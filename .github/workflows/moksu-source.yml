@@ -1,0 +1,62 @@
+name: moksu source preparation
+on:
+  push:
+    branches: [moksu-r2-6ee3e003]
+    paths: [.github/workflows/moksu-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: upstream
+          persist-credentials: false
+      - name: Preserve source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test "$(git -C upstream rev-parse HEAD)" = 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          git -C upstream archive --format=zip HEAD -o "$GITHUB_WORKSPACE/out/7kimisu-v2.29-source.zip"
+          git -C upstream rev-parse HEAD > out/upstream-commit.txt
+      - name: Download and verify original APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, pathlib, urllib.request, json
+          root = pathlib.Path('out')
+          urls = [
+            'https://github.com/hartgerinktarcila-design/7kimisu/releases/download/v2.29/7kimisu-v2.29.apk',
+            'https://api.github.com/repos/hartgerinktarcila-design/7kimisu/releases/assets/601123641',
+          ]
+          attempts=[]
+          for url in urls:
+            try:
+              request=urllib.request.Request(url, headers={'Accept':'application/octet-stream','User-Agent':'moksu-build'})
+              with urllib.request.urlopen(request, timeout=75) as stream:
+                data=stream.read(32*1024*1024)
+              digest=hashlib.sha256(data).hexdigest()
+              if len(data)!=12342092 or digest!='99015670aec968f759f1b077a432856b8c1c3fd5056fca6de85b527e23354a74':
+                raise ValueError('APK size/hash mismatch')
+              (root/'7kimisu-v2.29.apk').write_bytes(data)
+              attempts.append({'url':url,'status':'hash_verified','size':len(data),'sha256':digest})
+              break
+            except Exception as e:
+              attempts.append({'url':url,'status':'failed','reason':str(e)})
+          (root/'download-results.json').write_text(json.dumps(attempts,indent=2))
+          print(json.dumps(attempts,indent=2))
+          PY
+      - name: Upload source and original APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moksu-upstream-source
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
