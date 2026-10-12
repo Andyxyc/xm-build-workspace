@@ -1,0 +1,50 @@
+name: moksu toolchain availability
+on:
+  push:
+    branches: [moksu-r2-6ee3e003]
+    paths: ['.github/workflows/moksu-toolchain-check.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Inspect Google and Maven metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 - <<'PY'
+          import json, pathlib, urllib.request, xml.etree.ElementTree as E, concurrent.futures
+          out=pathlib.Path('out')
+          def load(url):
+            with urllib.request.urlopen(url,timeout=40) as r:return r.read()
+          data=load('https://dl.google.com/android/repository/repository2-3.xml')
+          (out/'repository2-3.xml').write_bytes(data)
+          root=E.fromstring(data)
+          packages=[e.attrib['path'] for e in root if e.tag.split('}')[-1]=='remotePackage']
+          selected=[p for p in packages if p.startswith(('platforms;','build-tools;','cmdline-tools;'))]
+          print('SDK packages:',json.dumps(selected))
+          targets={
+            'agp':('https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml','9.4.0'),
+            'kotlin':('https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugin/maven-metadata.xml','2.4.10'),
+            'compose-bom':('https://dl.google.com/dl/android/maven2/androidx/compose/compose-bom/maven-metadata.xml','2026.08.00'),
+            'miuix':('https://repo.maven.apache.org/maven2/top/yukonga/miuix/kmp/miuix-ui-android/maven-metadata.xml','0.9.3'),
+          }
+          def check(item):
+            name,(url,wanted)=item
+            try:
+              versions=[v.text for v in E.fromstring(load(url)).findall('.//version')]
+              return name,{'expected':wanted,'found':wanted in versions,'last_versions':versions[-18:],'url':url}
+            except Exception as e:return name,{'error':str(e),'url':url}
+          result=dict(concurrent.futures.ThreadPoolExecutor(max_workers=4).map(check,targets.items()))
+          result['sdk_packages']=selected
+          (out/'availability.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-toolchain-availability
+          path: out/
+          if-no-files-found: error
