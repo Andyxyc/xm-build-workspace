@@ -39,9 +39,10 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+          cmdline-tools-version: 16111833
           log-accepted-android-sdk-licenses: false
       - name: Install exact Android toolchain
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
       - name: Compile manager
         shell: bash
         working-directory: source/manager
@@ -119,6 +120,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+          cmdline-tools-version: 16111833
           log-accepted-android-sdk-licenses: false
       - name: Native dependencies
         run: |
@@ -126,11 +128,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libclang-dev
           rustup target add aarch64-linux-android x86_64-linux-android
+          git config --global url."https://github.com/cocool97/adb_client".insteadOf "https://github.com/Kernel-SU/adb_client"
       - name: Compile ksuinit and ksud
         shell: bash
         run: |
           set -euo pipefail
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
           mkdir -p out
           bash config/moksu/build_userspace.sh 2>&1 | tee out/native-build.log
       - uses: actions/upload-artifact@v4
@@ -161,6 +165,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+          cmdline-tools-version: 16111833
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'build-tools;37.0.0'
       - name: Pack and validate
