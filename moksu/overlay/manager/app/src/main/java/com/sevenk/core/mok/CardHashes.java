@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package com.sevenk.core.mok;
+
+/** Public verifiers only. Each issued card contains 120 random bits. */
+final class CardHashes {
+    private CardHashes() {}
+    static final String[] VALUES = {
+        "ed51a09c22e766fdcb44eb926f511bdf140aac64b7e29e96a3eb4049e1b9092f",
+        "6776e22f0f11c60cb0797a879ce26c5f7b1e9b7b21dd6c09e78725517b7e9cb9",
+        "9caa5ac293c474e065e69a9532e5b00fc0356c766738e6b8f3d5bf4a9b766a47",
+        "c82653f64cfef72e7de9dd3c79f1a3d67fc457d672f3303eb12008c47c5db92d",
+        "f7f0c22aef95593f35da532a29dc0d3e7233133af5b655f8484b09643143ee12",
+        "8b79b15b3f51dfd728c442dbba4ca0e7654c1d61b6592d2c9c551d8c1c9b1e85",
+        "f7d4a4ef96bb938e0b4ea7a3bdd3b8223e42d11b3651412fae3009ceea187ff3",
+        "8b4c511305979ed6d4033d304069f6c6d9a7044f78ee1b8dcc9627021907e200",
+        "40498fc8c76151b0f57e44fcb389fb81d8ab49e12477c163fbb79b62517e17e9",
+        "dfe5719d6093dee77c983c9628040ceabf385daa9354283d2cb5367198bda24a",
+        "0ae55e6bf4574e39b4df48b9b3f959b5a7c5f1a57643113e62733f4ba3a0190b",
+        "e3cdaac5be5d8eaea6baba80ef6902f66b4654356aa7e635fdf41682ab4b51cb",
+        "41c77cdf92e8dfa9f2051889dbdf53794941576c5e5f9dea12ddfd0aa55c9886",
+        "89800e3af68bc67fac7ebaecf4dfa30d2f0c38c3dd2733af6f07d8819a1a97d3",
+        "865c97a2b9ec93069c63b8cea191d578a7f03550a7768d441d171e0ee6574726",
+        "95c40dd5fcd11910806d82296131714a9bc7361c1a18a86bb8e9202eee36992a",
+        "53818752bc4df81d226b64f70e95b567628f445dd0c9c0cc90be940df6dc811a",
+        "fb1a3559185cab29e47ad7a901801217fd85f6972d04fefb72bfe6b1b16f5d1a",
+        "0cf37272f923b22957990dbe6bd9bb3ad69450499a43e576b7726ca14a223aa0",
+        "f81f76be4f5014b4a74ad3909fc1b00a954b9e8f6c942157bdf8a4f230546be5"
+    };
+}

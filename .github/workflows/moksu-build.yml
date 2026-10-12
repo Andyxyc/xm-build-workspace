@@ -1,0 +1,172 @@
+name: Build moksu
+on:
+  push:
+    branches: [moksu-r2-6ee3e003]
+    paths:
+      - 'moksu/**'
+      - '.github/workflows/moksu-build.yml'
+permissions:
+  contents: read
+concurrency:
+  group: moksu-build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  kernel:
+    name: LKM ${{ matrix.kmi }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        kmi: [android12-5.10, android13-5.10, android13-5.15, android14-5.15, android14-6.1, android15-6.6, android16-6.12, android17-6.18]
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply pinned source changes
+        run: python3 config/moksu/apply_ci.py source
+      - name: Build both kernel architectures
+        shell: bash
+        env:
+          KMI: ${{ matrix.kmi }}
+        run: bash config/moksu/build_lkm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-lkm-${{ matrix.kmi }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+  manager:
+    name: Android manager
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply pinned source changes
+        run: |
+          python3 config/moksu/apply_ci.py source
+          mkdir -p out
+          cp -a config/moksu source/moksu-build
+          tar --exclude=.git -czf out/moksu-corresponding-source.tar.gz -C source .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install exact Android toolchain
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile manager
+        shell: bash
+        working-directory: source/manager
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=2.29.2 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-build.log"
+          python3 - <<'PY'
+          import pathlib, shutil, os, zipfile
+          matches=list(pathlib.Path('app/build/outputs/apk/release').glob('*.apk'))
+          assert len(matches)==1, matches
+          with zipfile.ZipFile(matches[0]) as z:
+            assert z.testzip() is None
+            assert 'classes.dex' in z.namelist()
+          shutil.copy2(matches[0],pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'out/manager-unsigned.apk')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-manager-build
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+  userspace:
+    name: Root userspace
+    needs: kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 config/moksu/apply_ci.py source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-lkm-*
+          path: lkms
+          merge-multiple: true
+      - uses: android-actions/setup-android@v3
+      - name: Native dependencies
+        run: |
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Compile ksuinit and ksud
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          mkdir -p out
+          bash config/moksu/build_userspace.sh 2>&1 | tee out/native-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-userspace-build
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+  package:
+    name: Package rebuilt APK
+    needs: [manager, userspace]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-manager-build
+          path: ui
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-userspace-build
+          path: native
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'build-tools;37.0.0'
+      - name: Pack and validate
+        run: python3 config/moksu/pack_unsigned.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-complete-unsigned
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
