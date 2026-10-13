@@ -128,6 +128,8 @@ def apply(root):
  change('Cargo.lock','https://github.com/Kernel-SU/adb_client','https://github.com/KernelSU2/adb_client')
  change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props')
  change_count('Cargo.lock','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props',2)
+ change('userspace/ksuinit/Cargo.toml','https://github.com/Kernel-SU/rustix.git','https://github.com/KernelSU2/rustix.git')
+ change('Cargo.lock','https://github.com/Kernel-SU/rustix.git','https://github.com/KernelSU2/rustix.git')
  for p in (here/'overlay').rglob('*'):
   if p.is_file():
    if p.is_symlink() or p.suffix not in ('.java','.kt','.xml'):raise ValueError('Unexpected overlay')
