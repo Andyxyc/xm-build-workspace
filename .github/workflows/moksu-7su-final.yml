@@ -1,0 +1,141 @@
+name: moksu full 7SU stealth + webadmin integrated APK
+on:
+  push:
+    branches: [moksu-331-restore-7su-20261013]
+    paths: ['moksu/final-build-trigger.txt']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-final-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    name: 3.3.1 ksud + restored 7SU webadmin and KMI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply signed package, 7SU hidden mode and live web admin
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
+          python3 config/moksu/features/port_web.py source old
+          python3 config/moksu/features/port_web_compat.py source old
+          grep -q 'pub fn stealth_get_authed' source/userspace/ksud/src/ksucalls.rs
+          grep -q 'crate::webadmin_ksud::start_if_enabled()' source/userspace/ksud/src/init_event.rs
+          grep -q 'TOKEN_BYTES: usize = 32' source/userspace/ksud/src/webadmin.rs
+          grep -q 'Ipv4Addr::LOCALHOST' source/userspace/ksud/src/webadmin.rs
+          mkdir -p out
+          tar --exclude=.git --exclude=.gradle --exclude=target --exclude=build -czf out/moksu-331-7su-web-native-source.tar.gz -C source .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-stealth-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38412422406
+          github-token: ${{ github.token }}
+      - name: Verify eight rooted stealth KMIs both ABIs
+        run: |
+          set -euo pipefail
+          test "$(find lkms/aarch64 -name '*_kernelsu.ko' -type f | wc -l)" -eq 8
+          test "$(find lkms/x86_64 -name '*_kernelsu.ko' -type f | wc -l)" -eq 8
+          for p in lkms/{aarch64,x86_64}/*_kernelsu.ko; do
+            test -s "$p"
+            grep -aq 'ksu_stealth_is_enabled' "$p"
+          done
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: Android and Rust targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Compile real daemon with embedded updated hidden KMI
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/moksu331-restored-final-ksud.log
+          for arch in aarch64-linux-android x86_64-linux-android; do test -s "out/$arch/ksud"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-7su-full-native
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
+  package:
+    name: Assemble 7SU restored unsigned manager
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: native
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-7su-android-test
+          path: ui
+          run-id: 38412639039
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-7su-full-native
+          path: native
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare APK signer staging
+        run: |
+          set -euo pipefail
+          test -s ui/moksu-feature-staging.apk
+          cp ui/moksu-feature-staging.apk ui/manager-staging.apk
+          sdkmanager 'build-tools;37.0.0'
+      - name: Offline inspect/zipalign APK and attach source
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/pack_unsigned331.py
+          cp ui/moksu331-restored-source.tar.gz out/
+          python3 - <<'PY'
+          import pathlib,json,hashlib
+          p=pathlib.Path('out/moksu331-aligned-unsigned.apk')
+          assert p.stat().st_size>3_000_000
+          data=json.loads(pathlib.Path('out/moksu331-build-status.json').read_text())
+          data.update({'features':['7SU stealth kernel real ioctl','7SU root HTTP webadmin','moksu Aurora Night web UI','dial secret recovery'], 'all_features_restored':False, 'real_device_tested':False})
+          pathlib.Path('out/moksu331-build-status.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-331-7su-restored-owner-signing
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
