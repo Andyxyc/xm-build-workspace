@@ -1,0 +1,201 @@
+name: moksu 3.3.1 complete native core
+on:
+  push:
+    branches: [moksu-ksu331-release-6ee3e003]
+    paths:
+      - '.github/workflows/moksu331-native.yml'
+      - 'moksu/ksu331/build_lkm.sh'
+      - 'moksu/ksu331/build_userspace.sh'
+      - 'moksu/ksu331/pack_unsigned331.py'
+      - 'moksu/ksu331/apply_release.py'
+      - 'moksu/signing-public.json'
+permissions:
+  contents: read
+concurrency:
+  group: moksu331-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  kernel:
+    name: Core 3.3.1 KMI ${{ matrix.kmi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        kmi: [android12-5.10, android13-5.10, android13-5.15, android14-5.15, android14-6.1, android15-6.6, android16-6.12, android17-6.18]
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply signed manager identity to official Kbuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          grep -q 'KSU_PACKAGE_NAME ?= com.moksu.manager' source/kernel/Kbuild
+          grep -q '30f7419bd4aff5687cac937052663035a3d968db82c80cf7f954a83dfb32a82a' source/kernel/Kbuild
+      - name: Compile and validate KMI kernel modules
+        shell: bash
+        env:
+          KMI: ${{ matrix.kmi }}
+        run: bash config/moksu/ksu331/build_lkm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu331-lkm-${{ matrix.kmi }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+  userspace:
+    name: 3.3.1 ksud + ksuinit
+    needs: kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply updated Core manager package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu331-lkm-*
+          path: lkms
+          merge-multiple: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: Compile prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Compile KSU 3.3.1 native root core
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/moksu331-native-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu331-userspace
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+  manager:
+    name: Compile v3.3.1 signed-identity manager
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply author/login/theme
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          mkdir -p out
+          cp -a config/moksu source/moksu-build
+          tar --exclude=.git --exclude=.gradle --exclude=target --exclude=build --exclude=.cxx -czf out/moksu331-complete-corresponding-source.tar.gz -C source .
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: SDK 37 and NDK r29
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile manager
+        shell: bash
+        working-directory: source/manager
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1 2>&1 | tee "$GITHUB_WORKSPACE/out/moksu331-gradle.log"
+          python3 - <<'PY'
+          import pathlib,shutil,os,zipfile
+          paths=list(pathlib.Path('app/build/outputs/apk/release').glob('*.apk'))
+          assert len(paths)==1,paths
+          with zipfile.ZipFile(paths[0]) as z:
+            assert z.testzip() is None
+          shutil.copy2(paths[0],pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'out/manager-staging.apk')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu331-manager
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+  package:
+    name: Combine native 3.3.1 app and KMI
+    needs: [manager,userspace]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu331-manager
+          path: ui
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu331-userspace
+          path: native
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: Android build tools
+        run: sdkmanager 'build-tools;37.0.0'
+      - name: Repack and structurally verify APK
+        shell: bash
+        run: python3 config/moksu/ksu331/pack_unsigned331.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu331-complete-before-private-signing
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
