@@ -53,6 +53,13 @@ jobs:
         with: {path: config, persist-credentials: false}
       - uses: actions/download-artifact@v4
         with: {name: moksu-redesign-source, path: input}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
       - name: Extract reviewed source
         run: |
           set -euo pipefail
@@ -83,6 +90,13 @@ jobs:
         with: {path: config, persist-credentials: false}
       - uses: actions/download-artifact@v4
         with: {name: moksu-redesign-source, path: input}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
       - name: Extract native sources
         run: |
           set -euo pipefail
