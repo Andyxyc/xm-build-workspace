@@ -1,0 +1,142 @@
+name: moksu v3.3.1 redesigned root + web release
+on:
+  push:
+    branches: [moksu-331-redesign-r1-20261013]
+    paths: ['moksu/redesign/full-build-trigger.txt']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-redesign-final-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    name: Package rebuilt 3.3.1 ksud and 16 new KMIs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-redesign-source
+          path: input
+          run-id: 38418472725
+          github-token: ${{ github.token }}
+      - name: Restore all changed sources preserving official repository Git history
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tar -xzf input/moksu-redesign-source.tar.gz -C source
+          test -d source/.git
+          test -f source/userspace/ksud/assets/webadmin/index.html
+          grep -q 'KSU_EXPECTED_HASH ?= df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
+          grep -q 'fn ksuctl_profile' source/userspace/ksud/src/ksucalls.rs
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-redesign-kmi-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38418012975
+          github-token: ${{ github.token }}
+      - name: Verify eight KMI sets before inclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in aarch64 x86_64; do
+            test "$(find lkms/$arch -maxdepth 1 -name '*_kernelsu.ko' | wc -l)" -eq 8
+            for f in lkms/$arch/*_kernelsu.ko; do
+              test -s "$f"
+              grep -aq 'ksu_stealth_is_enabled' "$f"
+            done
+          done
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Android native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Compile 3.3.1 ksud and ksuinit with rebuilt root permission and stealth KMI
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/native-release-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-redesign-native-final, path: out/, retention-days: 14, if-no-files-found: warn}
+  bundle:
+    name: Build full unsigned APK ready for owner-only signing
+    runs-on: ubuntu-24.04
+    needs: native
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-redesign-android
+          path: ui
+          run-id: 38418472725
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-redesign-source
+          path: input
+          run-id: 38418472725
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-redesign-native-final
+          path: native
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: |
+          set -euo pipefail
+          sdkmanager 'build-tools;37.0.0'
+          test -s ui/moksu-redesign-ui-staging.apk
+          cp ui/moksu-redesign-ui-staging.apk ui/manager-staging.apk
+      - name: Package native libs and structurally validate every required feature
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/pack_unsigned331.py
+          cp input/moksu-redesign-source.tar.gz out/
+          python3 - <<'PY'
+          import zipfile,json,pathlib
+          p=pathlib.Path("out/moksu331-aligned-unsigned.apk")
+          with zipfile.ZipFile(p) as z:
+            assert z.testzip() is None
+            files=set(z.namelist())
+            for abi in ("arm64-v8a","x86_64"):
+              assert "lib/"+abi+"/libksud.so" in files
+              assert "lib/"+abi+"/libkernelsu.so" in files
+          f=pathlib.Path("out/moksu331-build-status.json")
+          status=json.loads(f.read_text())
+          status.update({"release_channel":"REDESIGN_TEST_CANDIDATE","ui_restructured":True,
+                         "web_settings_key_visible":True,"web_settings_manual_secret":True,
+                         "permission_toggle_reads_back":True,"device_tested":False,
+                         "other_browser_startup_overridden":False,"private_signing_done":False,
+                         "all_fork_features_restored":False})
+          f.write_text(json.dumps(status,ensure_ascii=False,indent=2)+"\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-v331-redesign-owner-signing
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
