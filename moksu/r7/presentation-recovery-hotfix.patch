@@ -1,0 +1,43 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -206,24 +206,28 @@
+         if (recovering || !MokDisguise.verify(this, pin)) return
+         recovering = true
+         lifecycleScope.launch {
+-            val restored = withContext(Dispatchers.IO) {
++            // Presentation is independent of kernel stealth: a valid PIN must always be
++            // able to exit the "uninstalled" UI even on a device without the stealth ioctl.
++            val kernelResult = withContext(Dispatchers.IO) {
+                 val state = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-                if (state == 0) true
+-                else {
+-                    val directly = runCatching {
+-                        Natives.stealthSet(false) && Natives.stealthState() == 0
+-                    }.getOrDefault(false)
+-                    directly || MokWebRecovery.disableStealth()
+-                }
+-            }
++                if (state != 1) Pair(state, state == 0)
++                else Pair(state, runCatching {
++                    Natives.stealthSet(false) && Natives.stealthState() == 0
++                }.getOrDefault(false) || MokWebRecovery.disableStealth())
++            }
++            val presentationRestored = MokDisplayState.setUninstalled(this@MokDisguiseActivity, false)
+             recovering = false
+-            if (restored && MokDisplayState.setUninstalled(this@MokDisguiseActivity, false)) {
++            if (presentationRestored) {
+                 startActivity(Intent(this@MokDisguiseActivity, MainActivity::class.java)
+                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
++                if (kernelResult.first == 1 && !kernelResult.second) {
++                    Toast.makeText(this@MokDisguiseActivity,
++                        "桌面显示已恢复，内核隐藏仍开启，请在网页版检查", Toast.LENGTH_LONG).show()
++                }
+                 finish()
+             } else {
+                 Toast.makeText(this@MokDisguiseActivity,
+-                    "恢复失败，请到已保存的网页版关闭隐藏模式", Toast.LENGTH_LONG).show()
++                    "无法恢复本地显示设置，请从网页版检查后重试", Toast.LENGTH_LONG).show()
+             }
+         }
+     }
