@@ -1,0 +1,62 @@
+name: Moksu 3.3.1 source merge
+on:
+  push:
+    branches: [moksu-ksu331-6ee3e003]
+    paths: ['moksu/ksu331/**', '.github/workflows/moksu331-port.yml']
+permissions:
+  contents: read
+concurrency:
+  group: moksu331-source-merge-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  port:
+    name: Safe three-way source merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 932014ab5b2c9b74a3d11e2ec4d17dd10fc9442e
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: new
+          persist-credentials: false
+      - name: Merge upstream core and fork features (strict conflicts)
+        run: |
+          set -euo pipefail
+          python3 -m py_compile config/moksu/ksu331/merge331.py
+          mkdir -p out
+          python3 config/moksu/ksu331/merge331.py base old new out/moksu331-port-audit.json
+      - name: Package corresponding full merge source
+        run: |
+          tar --exclude=.git --exclude=.gradle --exclude=target -czf out/moksu331-merged-source.tar.gz -C new .
+          python3 - <<'PY'
+          import tarfile
+          p='out/moksu331-merged-source.tar.gz'
+          with tarfile.open(p,'r:gz') as z:
+              assert z.getmember('manager/app/build.gradle.kts').size > 200
+              assert z.getmember('kernel/Kbuild').size > 200
+              assert z.getmember('userspace/ksud/Cargo.toml').size > 200
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu331-port-audit
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
