@@ -151,6 +151,9 @@ def apply(base_dir, fork_dir, latest_dir, report_dest):
             continue
         rc, contents, err = merge_bytes(ourdata, basedata, newdata)
         if rc != 0 or b"<<<<<<<" in contents:
+            report_file = out.parent / "merge_conflicts" / (rel + ".merge")
+            report_file.parent.mkdir(parents=True, exist_ok=True)
+            report_file.write_bytes(contents if contents else err.encode())
             summary["conflicts"].append(rel + (" => " + err if err else ""))
             stats["conflicted"] += 1
             continue
