@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           python3 config/moksu/ksu331/apply_release.py source source config
           grep -q 'KSU_PACKAGE_NAME ?= com.moksu.manager' source/kernel/Kbuild
-          grep -q '30f7419bd4aff5687cac937052663035a3d968db82c80cf7f954a83dfb32a82a' source/kernel/Kbuild
+          grep -q 'df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
       - name: Compile and validate KMI kernel modules
         shell: bash
         env:
