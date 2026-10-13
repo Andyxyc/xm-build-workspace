@@ -27,6 +27,11 @@ def once(text,old,new):
  if text.count(old)!=1: raise ValueError('Source anchor mismatch: '+old[:100])
  return text.replace(old,new,1)
 
+def exact_count(text,old,new,count):
+ actual=text.count(old)
+ if actual!=count: raise ValueError(f'Source anchor count mismatch ({actual}!={count}): '+old[:100])
+ return text.replace(old,new)
+
 def xml(text):
  return ET.fromstring(text,parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)))
 
@@ -44,6 +49,8 @@ def apply(root):
   return p.read_text(encoding='utf-8')
  def change(rel,old,new):
   changes[rel]=once(changes.get(rel,read(rel)),old,new)
+ def change_count(rel,old,new,count):
+  changes[rel]=exact_count(changes.get(rel,read(rel)),old,new,count)
  for rel,digest in EXPECTED.items():
   data=(root/rel).read_bytes()
   actual=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
@@ -120,7 +127,7 @@ def apply(root):
  change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/adb_client','https://github.com/KernelSU2/adb_client')
  change('Cargo.lock','https://github.com/Kernel-SU/adb_client','https://github.com/KernelSU2/adb_client')
  change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props')
- change('Cargo.lock','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props')
+ change_count('Cargo.lock','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props',2)
  for p in (here/'overlay').rglob('*'):
   if p.is_file():
    if p.is_symlink() or p.suffix not in ('.java','.kt','.xml'):raise ValueError('Unexpected overlay')
