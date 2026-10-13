@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: moksu-build-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   kernel:
     name: LKM ${{ matrix.kmi }}
@@ -73,7 +73,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - name: Install exact Android toolchain
         run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;29.0.14206865'
       - name: Compile manager
@@ -121,7 +120,6 @@ jobs:
           pattern: moksu-lkm-*
           path: lkms
           merge-multiple: true
-      - uses: android-actions/setup-android@v3
       - name: Native dependencies
         run: |
           sdkmanager 'ndk;29.0.14206865'
@@ -160,7 +158,6 @@ jobs:
         with:
           name: moksu-userspace-build
           path: native
-      - uses: android-actions/setup-android@v3
       - run: sdkmanager 'build-tools;37.0.0'
       - name: Pack and validate
         run: python3 config/moksu/pack_unsigned.py
