@@ -68,7 +68,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: {name: moksu-r2-source, path: input}
-      - run: mkdir -p source out && tar -xzf input/moksu-r2-source.tar.gz -C source
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - run: mkdir -p out && tar -xzf input/moksu-r2-source.tar.gz -C source
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '21'}
       - uses: android-actions/setup-android@v3
@@ -99,11 +106,25 @@ jobs:
         with: {path: config, persist-credentials: false}
       - uses: actions/download-artifact@v4
         with: {name: moksu-r2-source, path: input}
-      - run: mkdir -p source out && tar -xzf input/moksu-r2-source.tar.gz -C source
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - run: mkdir -p out && tar -xzf input/moksu-r2-source.tar.gz -C source
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '21'}
       - uses: android-actions/setup-android@v3
         with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-redesign-kmi-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38418012975
+          github-token: ${{ github.token }}
       - name: Rust Android NDK toolchain
         shell: bash
         run: |
