@@ -57,10 +57,10 @@ def patch(root,overlay):
       '  sw.setAttribute("role", "switch");\n  sw.setAttribute("tabindex", "0");\n'
       '  sw.setAttribute("aria-checked", g.granted ? "true" : "false");\n'
       '  sw.title = g.granted ?', "grant switch")
-    js=replace_once(js,
+    js=js.replace(
       '  acts.appendChild(sw);\n  card.appendChild(acts);\n  return card;',
       '  sw.onkeydown = function(ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); sw.click(); } };\n'
-      '  acts.appendChild(sw);\n  card.appendChild(acts);\n  return card;', "user card keyboard")
+      '  acts.appendChild(sw);\n  card.appendChild(acts);\n  return card;')
 
     # Replace the visual panel with an authentic page for credentials, security,
     # browser homepage instructions, and custom 256-bit access key.
