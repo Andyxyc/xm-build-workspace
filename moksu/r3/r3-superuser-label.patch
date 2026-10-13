@@ -1,0 +1,13 @@
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index 7fb45c8..80ca22b 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -776,7 +776,7 @@ function appCard(g) {
+   if (g.userId > 0) nm.appendChild(tagNode("users", "分身 " + g.userId, "dim"));
+   mt.appendChild(nm);
+   mt.appendChild(el("div", "m-meta",
+-    "uid " + g.uid + " · " + g.primary.pkg + (g.apps.length > 1 ? " · 同组 " + g.apps.length + " 个包" : "")));
++    "UID " + g.uid + (g.apps.length > 1 ? " · 同组 " + g.apps.length + " 个应用" : "")));
+   if (g.apps.length > 1) {
+     mt.appendChild(el("div", "m-desc", g.apps.map(function (a) { return a.pkg; }).join("\n")));
+   }
