@@ -8,7 +8,7 @@ permissions:
   actions: read
 concurrency:
   group: moksu-finish-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   manager:
     name: Compile Android manager
