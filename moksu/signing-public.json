@@ -1,1 +1,10 @@
-{"certificate_sha256":"38f3a0f16338c7d9f15b5dcfc420bea33523a98cad209c2c0020b8551be5d40f","certificate_size":1097,"certificate_size_hex":"0x449","package_name":"com.moksu.manager","app_name":"moksu","version_name":"2.29.6","signing_private_key_in_repository":false}
+{
+  "certificate_sha256": "30f7419bd4aff5687cac937052663035a3d968db82c80cf7f954a83dfb32a82a",
+  "certificate_size": 1103,
+  "certificate_size_hex": "0x44f",
+  "package_name": "com.moksu.manager",
+  "app_name": "moksu",
+  "signing_private_key_in_repository": false,
+  "certificate_subject": "CN=moksu,OU=XinZhongDouShiMo,O=XinZhongDouShiMo,C=CN",
+  "build_target": "KernelSU v3.3.1"
+}
