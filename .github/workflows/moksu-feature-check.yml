@@ -37,6 +37,7 @@ jobs:
           set -euo pipefail
           python3 -m py_compile config/moksu/features/port_android.py config/moksu/features/port_web.py
           python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
           python3 config/moksu/features/port_android.py source old
           python3 config/moksu/features/port_web.py source old
           mkdir -p out
@@ -88,6 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
           python3 config/moksu/features/port_web.py source old
           mkdir -p out
           python3 - <<'PY'
