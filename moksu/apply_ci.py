@@ -117,6 +117,10 @@ def apply(root):
  change('userspace/ksud/build.rs','cargo:rustc-env=KSU_PACKAGE_NAME=com.sevenk.core','cargo:rustc-env=KSU_PACKAGE_NAME=com.moksu.manager')
  change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/java-properties.git','https://github.com/KernelSU2/java-properties.git')
  change('Cargo.lock','https://github.com/Kernel-SU/java-properties.git','https://github.com/KernelSU2/java-properties.git')
+ change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/adb_client','https://github.com/KernelSU2/adb_client')
+ change('Cargo.lock','https://github.com/Kernel-SU/adb_client','https://github.com/KernelSU2/adb_client')
+ change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props')
+ change('Cargo.lock','https://github.com/Kernel-SU/ksu_props','https://github.com/KernelSU2/ksu_props')
  for p in (here/'overlay').rglob('*'):
   if p.is_file():
    if p.is_symlink() or p.suffix not in ('.java','.kt','.xml'):raise ValueError('Unexpected overlay')
