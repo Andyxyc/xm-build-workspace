@@ -1,0 +1,12 @@
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -1202,7 +1202,7 @@
+         }
+         "/api/stealth-code" => {
+             require_post!();
+-            respond(&mut writer, 410, JSON, br#"{"ok":false,"error":"拨号恢复入口已停用"}"#)
++            respond(&mut writer, 410, JSON, r#"{"ok":false,"error":"拨号恢复入口已停用"}"#.as_bytes())
+         }
+         // 其余（含模块自定义图标：前端 404 会退回首字母头像）一律 404
+         _ => respond(&mut writer, 404, PLAIN, b"Not Found"),
