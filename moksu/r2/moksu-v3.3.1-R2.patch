@@ -1,0 +1,1006 @@
+diff --git a/R2_SOURCE_CANDIDATE.json b/R2_SOURCE_CANDIDATE.json
+new file mode 100644
+index 0000000..c78dc80
+--- /dev/null
++++ b/R2_SOURCE_CANDIDATE.json
+@@ -0,0 +1,13 @@
++{
++  "project": "moksu",
++  "version": "3.3.1",
++  "revision": "R2-source-candidate",
++  "date": "2026-10-14",
++  "author": "心中都是莫",
++  "apk_built": false,
++  "apk_signed": false,
++  "android_compiled": false,
++  "rust_compiled": false,
++  "device_tested": false,
++  "notes": "R2_交接说明.md"
++}
+diff --git a/R2_交接说明.md b/R2_交接说明.md
+new file mode 100644
+index 0000000..45b0c06
+--- /dev/null
++++ b/R2_交接说明.md
+@@ -0,0 +1,30 @@
++# moksu v3.3.1 · R2 源码候选
++
++2026-10-14。基于已核对 SHA-256 的 moksu v3.3.1 网页重构版完整源码，继续修改，不覆盖上个已签名 APK。
++
++## 本版在源码中的改动
++
++- 网页主导航切换后滚动定位到顶部；Material 风格优化超级用户卡片、模块 WebUI 弹层布局。
++- 超级用户优先显示系统应用名称与 PNG 图标，包名作为辅助信息和缺失时的回退；Android 管理器打开后异步同步本机应用元数据。
++- WebUI 的 JavaScript 桥脚本提前到 `<head>`，补绝对 `/assets/` 路径、CSS 资源地址、WASM、字体等兼容项；未对 JYGISK 真实模块进行设备验证。
++- 网页设置里的浏览器自动入口开关（默认关闭）；Android 无障碍服务需要用户手动授权，才可以检测浏览器启动事件，不读取屏幕内容；不会更改浏览器的启动页配置。
++- 固定包名自动授权规则同时保存 APK 签名证书 SHA-256；安装/更新事件触发检查，只有签名和包名、真实 UID 同时匹配、且不是系统或共享 UID 时才请求 Root 授权和内核回读。**网页服务关闭或安装广播被系统限制时不能保证触发。**
++- Android 系统密令接收器：通过 `*#*#<4~12位数字>#*#*` 尝试切换隐藏状态并在退出后打开管理器；是否接收由 ROM/拨号器决定。
++- 内核报告隐藏模式时，两种管理器首页不再将其伪装成“未安装”并提供安装按钮。
++- 用户界面旧项目署名简化为 moksu · 心中都是莫；依赖源码、版权与许可证保留。
++
++## 尚未通过的测试与限制
++
++这份是 **源码候选包**，不包含新版已签名 APK，不包含新版已编译匹配 KMI 内核。当前工作容器未配置完整 Android SDK 和 Rust 构建工具链，以下项目没有通过真实编译/设备测试：Kotlin/Gradle、Rust/ksud、APK 签名、GKI/KMI 匹配、浏览器无障碍跳转、拨号器、安装后自动 Root、模块 JYGISK。
++
++Android 普通拨号器没有“纯数字一输入就自动调用第三方接收器”的公开标准接口。此版不读取拨号盘输入，使用系统 Secret Code 约定，不能把它称为纯数字即触发。
++
++## 已验证
++
++- 与上一版源码档案的 SHA-256 对应；
++- `git diff --check`；R2 patch 在干净 R1 工程上 `git apply --check` 并实际成功，14 个文件字节一致；
++- 修改的 `app.js` 通过 Node.js `--check`；
++- Manifest 与新增 XML 通过 XML 解析；
++- 离线 Chromium（模拟接口）桌面宽度 1280 / 手机宽度 390：列表名称图标、导航滚动、浏览器开关、授权规则添加交互均通过且无未捕获脚本异常。
++
++把本候选构建成 APK 前，先在 CI 上完整编译 Android 与 Rust，修复所有构建错误；再做上述实机验证，并保留原版 APK 与启动镜像做回退。源码里如果有额外安装功能，不应被解释为本版隐藏模式下可无风险操作。
+diff --git a/manager/app/src/main/AndroidManifest.xml b/manager/app/src/main/AndroidManifest.xml
+index 131a191..19c9bba 100644
+--- a/manager/app/src/main/AndroidManifest.xml
++++ b/manager/app/src/main/AndroidManifest.xml
+@@ -2,12 +2,31 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+     <application android:name=".KernelSUApplication" android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:directBootAware="true" android:fullBackupContent="@xml/backup_rules" android:hasFragileUserData="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.KernelSU" android:zygotePreloadName="me.weishu.kernelsu.magica.AppZygotePreload">
++        <service android:name=".mok.MokBrowserAutoService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="@string/moksu_browser_auto_service">
++            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
++            <meta-data android:name="android.accessibilityservice" android:resource="@xml/moksu_browser_auto_service" />
++        </service>
++        <receiver android:name=".mok.MokPackageEventReceiver" android:exported="false">
++            <intent-filter>
++                <action android:name="android.intent.action.PACKAGE_ADDED" />
++                <action android:name="android.intent.action.PACKAGE_REPLACED" />
++                <data android:scheme="package" />
++            </intent-filter>
++        </receiver>
++        <receiver android:name=".mok.MokDialCodeReceiver" android:exported="false">
++            <intent-filter>
++                <action android:name="android.provider.Telephony.SECRET_CODE" />
++                <action android:name="android.telephony.action.SECRET_CODE" />
++                <data android:scheme="android_secret_code" android:host="*" />
++            </intent-filter>
++        </receiver>
+         <activity android:name="me.weishu.kernelsu.mok.MoksuExtrasActivity" android:exported="false" android:directBootAware="false" android:theme="@style/Theme.KernelSU" />
+         <activity android:name="me.weishu.kernelsu.mok.MokLoginActivity" android:exported="false" android:directBootAware="false" android:excludeFromRecents="true" android:theme="@style/Theme.KernelSU" android:windowSoftInputMode="adjustResize" />
+         <activity android:name=".ui.MainActivity" android:exported="true" android:theme="@style/Theme.KernelSU.Starting" android:windowSoftInputMode="adjustResize">
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+new file mode 100644
+index 0000000..03de755
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+@@ -0,0 +1,212 @@
++package me.weishu.kernelsu.mok
++
++import android.accessibilityservice.AccessibilityService
++import android.content.BroadcastReceiver
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageInfo
++import android.content.pm.PackageManager
++import android.graphics.Bitmap
++import android.graphics.Canvas
++import android.os.Build
++import android.os.SystemClock
++import android.util.Base64
++import android.util.Log
++import android.view.accessibility.AccessibilityEvent
++import me.weishu.kernelsu.Natives
++import me.weishu.kernelsu.ui.MainActivity
++import me.weishu.kernelsu.ui.util.WebAdminCli
++import org.json.JSONArray
++import org.json.JSONObject
++import java.io.ByteArrayOutputStream
++import java.net.HttpURLConnection
++import java.net.URL
++import java.net.URLEncoder
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++import java.util.concurrent.atomic.AtomicBoolean
++
++/** The Android framework is the source of actual app labels, signing certs and icons.
++ * The local ksud panel never contacts the internet or stores the access token in prefs/logs.
++ */
++internal object MokWebDeviceBridge {
++    private val running = AtomicBoolean(false)
++    @Volatile private var lastSync = 0L
++    private val localUrl = Regex("^http://127\\.0\\.0\\.1:[0-9]{1,5}/x7k9f/[0-9a-fA-F]{64}$")
++    private fun baseUrl(): String? = WebAdminCli.url().trim().takeIf { localUrl.matches(it) }
++
++    private fun request(base: String, path: String, body: Map<String,String>? = null): JSONObject {
++        require(localUrl.matches(base))
++        val conn = (URL(base + path).openConnection() as HttpURLConnection)
++        try {
++            conn.connectTimeout = 1800
++            conn.readTimeout = 3000
++            conn.useCaches = false
++            if (body != null) {
++                conn.requestMethod = "POST"
++                conn.doOutput = true
++                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
++                val data = body.entries.joinToString("&") {
++                    URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8")
++                }
++                conn.outputStream.use { it.write(data.toByteArray(StandardCharsets.UTF_8)) }
++            }
++            if (conn.responseCode != 200) return JSONObject()
++            return JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
++        } finally { conn.disconnect() }
++    }
++
++    @Suppress("DEPRECATION")
++    private fun certificateSha(pm: PackageManager, name: String): String {
++        return runCatching {
++            val p: PackageInfo = if (Build.VERSION.SDK_INT >= 28)
++                pm.getPackageInfo(name, PackageManager.GET_SIGNING_CERTIFICATES)
++            else pm.getPackageInfo(name, PackageManager.GET_SIGNATURES)
++            val certs = if (Build.VERSION.SDK_INT >= 28)
++                p.signingInfo?.apkContentsSigners
++            else p.signatures
++            if (certs?.size != 1) return "" // reject ambiguous multiple signers
++            val bytes = MessageDigest.getInstance("SHA-256").digest(certs[0].toByteArray())
++            bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
++        }.getOrDefault("")
++    }
++
++    private fun iconBase64(pm: PackageManager, pkg: String): String = runCatching {
++        val drawable = pm.getApplicationIcon(pkg)
++        val image = Bitmap.createBitmap(42, 42, Bitmap.Config.ARGB_8888)
++        val canvas = Canvas(image)
++        drawable.setBounds(0, 0, 42, 42)
++        drawable.draw(canvas)
++        val bytes = ByteArrayOutputStream().use { out ->
++            image.compress(Bitmap.CompressFormat.PNG, 100, out)
++            out.toByteArray()
++        }
++        image.recycle()
++        if (bytes.size > 7500) "" else "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
++    }.getOrDefault("")
++
++    private fun record(pm: PackageManager, pkg: String): JSONObject? = runCatching {
++        val app = pm.getApplicationInfo(pkg, 0)
++        val label = app.loadLabel(pm)?.toString()?.trim().orEmpty().take(100).ifBlank { pkg }
++        JSONObject().put("pkg",pkg).put("label",label)
++            .put("icon",iconBase64(pm,pkg)).put("sha256",certificateSha(pm,pkg))
++    }.getOrNull()
++
++    fun syncAsync(context: Context) {
++        val now = SystemClock.elapsedRealtime()
++        if (now - lastSync < 120_000 || !running.compareAndSet(false,true)) return
++        val app = context.applicationContext
++        Thread({
++            try {
++                val base = baseUrl() ?: return@Thread
++                val pm = app.packageManager
++                @Suppress("DEPRECATION")
++                val infos = pm.getInstalledPackages(0)
++                // Server enforces 16 entries and 64 KiB body; use small chunks.
++                infos.chunked(5).forEach { chunk ->
++                    val array = JSONArray()
++                    chunk.forEach { p -> record(pm,p.packageName)?.let { array.put(it) } }
++                    if (array.length() > 0) request(base,"/api/app/metadata",mapOf("data" to array.toString()))
++                }
++                lastSync = SystemClock.elapsedRealtime()
++            } catch (e: Exception) {
++                Log.w("moksu", "应用资料同步暂不可用: ${e.javaClass.simpleName}")
++            } finally { running.set(false) }
++        }, "moksu-app-meta").start()
++    }
++
++    fun applyPackageRule(context: Context, pkg: String) {
++        if (!pkg.matches(Regex("[A-Za-z][A-Za-z0-9_.]{1,199}"))) return
++        val base = baseUrl() ?: return
++        val pm = context.packageManager
++        val sha = certificateSha(pm,pkg)
++        if (sha.length != 64) return
++        val rules = request(base, "/api/grant-rules").optJSONArray("list") ?: return
++        var allowed = false
++        for (i in 0 until rules.length()) {
++            val item = rules.optJSONObject(i) ?: continue
++            if (item.optString("pkg") == pkg && item.optString("sha256") == sha) { allowed = true; break }
++        }
++        if (!allowed) return
++        val uid = runCatching { pm.getApplicationInfo(pkg,0).uid }.getOrDefault(-1)
++        if (uid < 2000) return
++        val result = request(base,"/api/grant-rules/apply",mapOf("pkg" to pkg,"uid" to uid.toString(),"sig" to sha))
++        if (!result.optBoolean("ok")) Log.w("moksu", "固定授权内核回读失败（不含密钥），包：$pkg")
++    }
++
++    fun configAutoOpen(): Pair<Boolean,String>? = runCatching {
++        val base = baseUrl() ?: return null
++        request(base,"/api/browser/auto").optBoolean("enabled",false) to base
++    }.getOrNull()
++
++    fun dialToggle(context: Context, supplied: String) {
++        val base = baseUrl() ?: return
++        val expected = request(base,"/api/status").optString("stealthCode")
++        if (expected.length !in 4..12 || !expected.all(Char::isDigit) || supplied != expected) return
++        val before = runCatching { Natives.stealthState() }.getOrDefault(-1)
++        if (before !in 0..1) return
++        val result = runCatching { Natives.stealthSet(before == 0) }.getOrDefault(false)
++        val after = runCatching { Natives.stealthState() }.getOrDefault(-1)
++        if (result && after == 0 && before == 1) {
++            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
++        }
++    }
++}
++
++/** Only receives OS package events. No package-name-only authorization is permitted. */
++class MokPackageEventReceiver : BroadcastReceiver() {
++    override fun onReceive(context: Context, intent: Intent) {
++        val pkg = intent.data?.schemeSpecificPart ?: return
++        if (intent.action != Intent.ACTION_PACKAGE_ADDED && intent.action != Intent.ACTION_PACKAGE_REPLACED) return
++        val pending = goAsync()
++        Thread({
++            try { MokWebDeviceBridge.applyPackageRule(context.applicationContext, pkg) }
++            catch (_: Exception) { /* leave ungranted, never silently bypass identity */ }
++            finally { pending.finish() }
++        }, "moksu-package").start()
++    }
++}
++
++/** Android standard secret code: *#*#1234#*#*; plain digits cannot trigger OS callbacks. */
++class MokDialCodeReceiver : BroadcastReceiver() {
++    override fun onReceive(context: Context, intent: Intent) {
++        val code = intent.data?.host ?: return
++        if (!code.matches(Regex("[0-9]{4,12}"))) return
++        val pending = goAsync()
++        Thread({
++            try { MokWebDeviceBridge.dialToggle(context.applicationContext,code) }
++            catch (_: Exception) { /* unsupported dialer or kernel: no action */ }
++            finally { pending.finish() }
++        },"moksu-dial").start()
++    }
++}
++
++/** Explicit opt-in service. Does not read screen contents or intercept dialer keystrokes. */
++class MokBrowserAutoService : AccessibilityService() {
++    private val browsers = setOf(
++        "com.android.chrome", "com.microsoft.emmx", "org.mozilla.firefox",
++        "com.brave.browser", "com.sec.android.app.sbrowser", "com.opera.browser",
++        "mark.via", "com.kiwibrowser.browser"
++    )
++    @Volatile private var last = 0L
++    private val opening = AtomicBoolean(false)
++    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
++        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
++        val browser = event.packageName?.toString() ?: return
++        if (browser !in browsers) return
++        val now = SystemClock.elapsedRealtime()
++        if (now - last < 30000 || !opening.compareAndSet(false,true)) return
++        last = now
++        Thread({
++            try {
++                val status = MokWebDeviceBridge.configAutoOpen() ?: return@Thread
++                if (!status.first) return@Thread
++                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(status.second))
++                    .setPackage(browser).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++                startActivity(intent)
++            } catch (_: Exception) { /* browser not supported: do not loop */ }
++            finally { opening.set(false) }
++        },"moksu-browser").start()
++    }
++    override fun onInterrupt() {}
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+index e9d2daa..c1ab67f 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -210,6 +210,13 @@ class MoksuExtrasActivity:ComponentActivity() {
+                     OutlinedButton(onClick={refresh()},enabled=!busy){Text("刷新")}
+                 }
+             }
++            PanelCard {
++                Text("浏览器自动入口",fontSize=18.sp,fontWeight=FontWeight.Bold)
++                Text("网页设置可打开或关闭；需要手动启用 Android 无障碍服务。",fontSize=12.sp,color=Color(0xFFB2BED7))
++                OutlinedButton(onClick={
++                    startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
++                }) { Text("打开无障碍授权设置") }
++            }
+             PanelCard {
+                 Text("专属隐藏模式",fontSize=18.sp,fontWeight=FontWeight.Bold)
+                 Text(stealthState,fontSize=13.sp,color=Color(0xFFD1D9E9))
+@@ -219,13 +226,14 @@ class MoksuExtrasActivity:ComponentActivity() {
+                         enabled=!busy&&stealthSupported)
+                 }
+                 HorizontalDivider(color=Color(0xFF30445B))
++                Text("拨号盘输入 *#*#数字密令#*#* 可切换隐藏状态（实际支持取决于系统拨号器）。",fontSize=12.sp,color=Color(0xFFB2BED7))
+                 Text("使用与本版本匹配的隐藏内核后可以启用；若未装配套内核，请先安装再操作。",
+                     fontSize=12.sp,color=Color(0xFFB2BED7))
+                 OutlinedButton(onClick={refresh()},enabled=!busy){Text("重新读取内核")}
+             }
+             if(notice.isNotBlank())PanelCard{Text(notice,fontSize=13.sp,color=Mint)}
+             Spacer(Modifier.height(6.dp))
+-            Text("moksu · 基于 KernelSU 3.3.1 / 7kimisu 开源项目",
++            Text("moksu · 心中都是莫",
+                 fontSize=11.sp,color=Color(0xFF91A0B8))
+         }
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+index 3e76063..2e03270 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+@@ -115,6 +115,7 @@ class MainActivity : ComponentActivity() {
+     override fun onResume() {
+         super.onResume()
+         if (!me.weishu.kernelsu.mok.MokAuthGate.ensureAccess(this)) return
++        me.weishu.kernelsu.mok.MokWebDeviceBridge.syncAsync(applicationContext)
+     }
+ 
+     private val intentChannel = Channel<Intent>(capacity = Channel.BUFFERED)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
+index 0ab0323..9935b3c 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
+@@ -196,6 +196,18 @@ private fun StatusCard(
+     state: HomeUiState,
+     actions: HomeActions,
+ ) {
++    // Hidden kernel state must not be represented as an uninstalled kernel with an install action.
++    if (runCatching { Natives.stealthState() }.getOrDefault(-1) == 1) {
++        Surface(
++            modifier = Modifier.fillMaxWidth(),
++            shape = MaterialTheme.shapes.large,
++            color = MaterialTheme.colorScheme.surface,
++        ) {
++            Text("设备状态正常", modifier = Modifier.padding(22.dp),
++                style = MaterialTheme.typography.titleMedium)
++        }
++        return
++    }
+     Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+         val ksuActive = state.ksuVersion != null
+         val notInstalled = !ksuActive && state.kernelVersion.isGKI()
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
+index 4dbbd84..697edcd 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
+@@ -245,6 +245,13 @@ private fun StatusCard(
+     state: HomeUiState,
+     actions: HomeActions,
+ ) {
++    // In hidden mode keep the install route inaccessible instead of spoofing a broken installation.
++    if (runCatching { Natives.stealthState() }.getOrDefault(-1) == 1) {
++        Card {
++            BasicComponent(title = "设备状态正常", summary = "")
++        }
++        return
++    }
+     Column {
+         when {
+             state.ksuVersion != null -> {
+diff --git a/manager/app/src/main/res/values/strings.xml b/manager/app/src/main/res/values/strings.xml
+index d74d6fc..361ba7e 100644
+--- a/manager/app/src/main/res/values/strings.xml
++++ b/manager/app/src/main/res/values/strings.xml
+@@ -339,4 +339,6 @@
+     <string name="nav_rail_collapse">Collapse navigation rail</string>
+     <string name="settings_navigation_badge">Navigation badge</string>
+     <string name="settings_navigation_badge_summary">Show granted app and enabled module counts on the navigation bar</string>
++    <string name="moksu_browser_auto_service">moksu 浏览器自动入口</string>
++    <string name="moksu_browser_auto_description">仅在浏览器进入前台时，根据你的开关设置打开本机控制台。不读取屏幕文字。</string>
+ </resources>
+diff --git a/manager/app/src/main/res/xml/moksu_browser_auto_service.xml b/manager/app/src/main/res/xml/moksu_browser_auto_service.xml
+new file mode 100644
+index 0000000..63277e1
+--- /dev/null
++++ b/manager/app/src/main/res/xml/moksu_browser_auto_service.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
++    android:accessibilityEventTypes="typeWindowStateChanged"
++    android:accessibilityFeedbackType="feedbackGeneric"
++    android:notificationTimeout="250"
++    android:canRetrieveWindowContent="false"
++    android:description="@string/moksu_browser_auto_description" />
+diff --git a/userspace/ksud/assets/webadmin/app.css b/userspace/ksud/assets/webadmin/app.css
+index 47eab89..2a082b2 100644
+--- a/userspace/ksud/assets/webadmin/app.css
++++ b/userspace/ksud/assets/webadmin/app.css
+@@ -639,3 +639,21 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--card-2);padding:3
+ @media(prefers-reduced-motion:reduce){
+   *{scroll-behavior:auto!important;animation:none!important;transition:none!important}
+ }
++
++/* moksu R2 Material 3-inspired surfaces, legible app list and uncropped WebUI */
++:root, [data-theme="7k"] { --accent: #a6c8ff; --accent-fg: #09213d; }
++[data-theme="7k"][data-scheme="light"] { --accent: #3862a4; --accent-fg: #fff; }
++#users .mod .m-name { font-size: 15px; letter-spacing: .02px; line-height: 1.5; }
++#users .mod .m-meta { overflow-wrap:anywhere; }
++#users .mod .ava img { width:100%; height:100%; display:block; object-fit:contain; border-radius:14px; }
++#user-toolbar .auto-grants { margin:14px 0; padding:16px; border-radius:22px; }
++.grant-rule-list {display:grid; gap:7px; margin:9px 0 14px;}
++.grant-rule {display:flex; align-items:center; gap:8px; justify-content:space-between; min-width:0;}
++.grant-rule span {min-width:0; overflow-wrap:anywhere; font-size:12px;}
++.auto-rule-form {display:flex; flex-direction:column; gap:12px; padding:16px 0;}
++.auto-rule-form input {width:100%; min-width:0;}
++.webui-frame {width:100%; border:0; flex:1; min-height:54vh; background:var(--card);}
++.sheet.full {width:min(1200px,100vw);height:min(96dvh,980px);max-height:96dvh;}
++@media(max-width:680px){ .sheet.full {height:calc(100dvh - 14px);max-height:calc(100dvh - 14px);} }
++/* Switching sections must not animate/retain old scroll positions. */
++html,body { scroll-behavior:auto; overflow-anchor:none; }
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index 257de8f..32f6ec2 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -1,5 +1,5 @@
+ /* ══════════════════════════════════════════════════════════════════
+-   7kimisu 网页管理器 — 页面逻辑
++   moksu 网页管理器 — 页面逻辑
+    ──────────────────────────────────────────────────────────────────
+    安全约定（改这个文件时别破坏）：
+      · 所有动态数据（模块名/说明/App 名…）一律用 textContent 写入，
+@@ -26,6 +26,7 @@ var state = {
+   apps: [],
+   appSearch: "",
+   appFilter: "all",     // all | granted | plain | system
++  autoGrantRules: [],
+   // 超级用户日志
+   sulog: [],
+   sulogQuery: "",
+@@ -146,7 +147,7 @@ function chipsRow(container, items, current, onPick) {
+ /* ── 主题 ── */
+ var THEMES = [
+   { id: "auto",    name: "跟随系统",   sw: ["--bg", "--accent", "--ok"] },
+-  { id: "7k",      name: "7kimisu",    sw: ["--bg", "--accent", "--ok"] },
++  { id: "7k",      name: "Material 深色",    sw: ["--bg", "--accent", "--ok"] },
+   { id: "mocha",   name: "Catppuccin Mocha", sw: ["--bg", "--accent", "--ok"] },
+   { id: "latte",   name: "Catppuccin Latte", sw: ["--bg", "--accent", "--ok"] },
+   { id: "nord",    name: "Nord",       sw: ["--bg", "--accent", "--ok"] },
+@@ -672,11 +673,18 @@ function openModuleWeb(m) {
+   box.appendChild(bar);
+   var frame = el("iframe", "webui-frame");
+   frame.setAttribute("referrerpolicy", "no-referrer");
+-  frame.src = P + "/modweb/" + encodeURIComponent(m.id) + "/index.html";
++  var modUrl = P + "/modweb/" + encodeURIComponent(m.id) + "/index.html";
++  frame.src = modUrl;
++  frame.title = "模块网页 · " + (m.name || m.id);
++  frame.setAttribute("loading", "eager");
+   box.appendChild(frame);
++  var webState = el("div", "fld-h", "正在加载模块页面…");
++  box.appendChild(webState);
++  var webWait = setTimeout(function () { webState.textContent = "加载较慢。模块可能依赖浏览器不支持的 API，可试试在管理器中打开。"; }, 10000);
++  frame.addEventListener("load", function () { clearTimeout(webWait); webState.textContent = "网页已加载。若仍白屏，检查模块资源与 JavaScript 报错。"; });
++  frame.addEventListener("error", function () { clearTimeout(webWait); webState.textContent = "页面加载失败，请检查模块 webroot 是否完整。"; });
+   box.appendChild(el("div", "fld-h",
+-    "这是模块自带的网页界面（本机）。网页里能用的是精简版接口（exec / 提示）；" +
+-    "模块如果用到更复杂的接口，点右上角「在管理器里打开」用完整版。"));
++    "这是模块自带的网页界面（本机）。部分功能依赖模块自己的脚本，遇到兼容问题可在管理器里打开。"));
+   openSheet("", box, [{ label: "关闭" }], true);
+ }
+ 
+@@ -731,7 +739,7 @@ function filteredGroups() {
+   var q = state.appSearch.trim().toLowerCase();
+   if (q) {
+     list = list.filter(function (g) {
+-      return g.apps.some(function (a) { return a.pkg.toLowerCase().indexOf(q) >= 0; });
++      return g.apps.some(function (a) { return a.pkg.toLowerCase().indexOf(q) >= 0 || String(a.label || "").toLowerCase().indexOf(q) >= 0; });
+     });
+   }
+   var f = state.appFilter;
+@@ -742,7 +750,7 @@ function filteredGroups() {
+     var ra = a.granted ? 0 : (a.configured ? 1 : 2);
+     var rb = b.granted ? 0 : (b.configured ? 1 : 2);
+     if (ra !== rb) return ra - rb;
+-    return String(a.primary.pkg).localeCompare(String(b.primary.pkg), "en");
++    return String(a.primary.label || a.primary.pkg).localeCompare(String(b.primary.label || b.primary.pkg), "zh-CN");
+   });
+   return list;
+ }
+@@ -768,24 +776,83 @@ function renderApps() {
+   list.forEach(function (g) { box.appendChild(appCard(g)); });
+ }
+ 
++function loadGrantRules() {
++  return get("/api/grant-rules").then(function (r) {
++    state.autoGrantRules = Array.isArray(r.list) ? r.list : [];
++    var listBox = $(".grant-rule-list");
++    if (!listBox) return;
++    clear(listBox);
++    if (!state.autoGrantRules.length) { listBox.appendChild(el("div", "fld-h", "没有固定授权规则")); return; }
++    state.autoGrantRules.forEach(function (rule) {
++      var line = el("div", "grant-rule");
++      line.appendChild(el("span", null, rule.pkg + " · " + String(rule.sha256).slice(0, 12) + "…"));
++      var del = el("button", "btn", "删除");
++      del.onclick = function () {
++        confirmSheet("删除固定授权规则", "停止对「" + rule.pkg + "」的新安装自动授权？", "删除", function () {
++          post("/api/grant-rules/delete", {pkg: rule.pkg}).then(function (r) {
++            if (!r.ok) throw new Error(r.error || "删除失败");
++            toast("规则已删除"); loadGrantRules();
++          }).catch(function (e) { toast(e.message); });
++        });
++      };
++      line.appendChild(del); listBox.appendChild(line);
++    });
++  }).catch(function (e) { toast("规则读取失败：" + e.message); });
++}
++function openGrantRuleSheet(g) {
++  var wrap = el("div", "auto-rule-form");
++  var pkg = el("input", "code-input"); pkg.placeholder = "包名，如 com.example.app";
++  pkg.value = g ? g.primary.pkg : "";
++  var sig = el("input", "code-input");
++  sig.placeholder = "APK 签名证书 SHA-256（64 位十六进制）";
++  sig.value = g && g.primary.sha256 ? g.primary.sha256 : "";
++  wrap.appendChild(el("label", null, "固定包名")); wrap.appendChild(pkg);
++  wrap.appendChild(el("label", null, "签名指纹")); wrap.appendChild(sig);
++  wrap.appendChild(el("div", "hint", "只有同一签名证书的应用才自动获得 Root；不可只填包名。"));
++  openSheet("添加自动授权规则", wrap, [
++    {label:"取消"},
++    {label:"保存", cls:"primary", keepOpen:true, onClick:function () {
++      var p = pkg.value.trim(), fingerprint = sig.value.replace(/:/g, "").trim().toLowerCase();
++      if (!/^[A-Za-z][A-Za-z0-9_.]{1,199}$/.test(p) || !/^[a-f0-9]{64}$/.test(fingerprint)) {
++        toast("请输入正确的包名和证书 SHA-256"); return;
++      }
++      post("/api/grant-rules/add", {pkg:p, sig:fingerprint}).then(function(r){
++        if(!r.ok) throw new Error(r.error||"保存失败");
++        closeSheet(); toast("规则已保存"); loadGrantRules();
++      }).catch(function(e){toast("保存失败："+e.message);});
++    }}
++  ]);
++}
++
+ function appCard(g) {
+   var card = el("div", "mod");
+   var head = el("div", "mh");
+ 
+   var ava = el("div", "ava");
+-  ava.appendChild(el("span", null, (String(g.primary.pkg).charAt(0) || "?").toUpperCase()));
++  // Icon PNG is supplied by the local Android PackageManager, never an arbitrary URL.
++  var iconData = String(g.primary.icon || "");
++  if (/^data:image\/png;base64,[A-Za-z0-9+/=]{1,18000}$/.test(iconData)) {
++    var avatarImage = el("img");
++    avatarImage.alt = "";
++    avatarImage.decoding = "async";
++    avatarImage.src = iconData;
++    avatarImage.onerror = function () { clear(ava); ava.appendChild(el("span", null, (String(g.primary.label || g.primary.pkg).charAt(0) || "?").toUpperCase())); };
++    ava.appendChild(avatarImage);
++  } else {
++    ava.appendChild(el("span", null, (String(g.primary.label || g.primary.pkg).charAt(0) || "?").toUpperCase()));
++  }
+   head.appendChild(ava);
+ 
+   var mt = el("div", "mt");
+   var nm = el("div", "m-name");
+-  nm.appendChild(el("span", null, g.primary.pkg));
++  nm.appendChild(el("span", null, g.primary.label || g.primary.pkg));
+   if (g.granted) nm.appendChild(tagNode("shield-check", "已授权", "ok"));
+   if (g.configured && !g.granted) nm.appendChild(tagNode("settings-2", "已配置", "dim"));
+   if (g.system) nm.appendChild(tagNode("cpu", "系统", "dim"));
+   if (g.userId > 0) nm.appendChild(tagNode("users", "分身 " + g.userId, "dim"));
+   mt.appendChild(nm);
+   mt.appendChild(el("div", "m-meta",
+-    "uid " + g.uid + (g.apps.length > 1 ? " · 同组 " + g.apps.length + " 个包" : "")));
++    "uid " + g.uid + " · " + g.primary.pkg + (g.apps.length > 1 ? " · 同组 " + g.apps.length + " 个包" : "")));
+   if (g.apps.length > 1) {
+     mt.appendChild(el("div", "m-desc", g.apps.map(function (a) { return a.pkg; }).join("\n")));
+   }
+@@ -798,6 +865,11 @@ function appCard(g) {
+   cfg.appendChild(el("span", null, "配置"));
+   cfg.onclick = function () { openAppProfile(g); };
+   acts.appendChild(cfg);
++  if (g.primary.sha256 && !g.system) {
++    var fixed = el("button", "btn", "固定授权");
++    fixed.onclick = function () { openGrantRuleSheet(g); };
++    acts.appendChild(fixed);
++  }
+   acts.appendChild(el("div", "sp"));
+ 
+   var sw = el("div", "sw" + (g.granted ? " on" : ""));
+@@ -810,7 +882,7 @@ function appCard(g) {
+     var want = !g.granted;
+     if (!want) {
+       confirmSheet("撤销 root 权限",
+-        "确定撤销「" + g.primary.pkg + "」的 root 权限？\n\n" +
++        "确定撤销「" + (g.primary.label || g.primary.pkg) + "」的 root 权限？\n\n" +
+         "撤销后它再调用 su 会被拒绝（非 root 配置会被重置为默认）。",
+         "撤销", function () { setAppRoot(g, false); });
+       return;
+@@ -1317,7 +1389,25 @@ function renderSecurity() {
+   boot.appendChild(el("div","eyebrow","BROWSER HOMEPAGE"));
+   boot.appendChild(el("div","security-title","浏览器启动页"));
+   boot.appendChild(el("p","security-subtitle",
+-    "希望打开浏览器时直接进入 moksu：先复制下方地址，再在所用浏览器的「主页 / 启动页」设置中添加。浏览器是否每次启动载入主页由浏览器决定，moksu 不会擅自劫持其他应用。"));
++    "开启后，在 Android 系统设置中手动授权 moksu 的无障碍服务。支持的浏览器进入前台时会跳转到本机管理页，可随时关闭。"));
++  var browserWrap = el("div", "security-actions");
++  var browserSwitch = el("button", "btn", "正在读取状态…");
++  browserSwitch.disabled = true;
++  browserWrap.appendChild(browserSwitch);
++  boot.appendChild(browserWrap);
++  get("/api/browser/auto").then(function (v) {
++    var enabled=!!v.enabled;
++    function draw() { browserSwitch.textContent = enabled ? "已启用 · 点击关闭" : "已关闭 · 点击启用"; }
++    browserSwitch.disabled = false;
++    draw();
++    browserSwitch.onclick = function () {
++      post("/api/browser/auto", {enabled: enabled ? "0" : "1"}).then(function (r) {
++        if (!r.ok) throw new Error(r.error || "写入失败");
++        enabled = !!r.enabled; draw();
++        toast(enabled ? "已开启，请在 Android 无障碍设置中授权" : "自动入口已关闭");
++      }).catch(function (e) { toast("修改失败："+e.message); });
++    };
++  }).catch(function () { browserSwitch.textContent = "设置不可用，需更新 ksud"; });
+   var address=el("div","secret-value",location.origin+P);
+   boot.appendChild(address);
+   var wrap=el("div","security-actions");
+@@ -1404,8 +1494,12 @@ function show(tab) {
+   for (var i = 0; i < btns.length; i++) {
+     btns[i].classList.toggle("on", btns[i].getAttribute("data-tab") === tab);
+   }
++  // Mobile browsers preserve the old page scroll position when a tab is replaced.
++  // Always show the heading first, including the superuser list after switching back.
++  try { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
++  catch (_) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }
+   if (tab === "status") loadStatus();
+-  if (tab === "users") loadApps();
++  if (tab === "users") { loadGrantRules(); loadApps(); }
+   if (tab === "modules") loadModules();
+   if (tab === "sulog") loadSulog();
+   if (tab === "security") renderSecurity();
+@@ -1482,13 +1576,25 @@ function initSprite() {
+     });
+   $("#mod-toolbar").appendChild(chips);
+ 
++  // Root pre-authorization is bound to APK signing identity, never package name alone.
++  var autoGrants = el("div", "card auto-grants");
++  autoGrants.appendChild(el("div", "card-title", "安装后自动授权"));
++  autoGrants.appendChild(el("p", "fld-h", "仅对明确添加的包名及签名指纹生效；规则可随时删除。"));
++  var autoRuleList = el("div", "grant-rule-list");
++  autoGrants.appendChild(autoRuleList);
++  var addRule = el("button", "btn", "添加固定授权规则");
++  addRule.onclick = function () { openGrantRuleSheet(null); };
++  autoGrants.appendChild(addRule);
++  $("#user-toolbar").appendChild(autoGrants);
++  loadGrantRules();
++
+   // ── 超级用户页工具条 ──
+   var uBox = el("div", "toolbar");
+   var uWrap = el("div", "search");
+   uWrap.appendChild(ic("search"));
+   var uInput = el("input");
+   uInput.type = "search";
+-  uInput.placeholder = "搜索包名（例：com.tencent）";
++  uInput.placeholder = "搜索应用名称或包名";
+   uInput.oninput = function () { state.appSearch = uInput.value; renderApps(); };
+   uWrap.appendChild(uInput);
+   uBox.appendChild(uWrap);
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+index 3c32363..654cd54 100644
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -311,6 +311,80 @@ pub fn authed_rel(path: &str, token: &str) -> Option<String> {
+ }
+ 
+ 
++/// Secret-bearing Root grant policies and APK metadata must never share the public webpage assets.
++/// All paths are derived from the already protected webadmin.conf location.
++fn grant_rules_path() -> String { format!("{}.grant-rules.json", config_path()) }
++fn app_metadata_path() -> String { format!("{}.app-metadata.json", config_path()) }
++
++fn valid_cert_sha256(s: &str) -> bool {
++    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
++}
++
++fn private_write(path: &str, bytes: &[u8]) -> std::io::Result<()> {
++    use std::io::Write as _;
++    let dest = std::path::Path::new(path);
++    if let Some(parent) = dest.parent() { std::fs::create_dir_all(parent)?; }
++    let tmp = format!("{path}.tmp-{}-{}",std::process::id(),
++        random_hex(12).ok_or_else(|| std::io::Error::other("secure random unavailable"))?);
++    let result = (|| -> std::io::Result<()> {
++        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
++        #[cfg(unix)] {
++            use std::os::unix::fs::PermissionsExt;
++            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
++        }
++        f.write_all(bytes)?;
++        f.sync_all()?;
++        std::fs::rename(&tmp, path)?;
++        Ok(())
++    })();
++    if result.is_err() { let _ = std::fs::remove_file(&tmp); }
++    result
++}
++
++fn load_grant_rules() -> std::collections::BTreeMap<String,String> {
++    let text = std::fs::read_to_string(grant_rules_path()).unwrap_or_default();
++    let raw: std::collections::BTreeMap<String,String> =
++        serde_json::from_str(&text).unwrap_or_default();
++    raw.into_iter().filter(|(k,v)| valid_pkg(k) && valid_cert_sha256(v)).take(128).collect()
++}
++fn save_grant_rules(rules: &std::collections::BTreeMap<String,String>) -> std::io::Result<()> {
++    let text = serde_json::to_vec(rules).map_err(std::io::Error::other)?;
++    private_write(&grant_rules_path(), &text)
++}
++
++pub fn load_app_metadata() -> std::collections::BTreeMap<String,serde_json::Value> {
++    let text = std::fs::read_to_string(app_metadata_path()).unwrap_or_default();
++    let raw: std::collections::BTreeMap<String,serde_json::Value> =
++        serde_json::from_str(&text).unwrap_or_default();
++    raw.into_iter().filter(|(pkg,v)| valid_pkg(pkg) && v.is_object()).take(5000).collect()
++}
++fn update_app_metadata(raw: &str) -> Result<usize,String> {
++    let incoming: Vec<serde_json::Value> = serde_json::from_str(raw).map_err(|_|"无效 JSON")?;
++    if incoming.len() > 16 { return Err("一次最多同步 16 个应用".into()); }
++    let mut meta = load_app_metadata();
++    let mut count = 0;
++    for item in incoming {
++        let pkg = item.get("pkg").and_then(serde_json::Value::as_str).unwrap_or("");
++        let label = item.get("label").and_then(serde_json::Value::as_str).unwrap_or("");
++        let icon = item.get("icon").and_then(serde_json::Value::as_str).unwrap_or("");
++        let sig = item.get("sha256").and_then(serde_json::Value::as_str).unwrap_or("");
++        if !valid_pkg(pkg) || label.is_empty() || label.chars().count() > 100
++            || (!sig.is_empty() && !valid_cert_sha256(sig))
++            || icon.len() > 16000
++            || (!icon.is_empty() && (!icon.starts_with("data:image/png;base64,")
++                || !icon[22..].bytes().all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/' || c == b'='))) {
++            continue;
++        }
++        meta.insert(pkg.to_string(), serde_json::json!({"label":label,"icon":icon,"sha256":sig}));
++        count += 1;
++    }
++    if meta.len() > 5000 { return Err("应用缓存超出上限".into()); }
++    let bytes = serde_json::to_vec(&meta).map_err(|e|e.to_string())?;
++    if bytes.len() > 24*1024*1024 { return Err("应用缓存过大".into()); }
++    private_write(&app_metadata_path(),&bytes).map_err(|e|e.to_string())?;
++    Ok(count)
++}
++
+ const MAX_HEAD: usize = 16 * 1024;
+ const MAX_BODY: usize = 64 * 1024;
+ /// 上传装模块的体量上限（模块 zip 一般几 MB ~ 几十 MB；给足余量但不无限）
+@@ -354,6 +428,10 @@ pub trait Backend: Send + Sync + 'static {
+     fn apps(&self) -> serde_json::Value;
+     /// 授权 / 撤销某个 App 的 root
+     fn set_app_root(&self, pkg: &str, uid: u32, allow: bool) -> Result<String, String>;
++    /// Used only by the installed-package receiver; deny by default in test backends.
++    fn apply_auto_grant(&self, _pkg: &str, _uid: u32) -> Result<String, String> {
++        Err("设备不支持自动授权".to_string())
++    }
+     /// 读某个 App 的 root 配置
+     fn app_profile(&self, pkg: &str, uid: u32) -> Result<serde_json::Value, String>;
+     /// 写某个 App 的 root 配置（只应用 form 里出现的字段，其余保持原样）
+@@ -735,6 +813,75 @@ fn handle(server: &Server, stream: TcpStream) -> std::io::Result<()> {
+             };
+             respond(&mut writer,200,JSON,body.as_bytes())
+         }
++        "/api/browser/auto" => {
++            if method == "POST" {
++                let mut cfg = Config::load();
++                cfg.browser_auto = params.get("enabled").map(String::as_str) == Some("1");
++                let out = cfg.save();
++                let body = match out {
++                    Ok(()) => serde_json::json!({"ok":true,"enabled":cfg.browser_auto}),
++                    Err(e) => serde_json::json!({"ok":false,"error":format!("保存失败: {e}")}),
++                };
++                respond(&mut writer, 200, JSON, body.to_string().as_bytes())
++            } else {
++                respond(&mut writer, 200, JSON,
++                    serde_json::json!({"ok":true,"enabled":Config::load().browser_auto}).to_string().as_bytes())
++            }
++        }
++        "/api/grant-rules" => {
++            if method != "GET" { return respond(&mut writer, 404, PLAIN, b"Not Found"); }
++            let list: Vec<_> = load_grant_rules().into_iter().map(|(pkg, sha256)|
++                serde_json::json!({"pkg":pkg,"sha256":sha256})).collect();
++            respond(&mut writer, 200, JSON,
++                serde_json::json!({"ok":true,"list":list}).to_string().as_bytes())
++        }
++        "/api/grant-rules/add" => {
++            require_post!();
++            let pkg = params.get("pkg").cloned().unwrap_or_default();
++            let sig = params.get("sig").cloned().unwrap_or_default().to_ascii_lowercase();
++            let out = if !valid_pkg(&pkg) || !valid_cert_sha256(&sig) {
++                Err("包名或签名 SHA-256 无效".to_string())
++            } else {
++                let mut rules = load_grant_rules();
++                if rules.len() >= 128 && !rules.contains_key(&pkg) {
++                    Err("规则数量已达 128 条上限".to_string())
++                } else {
++                    rules.insert(pkg, sig);
++                    save_grant_rules(&rules).map_err(|e| e.to_string())
++                }
++            };
++            respond(&mut writer, 200, JSON, result_json(out.map(|_|"已保存".to_string())).as_bytes())
++        }
++        "/api/grant-rules/delete" => {
++            require_post!();
++            let pkg = params.get("pkg").cloned().unwrap_or_default();
++            let mut rules = load_grant_rules();
++            let out = if rules.remove(&pkg).is_some() {
++                save_grant_rules(&rules).map_err(|e| e.to_string())
++            } else { Err("没有此规则".to_string()) };
++            respond(&mut writer, 200, JSON, result_json(out.map(|_|"已删除".to_string())).as_bytes())
++        }
++        "/api/grant-rules/apply" => {
++            require_post!();
++            let pkg = params.get("pkg").cloned().unwrap_or_default();
++            let uid = params.get("uid").and_then(|v| v.parse::<u32>().ok());
++            let sig = params.get("sig").cloned().unwrap_or_default().to_ascii_lowercase();
++            let rules = load_grant_rules();
++            let out = if !valid_pkg(&pkg) || !valid_cert_sha256(&sig)
++                || rules.get(&pkg).map(String::as_str) != Some(sig.as_str()) {
++                Err("包名或签名不匹配，没有授权".to_string())
++            } else if let Some(uid) = uid {
++                // Android backend verifies the live package/uid association before grant.
++                server.backend.apply_auto_grant(&pkg, uid)
++            } else { Err("无效 UID".to_string()) };
++            respond(&mut writer, 200, JSON, result_json(out).as_bytes())
++        }
++        "/api/app/metadata" => {
++            require_post!();
++            let raw = params.get("data").cloned().unwrap_or_default();
++            let out = update_app_metadata(&raw);
++            respond(&mut writer, 200, JSON, result_json(out.map(|n| format!("已同步 {n} 项"))).as_bytes())
++        }
+         "/api/modules" => respond(&mut writer, 200, JSON, server.backend.modules().to_string().as_bytes()),
+         "/api/superusers" => {
+             respond(&mut writer, 200, JSON, server.backend.superusers().to_string().as_bytes())
+@@ -1182,9 +1329,10 @@ const CSP_MAIN: &str =
+ ///     （真机踩到：只给 'self' 会把模块自己的脚本整段拦掉 → 页面上按钮全点不动）。
+ /// 这两条只对**模块自己的页面**生效；网页管理器自己的页面仍然是严格版（零外部请求）。
+ const CSP_MODWEB: &str =
+-    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; \
+-     img-src 'self' data: https:; connect-src 'self'; \
+-     base-uri 'none'; form-action 'none'";
++    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; \
++     img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self'; \
++     frame-src 'self'; worker-src 'self' blob:; media-src 'self' data: blob:; \
++     base-uri 'self'; form-action 'none'";
+ 
+ fn respond(stream: &mut TcpStream, code: u16, mime: &str, body: &[u8]) -> std::io::Result<()> {
+     respond_csp(stream, code, mime, body, CSP_MAIN)
+@@ -1237,6 +1385,8 @@ pub struct Config {
+     /// 注意：它只在进程内存和 0600 的配置文件里出现 —— 不进日志、不进 `ps` 可见的命令行、
+     /// 不进 `webadmin.status`（见文件头"安全边界"）。
+     pub token: String,
++    /// Browser auto open requires an explicit user-controlled opt-in.
++    pub browser_auto: bool,
+ }
+ 
+ impl Config {
+@@ -1255,6 +1405,7 @@ impl Config {
+             if let Some((k, v)) = line.split_once('=') {
+                 match k.trim() {
+                     "enabled" => cfg.enabled = matches!(v.trim(), "1" | "true" | "yes"),
++                    "browser_auto" => cfg.browser_auto = matches!(v.trim(), "1" | "true" | "yes"),
+                     "port" => cfg.port = v.trim().parse().unwrap_or(PORT),
+                     "bound_port" => cfg.bound_port = v.trim().parse().unwrap_or(0),
+                     // 只接受"形状对"的 token：长度必须正好 64 且全是十六进制。
+@@ -1314,8 +1465,9 @@ impl Config {
+             "# moksu · 心中都是莫 网页管理器（ksud 读取；改完执行 `ksud webadmin restart` 或重启设备）\n\
+              # token = 访问密钥：**别外传**，拿到它的人能在本机拿到 root。\n\
+              #         要换一把：`ksud webadmin reset-token`（App 设置页也有入口）\n\
+-             enabled={}\nport={}\nbound_port={}\ntoken={}\n",
++             enabled={}\nbrowser_auto={}\nport={}\nbound_port={}\ntoken={}\n",
+             u8::from(self.enabled),
++            u8::from(self.browser_auto),
+             self.port,
+             self.bound_port,
+             self.token
+diff --git a/userspace/ksud/src/webadmin_ksud.rs b/userspace/ksud/src/webadmin_ksud.rs
+index 5c09c74..c63e3fb 100644
+--- a/userspace/ksud/src/webadmin_ksud.rs
++++ b/userspace/ksud/src/webadmin_ksud.rs
+@@ -158,8 +158,8 @@ impl Backend for KsudBackend {
+     /// · `NEW_GET_ALLOW_LIST` → allow_su == true 的 uid（= 授权了 root）
+     /// · `NEW_GET_DENY_LIST`  → allow_su == false 的 uid（= 单独配过非 root 策略）
+     ///
+-    /// ⚠️ 网页**拿不到 APK 里的中文应用名**（那需要解析 resources.arsc），
+-    /// 所以列表按包名展示 —— 这是用户 2026-09-17 拍板的选择。
++    /// Android 管理器将 PackageManager 的中文应用名称、图标与签名校验结果
++    /// 同步到本机受保护缓存；未同步时优雅回退到包名。
+     fn apps(&self) -> Value {
+         let granted: std::collections::HashSet<u32> =
+             ksucalls::allow_list_uids().into_iter().collect();
+@@ -168,13 +168,17 @@ impl Backend for KsudBackend {
+         let manager = ksucalls::manager_appid().unwrap_or(u32::MAX);
+ 
+         let mut list = Vec::new();
++        let metadata = webadmin::load_app_metadata();
+         for (pkg, uid) in package_list() {
+             // 管理器自己不在列表里（内核也把它排除在授权表外）
+             if uid % 100_000 == manager {
+                 continue;
+             }
+             list.push(json!({
+-                "pkg": pkg,
++                "pkg": pkg.clone(),
++                "label": metadata.get(&pkg).and_then(|v|v.get("label")).and_then(Value::as_str).unwrap_or(&pkg),
++                "icon": metadata.get(&pkg).and_then(|v|v.get("icon")).and_then(Value::as_str).unwrap_or(""),
++                "sha256": metadata.get(&pkg).and_then(|v|v.get("sha256")).and_then(Value::as_str).unwrap_or(""),
+                 "uid": uid,
+                 "granted": granted.contains(&uid),
+                 "configured": configured.contains(&uid),
+@@ -233,6 +237,18 @@ impl Backend for KsudBackend {
+         })
+     }
+ 
++    fn apply_auto_grant(&self, pkg: &str, uid: u32) -> Result<String,String> {
++        // Never trust the UID supplied through HTTP: package installs can race with UID reuse.
++        let installed = package_list();
++        if !installed.iter().any(|(name,actual)| name == pkg && *actual == uid) {
++            return Err("安装包与 UID 不匹配（或安装未完成）".into());
++        }
++        if uid < 10_000 || installed.iter().filter(|(_,actual)| *actual == uid).count() != 1 {
++            return Err("系统 UID 或共享 UID 不自动授权，请手动检查".into());
++        }
++        self.set_app_root(pkg,uid,true)
++    }
++
+     /// 读某个 App 的 root 配置（没有条目时给出默认值，`exists=false`）
+     fn app_profile(&self, pkg: &str, uid: u32) -> Result<Value, String> {
+         let cur = ksucalls::get_app_profile(uid, pkg).map_err(|e| format!("读取失败: {e:#}"))?;
+@@ -712,6 +728,9 @@ impl Backend for KsudBackend {
+             "gif" => "image/gif",
+             "webp" => "image/webp",
+             "ico" => "image/x-icon",
++            "wasm" => "application/wasm",
++            "webmanifest" => "application/manifest+json",
++            "mp4" => "video/mp4",
+             "woff" => "font/woff",
+             "woff2" => "font/woff2",
+             "ttf" => "font/ttf",
+@@ -729,13 +748,34 @@ impl Backend for KsudBackend {
+             //   于是 `modbridge.js` 取不到、`ksu.exec/spawn/...` 全 401（v2.13 鉴权漏改）。
+             //   字符串形状由 `webadmin::module_bridge_tag` 统一产出，那条有宿主单测。
+             let tag = webadmin::module_bridge_tag(&webadmin::base_path(), &info);
+-            let out = html.rfind("</body>").map_or_else(
+-                || format!("{html}{tag}"),
+-                |pos| format!("{}{}{}", &html[..pos], tag, &html[pos..]),
+-            );
++            // Many Vite-based WebUIs use absolute /assets/... paths, which otherwise
++            // escape the authenticated module mount and show a blank page (401).
++            let asset_prefix = format!("{}/modweb/{id}/", webadmin::base_path());
++            let mut html = html;
++            for (needle,replacement) in [
++                ("src=\"/assets/".to_string(), format!("src=\"{asset_prefix}assets/")),
++                ("href=\"/assets/".to_string(), format!("href=\"{asset_prefix}assets/")),
++                ("'/assets/".to_string(), format!("'{asset_prefix}assets/")),
++                ("\"/assets/".to_string(),format!("\"{asset_prefix}assets/")),
++            ] { html = html.replace(&needle,&replacement); }
++            // The bridge must exist BEFORE a module's own inline code executes.
++            let out = if let Some(start) = html.to_ascii_lowercase().find("<head") {
++                if let Some(end) = html[start..].find('>') {
++                    let at = start + end + 1;
++                    format!("{}<base href=\"{asset_prefix}\">{}{}", &html[..at],tag,&html[at..])
++                } else { format!("{tag}{html}") }
++            } else { format!("{tag}{html}") };
+             log_line(&format!("网页：打开模块 {id} 的网页界面（{rel2}）"));
+             return Ok((mime, out.into_bytes()));
+         }
++        if ext == "css" {
++            let base = format!("{}/modweb/{id}/", webadmin::base_path());
++            let css = String::from_utf8_lossy(&data)
++                .replace("url(/assets/", &format!("url({base}assets/"))
++                .replace("url('/assets/", &format!("url('{base}assets/"))
++                .replace("url(\"/assets/", &format!("url(\"{base}assets/"));
++            return Ok((mime, css.into_bytes()));
++        }
+         Ok((mime, data))
+     }
+ 
