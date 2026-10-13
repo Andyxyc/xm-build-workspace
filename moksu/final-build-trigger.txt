@@ -1,0 +1,4 @@
+moksu KernelSU 3.3.1 + 7SU full webadmin + stealth release candidate
+KMI source run: 38412422406
+Android UI source run: 38412639039
+No APK private key in GitHub
