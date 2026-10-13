@@ -1,0 +1,689 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+index 48911e2..1d1f331 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -9,11 +9,14 @@ import android.os.Bundle
+ import android.os.SystemClock
+ import android.security.keystore.KeyGenParameterSpec
+ import android.security.keystore.KeyProperties
++import android.widget.Toast
+ import android.view.WindowManager
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
+ import androidx.compose.foundation.ExperimentalFoundationApi
+ import androidx.compose.foundation.background
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.shape.RoundedCornerShape
+@@ -30,6 +33,13 @@ import androidx.compose.ui.text.input.KeyboardType
+ import androidx.compose.foundation.text.KeyboardOptions
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.unit.sp
++import androidx.compose.ui.platform.LocalContext
++import androidx.lifecycle.lifecycleScope
++import org.json.JSONArray
++import org.json.JSONObject
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
+ import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.ui.MainActivity
+ import me.weishu.kernelsu.ui.UiMode
+@@ -80,14 +90,21 @@ object MokDisguise {
+     }
+     fun configured(context: Context): Boolean = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+         .getString("pin-tag", null)?.isNotBlank() == true
+-    /** No six-digit plaintext or unsalted offline-bruteforceable hash is persisted. */
+-    fun setPin(context: Context, first: String, second: String): Boolean {
++    /** Save a keyed verifier and recheck it before reporting success. Never persist the digits. */
++    @Synchronized fun setPin(context: Context, first: String, second: String): Boolean {
+         if (!sixDigits.matches(first) || first != second) return false
+         return runCatching {
++            val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++            val old = prefs.getString("pin-tag",null)
+             val value = tag(first)
+-            context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
+-                .putString("pin-tag", value).putInt("attempts",0)
+-                .putLong("lock-until",0).commit() && configured(context)
++            if (!prefs.edit().putString("pin-tag",value).putInt("attempts",0)
++                    .putLong("lock-until",0).commit()) return false
++            if (configured(context) && verify(context,first)) return true
++            // Do not claim a PIN was saved if Android Keystore could not read it back.
++            prefs.edit().apply {
++                if (old == null) remove("pin-tag") else putString("pin-tag",old)
++            }.commit()
++            false
+         }.getOrDefault(false)
+     }
+     @Synchronized fun verify(context: Context, entered: String): Boolean {
+@@ -136,19 +153,17 @@ object MokDisguise {
+     }
+ }
+ 
+-/** Native, functional calculator/calendar front surfaces, with an explicit recovery gesture.
+- * A long-press on = (calculator) or on the displayed month (calendar) is required.
+- */
++/** Functional front surfaces: six digits + a single press of =, or calendar month long-press. */
+ class MokDisguiseActivity : ComponentActivity() {
++    private var recovering = false
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         val mode = MokDisguise.mode(this)
+-        // A disabled alias may be retained in an OEM launcher cache; do not expose control panel.
+         if (mode == MokDisguise.NORMAL) { finish(); return }
+-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
++        // Ordinary calculator and calendar screens should remain screenshot-capable.
+         setContent {
+             KernelSUTheme(uiMode = UiMode.Material) {
+-                Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background) {
++                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                     if (mode == MokDisguise.CALENDAR) CalendarFace { reveal(it) }
+                     else CalculatorFace { reveal(it) }
+                 }
+@@ -156,41 +171,59 @@ class MokDisguiseActivity : ComponentActivity() {
+         }
+     }
+     private fun reveal(pin: String) {
+-        if (!MokDisguise.verify(this, pin)) return
+-        // Allow manager login only after the native kernel confirms hidden mode was lifted.
+-        val previous = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-        if (previous == 1) {
+-            if (!runCatching { Natives.stealthSet(false) }.getOrDefault(false) ||
+-                runCatching { Natives.stealthState() }.getOrDefault(-1) != 0) return
++        if (recovering || !MokDisguise.verify(this, pin)) return
++        recovering = true
++        lifecycleScope.launch {
++            val restored = withContext(Dispatchers.IO) {
++                val state = runCatching { Natives.stealthState() }.getOrDefault(-1)
++                if (state == 0) true
++                else {
++                    val directly = runCatching {
++                        Natives.stealthSet(false) && Natives.stealthState() == 0
++                    }.getOrDefault(false)
++                    directly || MokWebRecovery.disableStealth()
++                }
++            }
++            recovering = false
++            if (restored) {
++                startActivity(Intent(this@MokDisguiseActivity, MainActivity::class.java)
++                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
++                finish()
++            } else {
++                Toast.makeText(this@MokDisguiseActivity,
++                    "恢复失败，请到已保存的网页版关闭隐藏模式", Toast.LENGTH_LONG).show()
++            }
+         }
+-        startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+-        finish()
+     }
+ }
+ 
+-@OptIn(ExperimentalFoundationApi::class)
+ @Composable private fun CalculatorFace(onUnlock:(String)->Unit) {
+     var display by remember { mutableStateOf("0") }
+     var previous by remember { mutableStateOf<BigDecimal?>(null) }
+     var op by remember { mutableStateOf<String?>(null) }
+     var fresh by remember { mutableStateOf(true) }
++    var expression by remember { mutableStateOf("") }
+     fun process(key:String) {
+         when(key) {
+-            "AC" -> {display="0";previous=null;op=null;fresh=true}
+-            "±" -> {display=if(display.startsWith("-"))display.drop(1) else "-$display"}
++            "AC" -> { display="0"; previous=null; op=null; fresh=true; expression="" }
++            "±" -> { display=if(display.startsWith("-")) display.drop(1) else "-$display" }
+             "%" -> { display=runCatching { BigDecimal(display).divide(BigDecimal(100)).stripTrailingZeros().toPlainString() }.getOrDefault(display) }
+             "+", "−", "×", "÷" -> {
+-                previous=display.toBigDecimalOrNull();op=key;fresh=true
++                previous=display.toBigDecimalOrNull(); op=key; fresh=true
++                expression=if (previous!=null) "$display $key" else ""
+             }
+             "=" -> {
+-                val a=previous;val b=display.toBigDecimalOrNull()
+-                if (a!=null && b!=null && op!=null) {
++                // Exactly six digits and no pending arithmetic: single-tap recovery.
++                if (previous==null && op==null && display.matches(Regex("[0-9]{6}"))) onUnlock(display)
++                val a=previous; val b=display.toBigDecimalOrNull()
++                if(a!=null && b!=null && op!=null) {
++                    expression="$a $op $display ="
+                     display=runCatching { when(op) {
+                         "+" -> a.add(b); "−" -> a.subtract(b)
+                         "×" -> a.multiply(b); else -> a.divide(b,MathContext.DECIMAL64)
+                     }.stripTrailingZeros().toPlainString() }.getOrDefault("错误")
+                 }
+-                previous=null;op=null;fresh=true
++                previous=null; op=null; fresh=true
+             }
+             else -> if(key.matches(Regex("[0-9.]"))) {
+                 if(key=="." && !fresh && display.contains('.')) return
+@@ -204,20 +237,33 @@ class MokDisguiseActivity : ComponentActivity() {
+             }
+         }
+     }
+-    Column(Modifier.fillMaxSize().padding(horizontal=20.dp, vertical=16.dp),verticalArrangement=Arrangement.Bottom) {
+-        Text(display,modifier=Modifier.fillMaxWidth().padding(end=10.dp,bottom=22.dp),
+-            fontSize=48.sp,textAlign=androidx.compose.ui.text.style.TextAlign.End,maxLines=1)
+-        val rows=listOf(listOf("AC","±","%","÷"),listOf("7","8","9","×"),listOf("4","5","6","−"),listOf("1","2","3","+"),listOf("0",".","="))
++    val scheme=MaterialTheme.colorScheme
++    Column(Modifier.fillMaxSize().padding(horizontal=16.dp, vertical=14.dp)) {
++        Spacer(Modifier.weight(1f))
++        Text(expression, modifier=Modifier.fillMaxWidth().padding(end=18.dp),
++            fontSize=17.sp, color=scheme.onSurfaceVariant,
++            textAlign=androidx.compose.ui.text.style.TextAlign.End,maxLines=1)
++        Text(display,modifier=Modifier.fillMaxWidth().padding(end=18.dp, bottom=25.dp),
++            fontSize=51.sp, color=scheme.onSurface,
++            textAlign=androidx.compose.ui.text.style.TextAlign.End,maxLines=1)
++        val rows=listOf(listOf("AC","±","%","÷"),listOf("7","8","9","×"),
++            listOf("4","5","6","−"),listOf("1","2","3","+"),listOf("0",".","="))
+         rows.forEach { row ->
+-            Row(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
++            Row(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+                 row.forEach { key ->
+-                    val bg=if(key in listOf("÷","×","−","+","=")) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+-                    Box(Modifier.weight(if(key=="0"&&row.size==3)2f else 1f).height(66.dp)
+-                        .background(bg,RoundedCornerShape(38.dp))
+-                        .combinedClickable(onClick={ process(key) },onLongClick={
+-                            if(key=="=" && display.matches(Regex("[0-9]{6}"))) onUnlock(display)
+-                        }),contentAlignment=Alignment.Center) {
+-                        Text(key,fontSize=24.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurface)
++                    val action = key in listOf("÷","×","−","+","=")
++                    val bg = when {
++                        key == "=" -> scheme.primary
++                        action -> scheme.primaryContainer
++                        key in listOf("AC","±","%") -> scheme.secondaryContainer
++                        else -> scheme.surfaceContainerHigh
++                    }
++                    val fg = if (key == "=") scheme.onPrimary else scheme.onSurface
++                    Button(onClick={process(key)}, modifier=Modifier.weight(if(key=="0" && row.size==3)2f else 1f).height(66.dp),
++                        shape=RoundedCornerShape(24.dp),contentPadding=PaddingValues(0.dp),
++                        colors=ButtonDefaults.buttonColors(containerColor=bg,contentColor=fg),
++                        elevation=null) {
++                        Text(key,fontSize=26.sp,fontWeight=FontWeight.Medium)
+                     }
+                 }
+             }
+@@ -225,51 +271,141 @@ class MokDisguiseActivity : ComponentActivity() {
+     }
+ }
+ 
++/** Offline local agenda: stored in the application's private preferences, with no calendar permission. */
++private data class LocalAgenda(val id:String,val date:String,val title:String,val time:String)
++private object LocalAgendaStore {
++    private const val PREF="moksu.local.calendar.v1"
++    private const val KEY="entries"
++    fun read(context:Context): List<LocalAgenda> = runCatching {
++        val input=JSONArray(context.getSharedPreferences(PREF,Context.MODE_PRIVATE).getString(KEY,"[]") ?: "[]")
++        (0 until minOf(600,input.length())).mapNotNull { index ->
++            val o=input.optJSONObject(index) ?: return@mapNotNull null
++            val date=o.optString("date")
++            val title=o.optString("title")
++            if (!date.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) || title.isBlank()) null
++            else LocalAgenda(o.optString("id"),date,title.take(80),o.optString("time").take(5))
++        }
++    }.getOrDefault(emptyList())
++    private fun save(context:Context, entries:List<LocalAgenda>):Boolean {
++        val array=JSONArray()
++        entries.take(600).forEach { e ->
++            array.put(JSONObject().put("id",e.id).put("date",e.date).put("title",e.title).put("time",e.time))
++        }
++        return context.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit()
++            .putString(KEY,array.toString()).commit()
++    }
++    fun add(context:Context,date:LocalDate,title:String,time:String):Boolean {
++        if(title.isBlank() || title.length>80 || read(context).size>=600) return false
++        return save(context, read(context)+LocalAgenda(UUID.randomUUID().toString(),date.toString(),title.trim(),time))
++    }
++    fun remove(context:Context,id:String):Boolean=save(context,read(context).filterNot { it.id==id })
++}
++
+ @OptIn(ExperimentalFoundationApi::class)
+ @Composable private fun CalendarFace(onUnlock:(String)->Unit) {
++    val context = LocalContext.current
++    val today = remember { LocalDate.now() }
+     var month by remember { mutableStateOf(YearMonth.now()) }
+-    var selected by remember { mutableStateOf(LocalDate.now()) }
++    var selected by remember { mutableStateOf(today) }
+     var showPin by remember { mutableStateOf(false) }
+-    var entry by remember { mutableStateOf("") }
+-    val today = remember { LocalDate.now() }
++    var pinEntry by remember { mutableStateOf("") }
++    var showAdd by remember { mutableStateOf(false) }
++    var title by remember { mutableStateOf("") }
++    var time by remember { mutableStateOf("") }
++    var revision by remember { mutableIntStateOf(0) }
++    val entries = remember(revision) { LocalAgendaStore.read(context) }
++    val selectedEntries=entries.filter { it.date==selected.toString() }.sortedBy { it.time }
+     val days = listOf("一","二","三","四","五","六","日")
+-    Column(Modifier.fillMaxSize().padding(horizontal=18.dp, vertical=28.dp)) {
+-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+-            Text("日历",fontSize=30.sp,fontWeight=FontWeight.SemiBold)
+-            TextButton(onClick={ month=YearMonth.now();selected=today }) { Text("今天") }
+-        }
+-        Spacer(Modifier.height(26.dp))
+-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+-            TextButton(onClick={month=month.minusMonths(1)}) {Text("‹",fontSize=28.sp)}
+-            Box(Modifier.combinedClickable(onClick={},onLongClick={showPin=true}),contentAlignment=Alignment.Center) {
+-                Text("${month.year}年 ${month.monthValue}月",fontSize=20.sp,fontWeight=FontWeight.Medium)
++    val scheme=MaterialTheme.colorScheme
++    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal=18.dp, vertical=22.dp),
++        verticalArrangement=Arrangement.spacedBy(13.dp)) {
++        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
++            horizontalArrangement=Arrangement.SpaceBetween) {
++            Column {
++                Text("日历",fontSize=29.sp,fontWeight=FontWeight.SemiBold,color=scheme.onSurface)
++                Text("${today.year}年${today.monthValue}月${today.dayOfMonth}日",fontSize=12.sp,color=scheme.onSurfaceVariant)
+             }
+-            TextButton(onClick={month=month.plusMonths(1)}) {Text("›",fontSize=28.sp)}
++            TextButton(onClick={month=YearMonth.now();selected=today}) { Text("今天") }
+         }
+-        Spacer(Modifier.height(24.dp))
+-        Row(Modifier.fillMaxWidth()) { days.forEach { d -> Box(Modifier.weight(1f),contentAlignment=Alignment.Center) { Text(d,color=MaterialTheme.colorScheme.onSurfaceVariant) } } }
+-        Spacer(Modifier.height(12.dp))
+-        val offset=month.atDay(1).dayOfWeek.value-1
+-        val dates=(0 until offset).map { null }+(1..month.lengthOfMonth()).map {month.atDay(it)}
+-        LazyVerticalGrid(columns=GridCells.Fixed(7),modifier=Modifier.fillMaxWidth().height(365.dp),userScrollEnabled=false) {
+-            items(dates) { date ->
+-                Box(Modifier.fillMaxWidth().height(50.dp),contentAlignment=Alignment.Center) {
+-                    if(date!=null) {
+-                        val active=selected==date
+-                        TextButton(onClick={selected=date},contentPadding=PaddingValues(0.dp),
+-                            colors=ButtonDefaults.textButtonColors(containerColor=if(active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)) {
+-                            Text(date.dayOfMonth.toString(),fontSize=16.sp,color=if(date==today)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
++        Card(shape=RoundedCornerShape(23.dp),colors=CardDefaults.cardColors(containerColor=scheme.surfaceContainerLow)) {
++            Column(Modifier.fillMaxWidth().padding(horizontal=9.dp,vertical=15.dp)) {
++                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
++                    TextButton(onClick={month=month.minusMonths(1);selected=month.atDay(1)}) { Text("‹",fontSize=29.sp) }
++                    Box(Modifier.combinedClickable(onClick={},onLongClick={showPin=true}),contentAlignment=Alignment.Center) {
++                        Text("${month.year}年 ${month.monthValue}月",fontSize=19.sp,fontWeight=FontWeight.SemiBold)
++                    }
++                    TextButton(onClick={month=month.plusMonths(1);selected=month.atDay(1)}) { Text("›",fontSize=29.sp) }
++                }
++                Row(Modifier.fillMaxWidth().padding(vertical=7.dp)) {
++                    days.forEach { d -> Box(Modifier.weight(1f),contentAlignment=Alignment.Center) {
++                        Text(d,color=scheme.onSurfaceVariant,fontSize=12.sp)
++                    } }
++                }
++                val offset=month.atDay(1).dayOfWeek.value-1
++                val dates=(0 until offset).map { null }+(1..month.lengthOfMonth()).map {month.atDay(it)}
++                LazyVerticalGrid(columns=GridCells.Fixed(7),modifier=Modifier.fillMaxWidth().height(((dates.size+6)/7*47).dp),
++                    userScrollEnabled=false) {
++                    items(dates) { date ->
++                        Box(Modifier.fillMaxWidth().height(47.dp),contentAlignment=Alignment.Center) {
++                            if(date!=null) {
++                                val active=selected==date
++                                val hasEvents=entries.any{it.date==date.toString()}
++                                Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally) {
++                                    TextButton(onClick={selected=date},contentPadding=PaddingValues(0.dp),
++                                        modifier=Modifier.size(width=38.dp,height=33.dp),
++                                        colors=ButtonDefaults.textButtonColors(
++                                            containerColor=if(active) scheme.primaryContainer else Color.Transparent)) {
++                                        Text(date.dayOfMonth.toString(),fontSize=15.sp,
++                                            color=if(date==today) scheme.primary else scheme.onSurface)
++                                    }
++                                    Box(Modifier.size(4.dp).background(
++                                        if(hasEvents)scheme.primary else Color.Transparent,RoundedCornerShape(3.dp)))
++                                }
++                            }
+                         }
+                     }
+                 }
+             }
+         }
+-        Spacer(Modifier.height(10.dp))
+-        Text("${selected.monthValue}月${selected.dayOfMonth}日 · ${selected.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL,java.util.Locale.CHINA)}",fontSize=16.sp)
++        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
++            horizontalArrangement=Arrangement.SpaceBetween) {
++            Column {
++                Text("${selected.monthValue}月${selected.dayOfMonth}日",fontSize=22.sp,fontWeight=FontWeight.SemiBold)
++                Text(selected.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL,java.util.Locale.CHINA),
++                    color=scheme.onSurfaceVariant,fontSize=13.sp)
++            }
++            Button(onClick={title="";time="";showAdd=true}) { Text("添加日程") }
++        }
++        if (selectedEntries.isEmpty()) {
++            Card(shape=RoundedCornerShape(18.dp),colors=CardDefaults.cardColors(containerColor=scheme.surfaceContainerLow)) {
++                Text("当天暂无日程", modifier=Modifier.fillMaxWidth().padding(22.dp),color=scheme.onSurfaceVariant)
++            }
++        } else selectedEntries.forEach { e ->
++            Card(shape=RoundedCornerShape(18.dp),colors=CardDefaults.cardColors(containerColor=scheme.surfaceContainerLow)) {
++                Row(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=9.dp),verticalAlignment=Alignment.CenterVertically) {
++                    Column(Modifier.weight(1f)) {
++                        Text(e.title,fontWeight=FontWeight.Medium,fontSize=16.sp)
++                        Text(e.time.ifEmpty {"全天"},fontSize=12.sp,color=scheme.onSurfaceVariant)
++                    }
++                    TextButton(onClick={if(LocalAgendaStore.remove(context,e.id)) revision++}){Text("删除")}
++                }
++            }
++        }
++        Spacer(Modifier.height(4.dp))
+     }
+-    if(showPin) AlertDialog(onDismissRequest={showPin=false;entry=""},title={Text("输入六位数字")},
+-        text={OutlinedTextField(entry,{if(it.length<=6&&it.all(Char::isDigit))entry=it},singleLine=true,
+-            keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())},
+-        confirmButton={TextButton(onClick={val p=entry;entry="";showPin=false;onUnlock(p)},enabled=entry.length==6){Text("确定")}},
+-        dismissButton={TextButton(onClick={showPin=false;entry=""}){Text("取消")}})
++    if(showAdd) AlertDialog(onDismissRequest={showAdd=false},title={Text("添加日程")},
++        text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
++            Text("${selected.year}年${selected.monthValue}月${selected.dayOfMonth}日")
++            OutlinedTextField(title,{if(it.length<=80)title=it},singleLine=true,label={Text("事项")})
++            OutlinedTextField(time,{if(it.length<=5)time=it},singleLine=true,label={Text("时间（可不填，例 09:30）")})
++        }},confirmButton={TextButton(onClick={
++            val valid=time.isBlank() || (time.matches(Regex("[0-2][0-9]:[0-5][0-9]")) && time.take(2).toInt()<24)
++            if(valid && LocalAgendaStore.add(context,selected,title,time)) {revision++;showAdd=false}
++        },enabled=title.isNotBlank()){Text("保存")}},dismissButton={TextButton(onClick={showAdd=false}){Text("取消")}})
++    if(showPin) AlertDialog(onDismissRequest={showPin=false;pinEntry=""},title={Text("输入六位数字")},
++        text={OutlinedTextField(pinEntry,{if(it.length<=6 && it.all(Char::isDigit)) pinEntry=it},singleLine=true,
++            keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),
++            visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())},
++        confirmButton={TextButton(onClick={val p=pinEntry;pinEntry="";showPin=false;onUnlock(p)},enabled=pinEntry.length==6){Text("确定")}},
++        dismissButton={TextButton(onClick={showPin=false;pinEntry=""}){Text("取消")}})
+ }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt
+index dc66ea3..e094512 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt
+@@ -101,14 +101,14 @@ class MokLoginActivity : ComponentActivity() {
+                         text = {
+                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                 Text("闲鱼 心中都是莫 · 定制")
+-                                Text("首次安装请将下方设备码发给作者获取开通帮助。设备码是本次安装的随机标识，不包含 IMEI 等硬件信息。")
++                                Text("请联系作者开通，提供以下设备码。")
+                                 val deviceCode = remember { MokDeviceCode.get(this@MokLoginActivity) }
+                                 Text(deviceCode)
+                                 TextButton(onClick={
+                                     val clip=getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                     clip.setPrimaryClip(ClipData.newPlainText("设备码",deviceCode))
+                                 }) {Text("复制设备码")}
+-                                Text("输入卡密以登录")
++                                Text("输入开通卡密")
+                                 OutlinedTextField(
+                                     value = card,
+                                     onValueChange = {
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebRecovery.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebRecovery.kt
+new file mode 100644
+index 0000000..3bc73e1
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebRecovery.kt
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import java.net.HttpURLConnection
++import java.net.URL
++import me.weishu.kernelsu.ui.util.WebAdminCli
++import org.json.JSONObject
++
++/** Password gate is checked in MokDisguiseActivity before this local-only recovery path. */
++internal object MokWebRecovery {
++    private val safe = Regex("^http://127\\.0\\.0\\.1:[0-9]{1,5}/x7k9f/[0-9a-fA-F]{64}$")
++
++    fun disableStealth(): Boolean = runCatching {
++        val base = WebAdminCli.url().trim()
++        if (!safe.matches(base)) return false
++        val url = URL("$base/api/stealth")
++        val conn = url.openConnection() as HttpURLConnection
++        try {
++            conn.requestMethod = "POST"
++            conn.connectTimeout = 2000
++            conn.readTimeout = 3000
++            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
++            conn.useCaches = false
++            conn.doOutput = true
++            conn.outputStream.use { it.write("enable=0".toByteArray(Charsets.UTF_8)) }
++            conn.responseCode == 200 && JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
++                .optBoolean("ok", false)
++        } finally { conn.disconnect() }
++    }.getOrDefault(false)
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+index c67efc6..aee3634 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -52,6 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.unit.sp
+ import androidx.lifecycle.lifecycleScope
++import kotlinx.coroutines.delay
++import androidx.compose.runtime.LaunchedEffect
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
+@@ -78,11 +80,16 @@ class MoksuExtrasActivity:ComponentActivity() {
+     private var firstPin by mutableStateOf("")
+     private var secondPin by mutableStateOf("")
+     private var pinSaving by mutableStateOf(false)
++    private var pinConfigured by mutableStateOf(false)
++    private var pendingDisguise by mutableStateOf<String?>(null)
++    private var pendingStealth by mutableStateOf(false)
++    private var disguiseCountdown by mutableIntStateOf(5)
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         if (!MokAuthGate.ensureAccess(this)) return
+         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+         disguiseMode = MokDisguise.mode(this)
++        pinConfigured = MokDisguise.configured(this)
+         setContent { KernelSUTheme(uiMode=UiMode.Material) {
+             Surface(color=MaterialTheme.colorScheme.background) { Screen() }
+         } }
+@@ -92,6 +99,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+         super.onResume()
+         if (!MokAuthGate.ensureAccess(this)) return
+         disguiseMode = MokDisguise.mode(this)
++        pinConfigured = MokDisguise.configured(this)
+     }
+     private fun saveRecoveryPin() {
+         if (pinSaving) return
+@@ -103,18 +111,39 @@ class MoksuExtrasActivity:ComponentActivity() {
+         val one=firstPin; val two=secondPin
+         val ok=MokDisguise.setPin(this, one, two)
+         firstPin=""; secondPin=""; pinSaving=false
+-        if(ok) { showPinSetup=false;notice="六位恢复密码已保存" }
+-        else notice="密码保存失败，未修改原设置"
++        pinConfigured = MokDisguise.configured(this)
++        if (ok && pinConfigured) { showPinSetup=false;notice="恢复密码已保存并回读确认" }
++        else notice="保存失败，请重试；原密码未修改"
+     }
+ 
+     private fun setDisguise(mode: String) {
+         if (busy) return
+-        if (mode != MokDisguise.NORMAL && !MokDisguise.configured(this)) {
+-            showPinSetup=true;notice="请先设置六位恢复密码";return
++        if (mode == MokDisguise.NORMAL) {
++            // An explicit return to the normal launcher does not need a countdown.
++            applyDisguise(mode)
++            return
++        }
++        pinConfigured = MokDisguise.configured(this)
++        if (!pinConfigured) {
++            showPinSetup = true
++            notice = "请先设置并确认六位恢复密码"
++            return
+         }
+-        val ok=MokDisguise.setMode(this,mode)
+-        if(ok) { disguiseMode=mode;notice="桌面入口已切换；部分系统需稍等图标刷新" }
+-        else notice="切换失败，已尽力恢复上一个桌面入口"
++        if (!webEnabled || !webUrl.startsWith("http://127.0.0.1:")) {
++            notice = "请先开启网页版，确认可从网页关闭隐藏，再切换桌面入口"
++            return
++        }
++        pendingDisguise = mode
++        disguiseCountdown = 5
++    }
++
++    private fun applyDisguise(mode: String) {
++        if (busy) return
++        val ok = MokDisguise.setMode(this, mode)
++        if (ok) {
++            disguiseMode = MokDisguise.mode(this)
++            notice = "桌面入口已切换"
++        } else notice = "切换失败，请检查恢复密码并重试"
+     }
+     private fun refresh() {
+         if (busy) return
+@@ -162,6 +191,23 @@ class MoksuExtrasActivity:ComponentActivity() {
+         }
+     }
+     private fun setStealth(value:Boolean) {
++        if (busy || !stealthSupported) return
++        if (value) {
++            if (disguiseMode == MokDisguise.NORMAL || !MokDisguise.configured(this)) {
++                notice = "请先设置六位密码并选择计算器或日历"
++                return
++            }
++            if (!webEnabled || !webUrl.startsWith("http://127.0.0.1:")) {
++                notice = "请先开启网页版，保存地址，确保可以从网页关闭隐藏"
++                return
++            }
++            disguiseCountdown = 5
++            pendingStealth = true
++            return
++        }
++        commitStealth(false)
++    }
++    private fun commitStealth(value:Boolean) {
+         if(busy||!stealthSupported)return
+         // Only enter kernel hide mode after a real, testable six-digit recovery path exists.
+         if (value && (disguiseMode == MokDisguise.NORMAL || !MokDisguise.configured(this))) {
+@@ -212,6 +258,55 @@ class MoksuExtrasActivity:ComponentActivity() {
+         }
+     }
+     @Composable private fun Screen() {
++        if (pendingStealth) {
++            LaunchedEffect(pendingStealth) {
++                disguiseCountdown = 5
++                repeat(5) { delay(1000); disguiseCountdown -= 1 }
++            }
++            AlertDialog(
++                onDismissRequest = { pendingStealth = false },
++                title = { Text("开启隐藏模式") },
++                text = { Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
++                    Text(if (disguiseMode == MokDisguise.CALCULATOR)
++                        "恢复：输入六位密码，再按计算器等号。"
++                    else "恢复：长按日历月份标题，输入六位密码。")
++                    Text("恢复不成功时，使用保存的网页版链接关闭隐藏。")
++                    Text("请不要直接卸载管理器；先验证网页能独立恢复。")
++                    Text(if (disguiseCountdown>0) "请阅读操作说明（${disguiseCountdown} 秒）" else "可以继续")
++                } },
++                confirmButton = { TextButton(onClick={pendingStealth=false;commitStealth(true)},
++                    enabled=disguiseCountdown==0&&!busy){Text("确认开启")} },
++                dismissButton = { TextButton(onClick={pendingStealth=false}){Text("取消")} }
++            )
++        }
++        val modeToSwitch = pendingDisguise
++        if (modeToSwitch != null) {
++            LaunchedEffect(modeToSwitch) {
++                disguiseCountdown = 5
++                repeat(5) { delay(1000); disguiseCountdown -= 1 }
++            }
++            AlertDialog(
++                onDismissRequest = { pendingDisguise = null },
++                title = { Text(if (modeToSwitch == MokDisguise.CALCULATOR) "切换为计算器" else "切换为日历") },
++                text = {
++                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
++                        Text(if (modeToSwitch == MokDisguise.CALCULATOR)
++                            "恢复方式：在计算器输入设置的六位密码，单击等号。"
++                        else "恢复方式：长按日历月份标题，输入设置的六位密码。")
++                        Text("如无法恢复，请使用已保存的本机网页地址关闭隐藏模式。")
++                        Text("请先确认网页可以正常打开，再继续。")
++                        Text(if (disguiseCountdown > 0) "请阅读以上说明（${disguiseCountdown} 秒）" else "可以继续")
++                    }
++                },
++                confirmButton = {
++                    TextButton(onClick = {
++                        pendingDisguise = null
++                        applyDisguise(modeToSwitch)
++                    }, enabled = disguiseCountdown == 0 && !busy) { Text("确认切换") }
++                },
++                dismissButton = { TextButton(onClick = { pendingDisguise = null }) { Text("取消") } }
++            )
++        }
+         if (showPinSetup) {
+             AlertDialog(
+                 onDismissRequest = { if (!pinSaving) { showPinSetup=false;firstPin="";secondPin="" } },
+@@ -312,7 +407,11 @@ class MoksuExtrasActivity:ComponentActivity() {
+                     FilterChip(selected=disguiseMode==MokDisguise.CALENDAR,
+                         onClick={setDisguise(MokDisguise.CALENDAR)},label={Text("日历")})
+                 }
+-                Text("计算器输入六位数字后长按等号恢复；日历长按月份标题后输入六位数字恢复。",
++                Text("计算器输入六位数字，按等号恢复；日历长按月份标题，输入六位数字恢复。",
++                    fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                Text(if (pinConfigured) "恢复密码：已设置" else "恢复密码：尚未设置",
++                    fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                Text("需要时可使用网页版管理；隐藏入口前先确认网页可正常访问。不要直接卸载桌面管理器。",
+                     fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 OutlinedButton(onClick={firstPin="";secondPin="";showPinSetup=true},enabled=!busy) {Text("设置密码")}
+                 Text("使用与本版本匹配的隐藏内核后可以启用；若未装配套内核，请先安装再操作。",
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index db845f5..34c4629 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -226,17 +226,18 @@ function stealthRow(s) {
+   r.appendChild(k);
+   r.appendChild(el("div", "sp"));
+ 
+-  var sw = el("div", "sw" + (s.stealth ? " on" : ""));
++  var known = typeof s.stealth === "boolean";
++  var sw = el("div", "sw" + (s.stealth === true ? " on" : "") + (known ? "" : " unknown"));
+   sw.setAttribute("role", "switch");
+-  sw.title = s.stealth ? "关闭隐身" : "在 Android 管理器设置恢复方式后开启";
+-  sw.setAttribute("aria-checked",s.stealth ? "true" : "false");
++  sw.title = known ? (s.stealth ? "关闭隐藏" : "请在 Android 管理器配置后开启") : "内核状态暂时未知，可尝试关闭隐藏";
++  sw.setAttribute("aria-checked", known ? (s.stealth ? "true" : "false") : "mixed");
+   sw.onclick = function () {
+     if (state.busy) return;
+-    var want = !s.stealth;
++    var want = known && !s.stealth;
+     if (want) {
+       toast("请在 Android 管理器设置六位密码和桌面入口后开启");
+     } else {
+-      confirmSheet("关闭隐身模式？", "关闭后管理器界面立即恢复正常显示。", "关闭",
++      confirmSheet("关闭隐藏模式？", "此操作将尝试恢复桌面管理器的显示。", "关闭",
+         function () { setStealth(false); });
+     }
+   };
+@@ -274,10 +275,11 @@ function renderStatus(s) {
+   // Report the kernel's actual response. Stealth is not installation success.
+   var installed = s.root === true;
+   var hidden = s.stealth === true;
+-  var title = installed ? "Root 已就绪" : (hidden ? "内核状态受隐藏模式影响" : "尚未识别到 Root");
++  var unknown = s.stealth == null;
++  var title = installed ? "Root 已就绪" : (hidden ? "内核状态受隐藏模式影响" : unknown ? "内核状态暂时不可用" : "尚未识别到 Root");
+   var summary = installed
+     ? "内核连接正常 · " + String(s.manager || "moksu")
+-    : hidden ? "暂时无法确定安装状态，可从隐藏设置恢复识别" : "当前未识别到可用的内核接口，请检查安装和兼容情况";
++    : hidden ? "可在网页关闭隐藏模式" : unknown ? "未收到可靠的内核状态，稍后重试或关闭隐藏" : "当前未识别到可用的内核接口，请检查安装和兼容情况";
+   var hero=el("div","card hero " + (installed ? "on" : "off"));
+   var ring=el("div","ring"); ring.appendChild(ic(installed ? "shield-check" : hidden ? "eye-off" : "shield-alert"));
+   hero.appendChild(ring);
+@@ -328,7 +330,7 @@ function renderStatus(s) {
+   privacy.appendChild(row("terminal","Root shell",s.rootShell ? "可用" : "不可用",true,s.rootShell ? "ok" : "warn"));
+   privacy.appendChild(row("shield","安全模式",s.safeMode ? "开启" : "关闭",true,s.safeMode ? "warn" : "ok"));
+   privacy.appendChild(stealthRow(s));
+-  privacy.appendChild(el("div","hint","恢复入口由 Android 管理器中的计算器或日历管理；网页不保存恢复密码。"));
++  privacy.appendChild(el("div","hint","计算器输入六位数字并按等号恢复；日历长按月份标题。恢复失败时可在这里关闭隐藏。"));
+   box.appendChild(privacy);
+ 
+   var network=el("div","card tight");
+diff --git a/userspace/ksud/src/webadmin_ksud.rs b/userspace/ksud/src/webadmin_ksud.rs
+index 95764c4..b018419 100644
+--- a/userspace/ksud/src/webadmin_ksud.rs
++++ b/userspace/ksud/src/webadmin_ksud.rs
+@@ -26,13 +26,16 @@ pub struct KsudBackend;
+ impl Backend for KsudBackend {
+     fn status(&self) -> Value {
+         let release = kernel_release();
++        // Report an unavailable kernel response as UNKNOWN, not falsely as disabled.
++        let stealth = ksucalls::stealth_get_authed().ok();
+         json!({
+             // 这个网页服务本身就跑在 ksud（root 守护进程）里，所以 root 一定可用；
+             // 不存在"划掉 App 就没了"的问题（这正是搬过来的原因）
+             "root": true,
+             "rootShell": true,
+             "managerNotRecognized": false,
+-            "stealth": stealth_enabled(),
++            "stealth": stealth,
++            "stealthKnown": stealth.is_some(),
+             "gki": is_gki(&release),
+             "lkm": ksucalls::is_lkm(),
+             "lateLoad": ksucalls::is_late_load(),
