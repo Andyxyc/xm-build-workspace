@@ -1,0 +1,94 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+@@ -156,17 +156,27 @@
+      * role. Read the same root-owned PIN file used by ksud, even if the web server is off.
+      * Never log or persist the plaintext PIN in the manager app.
+      */
+-    fun matchesDialCode(supplied: String): Boolean {
+-        if (!supplied.matches(Regex("[0-9]{4,12}"))) return false
++    private fun configuredDialCode(): String? {
+         val out = ArrayList<String>()
+-        val err = ArrayList<String>()
++        val errors = ArrayList<String>()
+         val result = runCatching {
+             getRootShell().newJob()
+                 .add("cat /data/adb/sevenk/stealth_code 2>/dev/null")
+-                .to(out, err).exec()
++                .to(out, errors).exec()
+         }.getOrNull()
+-        val expected = if (result?.code == 0) out.joinToString("").trim() else "7070"
+-        return expected.matches(Regex("[0-9]{4,12}")) && supplied == expected
++        if (result?.code != 0) return null
++        // Never log this value or use a hardcoded 4-digit unlock PIN.
++        return out.joinToString("").trim().takeIf { it.matches(Regex("[0-9]{4,12}")) }
++    }
++
++    fun isFourDigitDialConfigured(): Boolean = configuredDialCode()?.length == 4
++
++    fun matchesDialCode(supplied: String): Boolean {
++        if (!supplied.matches(Regex("[0-9]{4,12}"))) return false
++        // Legacy R2 5-digit *#*#...#*#* secret codes must remain an emergency
++        // fallback for previously hidden devices lacking a configured code file.
++        val expected = configuredDialCode() ?: "70707"
++        return supplied == expected
+     }
+ 
+     fun dialToggle(context: Context, supplied: String): Boolean {
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -136,8 +136,22 @@
+     }
+     private fun setStealth(value:Boolean) {
+         if(busy||!stealthSupported)return
+-        busy=true
+-        lifecycleScope.launch {
++        // Require a working recovery path BEFORE hiding the manager interface.
++        // This is a system phone-role grant, not Accessibility permission.
++        if (value && !callRedirectEnabled) {
++            notice="请先启用四位拨号恢复入口并授予系统呼叫重定向角色，避免无法恢复"
++            return
++        }
++        busy=true
++        lifecycleScope.launch {
++            if (value) {
++                val configured=withContext(Dispatchers.IO) { MokWebDeviceBridge.isFourDigitDialConfigured() }
++                if (!configured) {
++                    notice="请先在网页版设置四位数字恢复码，再开启隐藏"
++                    busy=false
++                    return@launch
++                }
++            }
+             val check=withContext(Dispatchers.IO){
+                 val ok=runCatching { Natives.stealthSet(value) }.getOrDefault(false)
+                 val actual=runCatching { Natives.stealthState() }.getOrDefault(-1)
+diff --git a/userspace/ksud/src/webadmin_ksud.rs b/userspace/ksud/src/webadmin_ksud.rs
+--- a/userspace/ksud/src/webadmin_ksud.rs
++++ b/userspace/ksud/src/webadmin_ksud.rs
+@@ -85,7 +85,15 @@
+     }
+ 
+     fn set_stealth(&self, enable: bool) -> Result<String, String> {
+-        // 同上：以内核要求的管理器身份去切换
++        // A real 4-digit recovery code must have been persisted before hiding.
++        // A default shown by the UI is NOT a working four-digit dial code.
++        if enable {
++            let code=std::fs::read_to_string("/data/adb/sevenk/stealth_code")
++                .map_err(|_| "请先设置四位数字恢复码，并在 Android 设置中授权拨号恢复角色".to_string())?;
++            if code.trim().len() != 4 || !code.trim().bytes().all(|b| b.is_ascii_digit()) {
++                return Err("请先设置四位数字恢复码，再开启隐藏".to_string());
++            }
++        }
+         match ksucalls::stealth_set_authed(enable) {
+             Ok(()) => Ok(if enable { "隐身已开启" } else { "隐身已关闭" }.to_string()),
+             Err(e) => Err(format!("{e:#}")),
+@@ -1378,7 +1386,7 @@
+ 
+ /// 隐身密令（退出隐身用；只有拿到口令的本机页面能看）
+ fn stealth_code() -> String {
+-    std::fs::read_to_string("/data/adb/sevenk/stealth_code").map_or_else(|_| "7070".to_string(), |s| s.trim().to_string())
++    std::fs::read_to_string("/data/adb/sevenk/stealth_code").map_or_else(|_| "70707".to_string(), |s| s.trim().to_string())
+ }
+ 
+ /// 模块 id 列表（判空用）
