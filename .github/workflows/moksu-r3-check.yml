@@ -45,6 +45,10 @@ jobs:
           git apply ../config/moksu/r2/moksu-v3.3.1-R2.patch
           git apply --check ../config/moksu/r3/r3-source.patch
           git apply ../config/moksu/r3/r3-source.patch
+          git apply --check ../config/moksu/r3/r3-safety.patch
+          git apply ../config/moksu/r3/r3-safety.patch
+          grep -q 'isFourDigitDialConfigured' manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+          grep -q 'configuredDialCode' manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
           ! grep -q 'MokRecoveryActivity::class.java' manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
           ! grep -q 'MokRecoveryActivity::class.java' manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
           grep -q 'if (hiddenMode) return@buildList' manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
