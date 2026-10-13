@@ -1,0 +1,147 @@
+name: moksu v3.3.1 R4 compile gate
+on:
+  push:
+    branches: [moksu-331-r4-20261014]
+    paths:
+      - 'moksu/r4/**'
+      - '.github/workflows/moksu-r4-compile.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r4-20261014-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Apply R4 on verified R3 source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r3-source
+          path: input
+          run-id: 38447826255
+          github-token: ${{ github.token }}
+      - name: Apply R4 patch on previous tested code and validate guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -s input/moksu-r3-source.tar.gz
+          tar -xzf input/moksu-r3-source.tar.gz -C source
+          cd source
+          git apply --check ../config/moksu/r4/moksu-v3.3.1-R4.patch
+          git apply ../config/moksu/r4/moksu-v3.3.1-R4.patch
+          node --check userspace/ksud/assets/webadmin/app.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          r=Path('manager/app/src/main')
+          for p in [r/'AndroidManifest.xml',r/'res/values/strings.xml']:
+              ET.parse(p)
+          main=(r/'java/me/weishu/kernelsu/ui/MainActivity.kt').read_text()
+          home=(r/'java/me/weishu/kernelsu/ui/screen/home/HomeScreen.kt').read_text()
+          install=(r/'java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt').read_text()
+          extras=(r/'java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt').read_text()
+          web=Path('userspace/ksud/assets/webadmin/index.html').read_text()
+          assert 'hiddenHome()' not in main
+          assert 'forceUninstalled = true' in main and 'uiState.copy(' in home
+          assert 'InstallMethod.DownloadFile(summary = downloadFileMsg)' in install
+          assert 'if (hiddenMode) return@buildList' in install
+          assert 'Text("设置密码")' in extras and 'Switch(checked=callRedirectEnabled' in extras
+          assert 'material-r4.css' in web and 'mobile-nav' in web
+          assert 'stealthCodeConfigured' in Path('userspace/ksud/src/webadmin_ksud.rs').read_text()
+          PY
+          cd ..
+          cp -a config/moksu source/moksu-build
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r4-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r4-source, path: out/, retention-days: 14, if-no-files-found: warn}
+  android:
+    name: Android R4 manager unsigned compile
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r4-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r4-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile the original upstream Compose UI with R4 changes
+        shell: bash
+        working-directory: source/manager
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1-R4 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R4.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-r4-manager-unsigned.apk"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r4-android, path: out/, retention-days: 14, if-no-files-found: warn}
+  rust:
+    name: Rust R4 ksud native compile
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r4-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r4-source.tar.gz -C source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-redesign-kmi-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38418012975
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Install Android Rust toolchains
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Build ksud and ksuinit for both architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/rust-R4.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r4-native, path: out/, retention-days: 14, if-no-files-found: warn}
