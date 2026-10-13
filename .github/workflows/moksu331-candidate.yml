@@ -1,0 +1,97 @@
+name: moksu 3.3.1 full-feature candidate
+on:
+  push:
+    branches: [moksu-ksu331-release-6ee3e003]
+    paths:
+      - 'moksu/ksu331/**'
+      - 'moksu/signing-public.json'
+      - '.github/workflows/moksu331-candidate.yml'
+permissions:
+  contents: read
+concurrency:
+  group: moksu331-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  manager:
+    name: Full-feature 3.3.1 manager build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 932014ab5b2c9b74a3d11e2ec4d17dd10fc9442e
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Retain official KSU launcher icons
+        run: |
+          set -euo pipefail
+          cp -r source/manager/app/src/main/res/drawable /tmp/moksu_official_drawable
+          cp -r source/manager/app/src/main/res/mipmap-anydpi-v26 /tmp/moksu_official_mipmap
+      - name: Safe source merge and moksu branding
+        run: |
+          set -euo pipefail
+          mkdir -p official/manager/app/src/main/res
+          cp -r /tmp/moksu_official_drawable official/manager/app/src/main/res/drawable
+          cp -r /tmp/moksu_official_mipmap official/manager/app/src/main/res/mipmap-anydpi-v26
+          python3 -m py_compile config/moksu/ksu331/merge331.py config/moksu/ksu331/resolve_for_build.py config/moksu/ksu331/apply_release.py
+          python3 config/moksu/ksu331/resolve_for_build.py base old source out/moksu331-merge-audit.json
+          python3 config/moksu/ksu331/apply_release.py source official config
+          cp -a config/moksu source/moksu-build
+          tar --exclude=.git --exclude=.gradle --exclude=target --exclude=build --exclude=.cxx -czf out/moksu331-full-source.tar.gz -C source .
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: SDK 37 and NDK r29
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Build modified 3.3.1 manager
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1 2>&1 | tee "$GITHUB_WORKSPACE/out/moksu331-gradle.log"
+          python3 - <<'PY'
+          import pathlib,hashlib,shutil,zipfile,json,os
+          root=pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          paths=list(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))
+          assert len(paths)==1,paths
+          src=paths[0]
+          with zipfile.ZipFile(src) as z:
+            assert z.testzip() is None
+            assert "classes.dex" in z.namelist()
+            assert "lib/arm64-v8a/libkernelsu.so" in z.namelist()
+          dest=root/"out/manager-staging.apk"
+          shutil.copy2(src,dest)
+          print("MOKSU_MANAGER_STAGING_SUCCESS",dest.stat().st_size,hashlib.sha256(dest.read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu331-staging
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
