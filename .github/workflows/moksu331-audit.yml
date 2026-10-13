@@ -22,6 +22,12 @@ jobs:
           ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
           path: new
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 932014ab5b2c9b74a3d11e2ec4d17dd10fc9442e
+          path: base
+          persist-credentials: false
       - name: Compare and report
         shell: bash
         run: |
@@ -37,6 +43,14 @@ jobs:
           print('new-only files',len(b.keys()-a.keys()))
           for x in sorted(b.keys()-a.keys())[:100]:print('NEWONLY',x)
           print('shared file count',len(a.keys()&b.keys()))
+          src0=Path('base/manager/app/src/main/java/me/weishu/kernelsu')
+          z={p.relative_to(src0).as_posix():p for p in src0.rglob('*') if p.is_file()}
+          print('v3.3.0-base file count',len(z))
+          for x in sorted(a.keys()&z.keys()):
+            t=z[x].read_text(errors='replace').splitlines()
+            u=a[x].read_text(errors='replace').replace('com.sevenk.core','me.weishu.kernelsu').splitlines()
+            ratio=difflib.SequenceMatcher(None,t,u,autojunk=False).ratio()
+            if ratio<0.5 and ('ui' in x or 'Natives' in x):print('FORKHEAVY',x,round(ratio,3))
           core=['Natives.kt','KernelSUApplication.kt','ui/MainActivity.kt','ui/webui/WebUIActivity.kt','ui/screen/home/HomeMaterial.kt','ui/screen/home/HomeMiuix.kt','ui/screen/settings/SettingsMaterial.kt','ui/screen/module/ModuleViewModel.kt','ui/UiMode.kt']
           for x in core:
             if x not in a or x not in b:continue
