@@ -97,6 +97,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -144,6 +145,8 @@ class MoksuExtrasActivity:ComponentActivity() {
     private var webUrl by mutableStateOf("")
     private var webState by mutableStateOf("正在读取状态")
     private var stealthState by mutableStateOf("正在检测内核")
+    private var stealthSupported by mutableStateOf(false)
+    private var stealthEnabled by mutableStateOf(false)
     private var notice by mutableStateOf("")
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
@@ -172,9 +175,16 @@ class MoksuExtrasActivity:ComponentActivity() {
             webState=info.first.ifBlank { "无法连接 ksud，请检查 Root 和服务版本" }
             webUrl=info.second
             webEnabled=webUrl.startsWith("http://127.0.0.1:")
-            stealthState=if (info.third>=0)
-                "Kernel UAPI "+info.third+" · 隐身核心待兼容确认"
-                else "未检测到可用的内核 Root 接口"
+            val state = withContext(Dispatchers.IO) {
+                runCatching { Natives.stealthState() }.getOrDefault(-1)
+            }
+            stealthSupported=state==0||state==1
+            stealthEnabled=state==1
+            stealthState=when(state) {
+                1 -> "内核隐身已开启，真实 Root 权限未变"
+                0 -> "内核隐身已关闭"
+                else -> "当前内核未提供 7SU 隐身指令（不会假装启用）"
+            }
             busy=false
         }
     }
@@ -195,6 +205,24 @@ class MoksuExtrasActivity:ComponentActivity() {
             busy=false
         }
     }
+    private fun setStealth(value:Boolean) {
+        if(busy||!stealthSupported)return
+        busy=true
+        lifecycleScope.launch {
+            val check=withContext(Dispatchers.IO){
+                val ok=runCatching { Natives.stealthSet(value) }.getOrDefault(false)
+                val actual=runCatching { Natives.stealthState() }.getOrDefault(-1)
+                Pair(ok,actual)
+            }
+            stealthSupported=check.second in 0..1
+            stealthEnabled=check.second==1
+            notice=if(check.first&&check.second==(if(value)1 else 0))
+                "内核已确认隐身状态改变，返回主界面后刷新即可"
+                else "隐身切换失败，状态未得到内核确认"
+            stealthState=if(stealthEnabled) "内核隐身已开启" else "内核隐身已关闭"
+            busy=false
+        }
+    }
     private fun rotateToken() {
         if(busy)return
         busy=true
@@ -206,7 +234,7 @@ class MoksuExtrasActivity:ComponentActivity() {
             busy=false
         }
     }
-    @Composable private fun PanelCard(body:@Composable Column.()->Unit) {
+    @Composable private fun PanelCard(body:@Composable ColumnScope.()->Unit) {
         Card(
             modifier=Modifier.fillMaxWidth(),
             shape=RoundedCornerShape(22.dp),
@@ -253,17 +281,22 @@ class MoksuExtrasActivity:ComponentActivity() {
                     },enabled=!busy&&webEnabled){Text("复制链接")}
                 }
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick={rotateToken},enabled=!busy&&webEnabled){Text("重置密钥")}
-                    OutlinedButton(onClick={refresh},enabled=!busy){Text("刷新")}
+                    OutlinedButton(onClick={rotateToken()},enabled=!busy&&webEnabled){Text("重置密钥")}
+                    OutlinedButton(onClick={refresh()},enabled=!busy){Text("刷新")}
                 }
             }
             PanelCard {
                 Text("7SU 隐身 / 隐藏模式",fontSize=18.sp,fontWeight=FontWeight.Bold)
                 Text(stealthState,fontSize=13.sp,color=Color(0xFFD1D9E9))
+                Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                    Text("内核隐身",fontSize=14.sp,color=Mint)
+                    Switch(checked=stealthEnabled,onCheckedChange={setStealth(it)},
+                        enabled=!busy&&stealthSupported)
+                }
                 HorizontalDivider(color=Color(0xFF30445B))
-                Text("真实隐身需内核支持，未通过检测不会显示虚假的启用结果。",
+                Text("原版 7SU 隐身仅隐藏管理器 Root 状态显示。入口仍保留，可随时恢复；不支持的内核不能开启。",
                     fontSize=12.sp,color=Color(0xFFB2BED7))
-                OutlinedButton(onClick={refresh},enabled=!busy){Text("检测")}
+                OutlinedButton(onClick={refresh()},enabled=!busy){Text("重新读取内核")}
             }
             if(notice.isNotBlank())PanelCard{Text(notice,fontSize=13.sp,color=Mint)}
             Spacer(Modifier.height(6.dp))
