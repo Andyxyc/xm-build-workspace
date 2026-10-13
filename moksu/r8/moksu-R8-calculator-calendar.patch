@@ -1,0 +1,1208 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -62,7 +62,7 @@
+     const val CALENDAR = "calendar"
+     private const val PREF = "moksu.disguise.v1"
+     private const val KEY_ALIAS = "moksu.disguise.recovery.hmac.v1"
+-    private val sixDigits = Regex("[0-9]{6}")
++    private val recoveryDigits = Regex("[0-9]{6,8}")
+     private val names = mapOf(
+         NORMAL to "me.weishu.kernelsu.mok.MokManagerLauncher",
+         CALCULATOR to "me.weishu.kernelsu.mok.MokCalculatorLauncher",
+@@ -88,27 +88,51 @@
+         return android.util.Base64.encodeToString(mac.doFinal(
+             ("moksu-disguise-pin-v1\u0000" + pin).toByteArray(Charsets.UTF_8)), android.util.Base64.NO_WRAP)
+     }
++    fun pinLength(context:Context):Int = context.getSharedPreferences(PREF,Context.MODE_PRIVATE)
++        .getInt("pin-length",6).takeIf {it==6 || it==8} ?: 6
++    fun calculatorUnlock(context:Context):String = context.getSharedPreferences(PREF,Context.MODE_PRIVATE)
++        .getString("calc-unlock","equals")?.takeIf { it in setOf("equals","percent","history") } ?: "equals"
++    fun calendarUnlock(context:Context):String = context.getSharedPreferences(PREF,Context.MODE_PRIVATE)
++        .getString("calendar-unlock","search")?.takeIf {it in setOf("search","today-triple") } ?: "search"
++    fun setCalculatorUnlock(context:Context,value:String):Boolean = value in setOf("equals","percent","history") &&
++        context.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putString("calc-unlock",value).commit()
++    fun setCalendarUnlock(context:Context,value:String):Boolean = value in setOf("search","today-triple") &&
++        context.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putString("calendar-unlock",value).commit()
++    fun guide(context:Context, mode:String):String = when(mode) {
++        CALCULATOR -> when(calculatorUnlock(context)) {
++            "percent" -> "在计算器输入设置的密码，按百分号。"
++            "history" -> "在计算器输入设置的密码，打开历史记录。"
++            else -> "在计算器输入设置的密码，按等号。"
++        }
++        CALENDAR -> when(calendarUnlock(context)) {
++            "today-triple" -> "在日历连续点击今天日期三次，再输入密码。"
++            else -> "在日历日程搜索中输入设置的密码并提交。"
++        }
++        else -> "先恢复桌面入口，再关闭隐藏。"
++    }
+     fun configured(context: Context): Boolean = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+         .getString("pin-tag", null)?.isNotBlank() == true
+     /** Save a keyed verifier and recheck it before reporting success. Never persist the digits. */
+     @Synchronized fun setPin(context: Context, first: String, second: String): Boolean {
+-        if (!sixDigits.matches(first) || first != second) return false
++        if (!recoveryDigits.matches(first) || first != second || first.length !in setOf(6,8)) return false
+         return runCatching {
+             val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+             val old = prefs.getString("pin-tag",null)
++            val oldLength=prefs.getInt("pin-length",6)
+             val value = tag(first)
+-            if (!prefs.edit().putString("pin-tag",value).putInt("attempts",0)
++            if (!prefs.edit().putString("pin-tag",value).putInt("pin-length",first.length).putInt("attempts",0)
+                     .putLong("lock-until",0).commit()) return false
+             if (configured(context) && verify(context,first)) return true
+             // Do not claim a PIN was saved if Android Keystore could not read it back.
+             prefs.edit().apply {
+                 if (old == null) remove("pin-tag") else putString("pin-tag",old)
++                putInt("pin-length",oldLength)
+             }.commit()
+             false
+         }.getOrDefault(false)
+     }
+     @Synchronized fun verify(context: Context, entered: String): Boolean {
+-        if (!sixDigits.matches(entered)) return false
++        if (!recoveryDigits.matches(entered) || entered.length != pinLength(context)) return false
+         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+         if (SystemClock.elapsedRealtime() < prefs.getLong("lock-until",0)) return false
+         val stored = prefs.getString("pin-tag",null) ?: return false
+@@ -162,12 +186,8 @@
+         if (mode == MokDisguise.NORMAL) { finish(); return }
+         // Ordinary calculator and calendar screens should remain screenshot-capable.
+         setContent {
+-            KernelSUTheme(uiMode = UiMode.Material) {
+-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+-                    if (mode == MokDisguise.CALENDAR) CalendarFace { reveal(it) }
+-                    else CalculatorFace { reveal(it) }
+-                }
+-            }
++            if (mode == MokDisguise.CALENDAR) MokCalendarApp { reveal(it) }
++            else MokCalculatorApp { reveal(it) }
+         }
+     }
+     private fun reveal(pin: String) {
+@@ -196,216 +216,3 @@
+         }
+     }
+ }
+-
+-@Composable private fun CalculatorFace(onUnlock:(String)->Unit) {
+-    var display by remember { mutableStateOf("0") }
+-    var previous by remember { mutableStateOf<BigDecimal?>(null) }
+-    var op by remember { mutableStateOf<String?>(null) }
+-    var fresh by remember { mutableStateOf(true) }
+-    var expression by remember { mutableStateOf("") }
+-    fun process(key:String) {
+-        when(key) {
+-            "AC" -> { display="0"; previous=null; op=null; fresh=true; expression="" }
+-            "±" -> { display=if(display.startsWith("-")) display.drop(1) else "-$display" }
+-            "%" -> { display=runCatching { BigDecimal(display).divide(BigDecimal(100)).stripTrailingZeros().toPlainString() }.getOrDefault(display) }
+-            "+", "−", "×", "÷" -> {
+-                previous=display.toBigDecimalOrNull(); op=key; fresh=true
+-                expression=if (previous!=null) "$display $key" else ""
+-            }
+-            "=" -> {
+-                // Exactly six digits and no pending arithmetic: single-tap recovery.
+-                if (previous==null && op==null && display.matches(Regex("[0-9]{6}"))) onUnlock(display)
+-                val a=previous; val b=display.toBigDecimalOrNull()
+-                if(a!=null && b!=null && op!=null) {
+-                    expression="$a $op $display ="
+-                    display=runCatching { when(op) {
+-                        "+" -> a.add(b); "−" -> a.subtract(b)
+-                        "×" -> a.multiply(b); else -> a.divide(b,MathContext.DECIMAL64)
+-                    }.stripTrailingZeros().toPlainString() }.getOrDefault("错误")
+-                }
+-                previous=null; op=null; fresh=true
+-            }
+-            else -> if(key.matches(Regex("[0-9.]"))) {
+-                if(key=="." && !fresh && display.contains('.')) return
+-                display=when {
+-                    fresh && key=="." -> "0."
+-                    fresh || display=="0" -> key
+-                    display.length>=18 -> display
+-                    else -> display+key
+-                }
+-                fresh=false
+-            }
+-        }
+-    }
+-    val scheme=MaterialTheme.colorScheme
+-    Column(Modifier.fillMaxSize().padding(horizontal=16.dp, vertical=14.dp)) {
+-        Spacer(Modifier.weight(1f))
+-        Text(expression, modifier=Modifier.fillMaxWidth().padding(end=18.dp),
+-            fontSize=17.sp, color=scheme.onSurfaceVariant,
+-            textAlign=androidx.compose.ui.text.style.TextAlign.End,maxLines=1)
+-        Text(display,modifier=Modifier.fillMaxWidth().padding(end=18.dp, bottom=25.dp),
+-            fontSize=51.sp, color=scheme.onSurface,
+-            textAlign=androidx.compose.ui.text.style.TextAlign.End,maxLines=1)
+-        val rows=listOf(listOf("AC","±","%","÷"),listOf("7","8","9","×"),
+-            listOf("4","5","6","−"),listOf("1","2","3","+"),listOf("0",".","="))
+-        rows.forEach { row ->
+-            Row(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalArrangement=Arrangement.spacedBy(9.dp)) {
+-                row.forEach { key ->
+-                    val action = key in listOf("÷","×","−","+","=")
+-                    val bg = when {
+-                        key == "=" -> scheme.primary
+-                        action -> scheme.primaryContainer
+-                        key in listOf("AC","±","%") -> scheme.secondaryContainer
+-                        else -> scheme.surfaceContainerHigh
+-                    }
+-                    val fg = if (key == "=") scheme.onPrimary else scheme.onSurface
+-                    Button(onClick={process(key)}, modifier=Modifier.weight(if(key=="0" && row.size==3)2f else 1f).height(66.dp),
+-                        shape=RoundedCornerShape(24.dp),contentPadding=PaddingValues(0.dp),
+-                        colors=ButtonDefaults.buttonColors(containerColor=bg,contentColor=fg),
+-                        elevation=null) {
+-                        Text(key,fontSize=26.sp,fontWeight=FontWeight.Medium)
+-                    }
+-                }
+-            }
+-        }
+-    }
+-}
+-
+-/** Offline local agenda: stored in the application's private preferences, with no calendar permission. */
+-private data class LocalAgenda(val id:String,val date:String,val title:String,val time:String)
+-private object LocalAgendaStore {
+-    private const val PREF="moksu.local.calendar.v1"
+-    private const val KEY="entries"
+-    fun read(context:Context): List<LocalAgenda> = runCatching {
+-        val input=JSONArray(context.getSharedPreferences(PREF,Context.MODE_PRIVATE).getString(KEY,"[]") ?: "[]")
+-        (0 until minOf(600,input.length())).mapNotNull { index ->
+-            val o=input.optJSONObject(index) ?: return@mapNotNull null
+-            val date=o.optString("date")
+-            val title=o.optString("title")
+-            if (!date.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) || title.isBlank()) null
+-            else LocalAgenda(o.optString("id"),date,title.take(80),o.optString("time").take(5))
+-        }
+-    }.getOrDefault(emptyList())
+-    private fun save(context:Context, entries:List<LocalAgenda>):Boolean {
+-        val array=JSONArray()
+-        entries.take(600).forEach { e ->
+-            array.put(JSONObject().put("id",e.id).put("date",e.date).put("title",e.title).put("time",e.time))
+-        }
+-        return context.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit()
+-            .putString(KEY,array.toString()).commit()
+-    }
+-    fun add(context:Context,date:LocalDate,title:String,time:String):Boolean {
+-        if(title.isBlank() || title.length>80 || read(context).size>=600) return false
+-        return save(context, read(context)+LocalAgenda(UUID.randomUUID().toString(),date.toString(),title.trim(),time))
+-    }
+-    fun remove(context:Context,id:String):Boolean=save(context,read(context).filterNot { it.id==id })
+-}
+-
+-@OptIn(ExperimentalFoundationApi::class)
+-@Composable private fun CalendarFace(onUnlock:(String)->Unit) {
+-    val context = LocalContext.current
+-    val today = remember { LocalDate.now() }
+-    var month by remember { mutableStateOf(YearMonth.now()) }
+-    var selected by remember { mutableStateOf(today) }
+-    var showPin by remember { mutableStateOf(false) }
+-    var pinEntry by remember { mutableStateOf("") }
+-    var showAdd by remember { mutableStateOf(false) }
+-    var title by remember { mutableStateOf("") }
+-    var time by remember { mutableStateOf("") }
+-    var revision by remember { mutableIntStateOf(0) }
+-    val entries = remember(revision) { LocalAgendaStore.read(context) }
+-    val selectedEntries=entries.filter { it.date==selected.toString() }.sortedBy { it.time }
+-    val days = listOf("一","二","三","四","五","六","日")
+-    val scheme=MaterialTheme.colorScheme
+-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal=18.dp, vertical=22.dp),
+-        verticalArrangement=Arrangement.spacedBy(13.dp)) {
+-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+-            horizontalArrangement=Arrangement.SpaceBetween) {
+-            Column {
+-                Text("日历",fontSize=29.sp,fontWeight=FontWeight.SemiBold,color=scheme.onSurface)
+-                Text("${today.year}年${today.monthValue}月${today.dayOfMonth}日",fontSize=12.sp,color=scheme.onSurfaceVariant)
+-            }
+-            TextButton(onClick={month=YearMonth.now();selected=today}) { Text("今天") }
+-        }
+-        Card(shape=RoundedCornerShape(23.dp),colors=CardDefaults.cardColors(containerColor=scheme.surfaceContainerLow)) {
+-            Column(Modifier.fillMaxWidth().padding(horizontal=9.dp,vertical=15.dp)) {
+-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+-                    TextButton(onClick={month=month.minusMonths(1);selected=month.atDay(1)}) { Text("‹",fontSize=29.sp) }
+-                    Box(Modifier.combinedClickable(onClick={},onLongClick={showPin=true}),contentAlignment=Alignment.Center) {
+-                        Text("${month.year}年 ${month.monthValue}月",fontSize=19.sp,fontWeight=FontWeight.SemiBold)
+-                    }
+-                    TextButton(onClick={month=month.plusMonths(1);selected=month.atDay(1)}) { Text("›",fontSize=29.sp) }
+-                }
+-                Row(Modifier.fillMaxWidth().padding(vertical=7.dp)) {
+-                    days.forEach { d -> Box(Modifier.weight(1f),contentAlignment=Alignment.Center) {
+-                        Text(d,color=scheme.onSurfaceVariant,fontSize=12.sp)
+-                    } }
+-                }
+-                val offset=month.atDay(1).dayOfWeek.value-1
+-                val dates=(0 until offset).map { null }+(1..month.lengthOfMonth()).map {month.atDay(it)}
+-                LazyVerticalGrid(columns=GridCells.Fixed(7),modifier=Modifier.fillMaxWidth().height(((dates.size+6)/7*47).dp),
+-                    userScrollEnabled=false) {
+-                    items(dates) { date ->
+-                        Box(Modifier.fillMaxWidth().height(47.dp),contentAlignment=Alignment.Center) {
+-                            if(date!=null) {
+-                                val active=selected==date
+-                                val hasEvents=entries.any{it.date==date.toString()}
+-                                Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally) {
+-                                    TextButton(onClick={selected=date},contentPadding=PaddingValues(0.dp),
+-                                        modifier=Modifier.size(width=38.dp,height=33.dp),
+-                                        colors=ButtonDefaults.textButtonColors(
+-                                            containerColor=if(active) scheme.primaryContainer else Color.Transparent)) {
+-                                        Text(date.dayOfMonth.toString(),fontSize=15.sp,
+-                                            color=if(date==today) scheme.primary else scheme.onSurface)
+-                                    }
+-                                    Box(Modifier.size(4.dp).background(
+-                                        if(hasEvents)scheme.primary else Color.Transparent,RoundedCornerShape(3.dp)))
+-                                }
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+-            horizontalArrangement=Arrangement.SpaceBetween) {
+-            Column {
+-                Text("${selected.monthValue}月${selected.dayOfMonth}日",fontSize=22.sp,fontWeight=FontWeight.SemiBold)
+-                Text(selected.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL,java.util.Locale.CHINA),
+-                    color=scheme.onSurfaceVariant,fontSize=13.sp)
+-            }
+-            Button(onClick={title="";time="";showAdd=true}) { Text("添加日程") }
+-        }
+-        if (selectedEntries.isEmpty()) {
+-            Card(shape=RoundedCornerShape(18.dp),colors=CardDefaults.cardColors(containerColor=scheme.surfaceContainerLow)) {
+-                Text("当天暂无日程", modifier=Modifier.fillMaxWidth().padding(22.dp),color=scheme.onSurfaceVariant)
+-            }
+-        } else selectedEntries.forEach { e ->
+-            Card(shape=RoundedCornerShape(18.dp),colors=CardDefaults.cardColors(containerColor=scheme.surfaceContainerLow)) {
+-                Row(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=9.dp),verticalAlignment=Alignment.CenterVertically) {
+-                    Column(Modifier.weight(1f)) {
+-                        Text(e.title,fontWeight=FontWeight.Medium,fontSize=16.sp)
+-                        Text(e.time.ifEmpty {"全天"},fontSize=12.sp,color=scheme.onSurfaceVariant)
+-                    }
+-                    TextButton(onClick={if(LocalAgendaStore.remove(context,e.id)) revision++}){Text("删除")}
+-                }
+-            }
+-        }
+-        Spacer(Modifier.height(4.dp))
+-    }
+-    if(showAdd) AlertDialog(onDismissRequest={showAdd=false},title={Text("添加日程")},
+-        text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+-            Text("${selected.year}年${selected.monthValue}月${selected.dayOfMonth}日")
+-            OutlinedTextField(title,{if(it.length<=80)title=it},singleLine=true,label={Text("事项")})
+-            OutlinedTextField(time,{if(it.length<=5)time=it},singleLine=true,label={Text("时间（可不填，例 09:30）")})
+-        }},confirmButton={TextButton(onClick={
+-            val valid=time.isBlank() || (time.matches(Regex("[0-2][0-9]:[0-5][0-9]")) && time.take(2).toInt()<24)
+-            if(valid && LocalAgendaStore.add(context,selected,title,time)) {revision++;showAdd=false}
+-        },enabled=title.isNotBlank()){Text("保存")}},dismissButton={TextButton(onClick={showAdd=false}){Text("取消")}})
+-    if(showPin) AlertDialog(onDismissRequest={showPin=false;pinEntry=""},title={Text("输入六位数字")},
+-        text={OutlinedTextField(pinEntry,{if(it.length<=6 && it.all(Char::isDigit)) pinEntry=it},singleLine=true,
+-            keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),
+-            visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())},
+-        confirmButton={TextButton(onClick={val p=pinEntry;pinEntry="";showPin=false;onUnlock(p)},enabled=pinEntry.length==6){Text("确定")}},
+-        dismissButton={TextButton(onClick={showPin=false;pinEntry=""}){Text("取消")}})
+-}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -84,12 +84,18 @@
+     private var pendingDisguise by mutableStateOf<String?>(null)
+     private var pendingStealth by mutableStateOf(false)
+     private var disguiseCountdown by mutableStateOf(5)
++    private var desiredPinLength by mutableStateOf(6)
++    private var calcUnlock by mutableStateOf("equals")
++    private var calendarUnlock by mutableStateOf("search")
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         if (!MokAuthGate.ensureAccess(this)) return
+         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+         disguiseMode = MokDisguise.mode(this)
+         pinConfigured = MokDisguise.configured(this)
++        desiredPinLength = MokDisguise.pinLength(this)
++        calcUnlock = MokDisguise.calculatorUnlock(this)
++        calendarUnlock = MokDisguise.calendarUnlock(this)
+         setContent { KernelSUTheme(uiMode=UiMode.Material) {
+             Surface(color=MaterialTheme.colorScheme.background) { Screen() }
+         } }
+@@ -103,8 +109,8 @@
+     }
+     private fun saveRecoveryPin() {
+         if (pinSaving) return
+-        if (!firstPin.matches(Regex("[0-9]{6}")) || firstPin != secondPin) {
+-            notice = "请两次输入相同的六位数字"
++        if (!firstPin.matches(Regex("[0-9]{${desiredPinLength}}")) || firstPin != secondPin) {
++            notice = "请两次输入相同的${desiredPinLength}位数字"
+             return
+         }
+         pinSaving = true
+@@ -126,7 +132,7 @@
+         pinConfigured = MokDisguise.configured(this)
+         if (!pinConfigured) {
+             showPinSetup = true
+-            notice = "请先设置并确认六位恢复密码"
++            notice = "请先设置并确认恢复密码"
+             return
+         }
+         if (!webEnabled || !webUrl.startsWith("http://127.0.0.1:")) {
+@@ -194,7 +200,7 @@
+         if (busy || !stealthSupported) return
+         if (value) {
+             if (disguiseMode == MokDisguise.NORMAL || !MokDisguise.configured(this)) {
+-                notice = "请先设置六位密码并选择计算器或日历"
++                notice = "请先设置恢复密码并选择计算器或日历"
+                 return
+             }
+             if (!webEnabled || !webUrl.startsWith("http://127.0.0.1:")) {
+@@ -211,7 +217,7 @@
+         if(busy||!stealthSupported)return
+         // Only enter kernel hide mode after a real, testable six-digit recovery path exists.
+         if (value && (disguiseMode == MokDisguise.NORMAL || !MokDisguise.configured(this))) {
+-            notice="请先设置六位密码并选择计算器或日历入口，确保可以恢复";return
++            notice="请先设置恢复密码并选择计算器或日历入口，确保可以恢复";return
+         }
+         busy=true
+         lifecycleScope.launch {
+@@ -267,9 +273,7 @@
+                 onDismissRequest = { pendingStealth = false },
+                 title = { Text("开启隐藏模式") },
+                 text = { Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+-                    Text(if (disguiseMode == MokDisguise.CALCULATOR)
+-                        "恢复：输入六位密码，再按计算器等号。"
+-                    else "恢复：长按日历月份标题，输入六位密码。")
++                    Text(MokDisguise.guide(this@MoksuExtrasActivity,disguiseMode))
+                     Text("恢复不成功时，使用保存的网页版链接关闭隐藏。")
+                     Text("请不要直接卸载管理器；先验证网页能独立恢复。")
+                     Text(if (disguiseCountdown>0) "请阅读操作说明（${disguiseCountdown} 秒）" else "可以继续")
+@@ -290,9 +294,7 @@
+                 title = { Text(if (modeToSwitch == MokDisguise.CALCULATOR) "切换为计算器" else "切换为日历") },
+                 text = {
+                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+-                        Text(if (modeToSwitch == MokDisguise.CALCULATOR)
+-                            "恢复方式：在计算器输入设置的六位密码，单击等号。"
+-                        else "恢复方式：长按日历月份标题，输入设置的六位密码。")
++                        Text(MokDisguise.guide(this@MoksuExtrasActivity,modeToSwitch))
+                         Text("如无法恢复，请使用已保存的本机网页地址关闭隐藏模式。")
+                         Text("请先确认网页可以正常打开，再继续。")
+                         Text(if (disguiseCountdown > 0) "请阅读以上说明（${disguiseCountdown} 秒）" else "可以继续")
+@@ -310,16 +312,26 @@
+         if (showPinSetup) {
+             AlertDialog(
+                 onDismissRequest = { if (!pinSaving) { showPinSetup=false;firstPin="";secondPin="" } },
+-                title = { Text("设置六位密码") },
++                title = { Text("设置恢复密码") },
+                 text = {
+                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
++                            FilterChip(selected=desiredPinLength==6,onClick={
++                                desiredPinLength=6
++                                firstPin="";secondPin=""
++                            },label={Text("6 位")})
++                            FilterChip(selected=desiredPinLength==8,onClick={
++                                desiredPinLength=8
++                                firstPin="";secondPin=""
++                            },label={Text("8 位")})
++                        }
+                         OutlinedTextField(
+-                            value=firstPin, onValueChange={v -> if(v.length<=6 && v.all { it in '0'..'9' }) firstPin=v},
+-                            singleLine=true, label={Text("输入六位数字")},
++                            value=firstPin, onValueChange={v -> if(v.length<=desiredPinLength && v.all { it in '0'..'9' }) firstPin=v},
++                            singleLine=true, label={Text("输入${desiredPinLength}位数字")},
+                             visualTransformation=PasswordVisualTransformation(),
+                             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
+                         OutlinedTextField(
+-                            value=secondPin, onValueChange={v -> if(v.length<=6 && v.all { it in '0'..'9' }) secondPin=v},
++                            value=secondPin, onValueChange={v -> if(v.length<=desiredPinLength && v.all { it in '0'..'9' }) secondPin=v},
+                             singleLine=true, label={Text("再次输入确认")},
+                             visualTransformation=PasswordVisualTransformation(),
+                             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
+@@ -407,7 +419,25 @@
+                     FilterChip(selected=disguiseMode==MokDisguise.CALENDAR,
+                         onClick={setDisguise(MokDisguise.CALENDAR)},label={Text("日历")})
+                 }
+-                Text("计算器输入六位数字，按等号恢复；日历长按月份标题，输入六位数字恢复。",
++                Text("恢复入口",fontSize=15.sp,fontWeight=FontWeight.Medium)
++                Text("计算器解锁方式",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                Row(horizontalArrangement=Arrangement.spacedBy(5.dp)) {
++                    listOf("equals" to "数字 + 等号","percent" to "数字 + 百分号","history" to "数字 + 历史记录").forEach { (id,label) ->
++                        FilterChip(selected=calcUnlock==id,onClick={
++                            if(MokDisguise.setCalculatorUnlock(this@MoksuExtrasActivity,id))calcUnlock=id
++                        },label={Text(label,fontSize=11.sp)})
++                    }
++                }
++                Text("日历解锁方式",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
++                    FilterChip(selected=calendarUnlock=="search",onClick={
++                        if(MokDisguise.setCalendarUnlock(this@MoksuExtrasActivity,"search"))calendarUnlock="search"
++                    },label={Text("搜索密码")})
++                    FilterChip(selected=calendarUnlock=="today-triple",onClick={
++                        if(MokDisguise.setCalendarUnlock(this@MoksuExtrasActivity,"today-triple"))calendarUnlock="today-triple"
++                    },label={Text("连点今天 3 次")})
++                }
++                Text(MokDisguise.guide(this@MoksuExtrasActivity,disguiseMode),
+                     fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 Text(if (pinConfigured) "恢复密码：已设置" else "恢复密码：尚未设置",
+                     fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorApp.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorApp.kt
+new file mode 100644
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorApp.kt
+@@ -0,0 +1,205 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.content.Context
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.style.TextAlign
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import java.math.BigDecimal
++import java.math.MathContext
++import java.math.RoundingMode
++import kotlin.math.*
++
++private val CalcBackground=Color(0xFFF7F8FA)
++private val CalcText=Color(0xFF19202B)
++private val CalcMuted=Color(0xFF6B7684)
++private val CalcButton=Color(0xFFE9EEF3)
++private val CalcAccent=Color(0xFF3378ED)
++private val CalcOperator=Color(0xFFDCE8FD)
++
++private object CalcHistory {
++    private const val FILE="local.calc.history.v1"
++    fun read(ctx:Context):List<String> = ctx.getSharedPreferences(FILE,Context.MODE_PRIVATE)
++        .getString("entries","").orEmpty().lines().filter {it.isNotBlank()}.takeLast(40)
++    fun append(ctx:Context,item:String) {
++        val v=(read(ctx)+item.replace('\n',' ').take(90)).takeLast(40)
++        ctx.getSharedPreferences(FILE,Context.MODE_PRIVATE).edit().putString("entries",v.joinToString("\n")).apply()
++    }
++    fun clear(ctx:Context) {ctx.getSharedPreferences(FILE,Context.MODE_PRIVATE).edit().remove("entries").apply()}
++}
++
++@Composable
++internal fun MokCalculatorApp(onUnlock:(String)->Unit) {
++    val ctx=LocalContext.current
++    var display by remember { mutableStateOf("0") }
++    var formula by remember { mutableStateOf("") }
++    var stored by remember { mutableStateOf<BigDecimal?>(null) }
++    var op by remember { mutableStateOf("") }
++    var fresh by remember { mutableStateOf(true) }
++    var sci by remember { mutableStateOf(false) }
++    var memory by remember { mutableStateOf<BigDecimal?>(null) }
++    var showHistory by remember { mutableStateOf(false) }
++    var historyRev by remember { mutableIntStateOf(0) }
++    val secret=MokDisguise.calculatorUnlock(ctx)
++    val pinSize=MokDisguise.pinLength(ctx)
++
++    fun maybeRestore(trigger:String):Boolean {
++        if(trigger!=secret || op.isNotEmpty() || stored!=null || display.length!=pinSize ||
++            display.any {it !in '0'..'9'}) return false
++        onUnlock(display)
++        return true
++    }
++    fun calculate():String {
++        val left=stored ?: return display
++        val right=display.toBigDecimalOrNull() ?: return display
++        return runCatching {
++            (when(op) {
++                "+" -> left.add(right)
++                "−" -> left.subtract(right)
++                "×" -> left.multiply(right)
++                "÷" -> if(right.compareTo(BigDecimal.ZERO)==0) throw ArithmeticException() else left.divide(right,MathContext.DECIMAL64)
++                else -> right
++            }).stripTrailingZeros().toPlainString().take(26)
++        }.getOrDefault("无法计算")
++    }
++    fun process(symbol:String) {
++        when(symbol) {
++            "AC" -> {display="0";formula="";stored=null;op="";fresh=true}
++            "⌫" -> {display=display.dropLast(1).ifBlank {"0"};fresh=false}
++            "±" -> {if(display!="0" && display!="无法计算") display=if(display.startsWith("-"))display.drop(1) else "-$display"}
++            "%" -> if(!maybeRestore("percent")) {
++                display=runCatching {display.toBigDecimal().movePointLeft(2).stripTrailingZeros().toPlainString()}.getOrDefault(display)
++            }
++            "÷","×","−","+" -> {
++                stored=display.toBigDecimalOrNull()
++                op=symbol;formula="$display $symbol";fresh=true
++            }
++            "=" -> {
++                if(maybeRestore("equals")) return
++                if(op.isNotBlank() && stored!=null) {
++                    val old="${stored!!.stripTrailingZeros().toPlainString()} $op $display"
++                    display=calculate()
++                    formula="$old ="
++                    if(display!="无法计算") {CalcHistory.append(ctx,"$old = $display");historyRev++}
++                }
++                stored=null;op="";fresh=true
++            }
++            "π" -> {display=Math.PI.toString().take(17);fresh=true}
++            "e" -> {display=Math.E.toString().take(17);fresh=true}
++            "√","sin","cos","tan","ln","x²","1/x" -> {
++                val n=display.toDoubleOrNull() ?: return
++                val v=when(symbol) {
++                    "√" -> sqrt(n);"sin" -> sin(Math.toRadians(n));"cos" -> cos(Math.toRadians(n))
++                    "tan" -> tan(Math.toRadians(n));"ln" -> ln(n);"x²" -> n*n;else -> 1.0/n
++                }
++                display=if(v.isFinite()) BigDecimal(v,MathContext(12,RoundingMode.HALF_UP)).stripTrailingZeros().toPlainString() else "无法计算"
++                formula="$symbol($n)";fresh=true
++            }
++            "." -> {
++                if (fresh) {display="0.";fresh=false}
++                else if(!display.contains('.')) display+="."
++            }
++            else -> if(symbol.matches(Regex("[0-9]"))) {
++                display=if(fresh || display=="0" || display=="无法计算")symbol
++                        else if(display.length<23)display+symbol else display
++                fresh=false
++            }
++        }
++    }
++    MaterialTheme(colorScheme=lightColorScheme(primary=CalcAccent,onPrimary=Color.White,
++        background=CalcBackground,onBackground=CalcText,surface=CalcBackground,onSurface=CalcText)) {
++        Surface(Modifier.fillMaxSize(),color=CalcBackground) {
++            BoxWithConstraints(Modifier.fillMaxSize()) {
++                val compact=maxHeight<670.dp
++                val keyHeight=if(compact)54.dp else 68.dp
++                val gap=if(compact)4.dp else 7.dp
++                val numberSize=if(maxWidth<350.dp)24.sp else 29.sp
++                Column(Modifier.fillMaxSize().padding(horizontal=18.dp,vertical=12.dp)) {
++                    Row(Modifier.fillMaxWidth().height(46.dp),verticalAlignment=Alignment.CenterVertically,
++                        horizontalArrangement=Arrangement.SpaceBetween) {
++                        Text("计算器",fontSize=24.sp,fontWeight=FontWeight.SemiBold,color=CalcText)
++                        Row(horizontalArrangement=Arrangement.spacedBy(4.dp),verticalAlignment=Alignment.CenterVertically) {
++                            TextButton(onClick={sci=!sci}) {Text(if(sci)"基础" else "科学",color=CalcMuted)}
++                            TextButton(onClick={
++                                if(!maybeRestore("history"))showHistory=true
++                            }) {Text("历史",color=CalcMuted)}
++                        }
++                    }
++                    Spacer(Modifier.weight(1f))
++                    Text(formula,Modifier.fillMaxWidth().padding(horizontal=6.dp,vertical=8.dp),
++                        fontSize=15.sp,color=CalcMuted,textAlign=TextAlign.End,maxLines=1)
++                    Text(display,Modifier.fillMaxWidth().padding(horizontal=6.dp,vertical=10.dp),
++                        fontSize=if(maxWidth<350.dp)40.sp else 49.sp,
++                        fontWeight=FontWeight.Light,color=CalcText,textAlign=TextAlign.End,maxLines=1)
++                    if(sci) {
++                        Row(Modifier.fillMaxWidth().padding(bottom=7.dp),horizontalArrangement=Arrangement.spacedBy(5.dp)) {
++                            listOf("√","sin","cos","tan","ln","x²","1/x","π","e").take(5).forEach { label ->
++                                TextButton(onClick={process(label)},modifier=Modifier.weight(1f),
++                                    contentPadding=PaddingValues(0.dp)) {
++                                    Text(label,fontSize=if(compact)12.sp else 14.sp,color=CalcAccent,maxLines=1)
++                                }
++                            }
++                        }
++                        Row(Modifier.fillMaxWidth().padding(bottom=7.dp),horizontalArrangement=Arrangement.spacedBy(5.dp)) {
++                            listOf("x²","1/x","π","e","MR").forEach { label ->
++                                TextButton(onClick={if(label=="MR")display=memory?.stripTrailingZeros()?.toPlainString()?:display else process(label)},
++                                    modifier=Modifier.weight(1f),contentPadding=PaddingValues(0.dp)) {
++                                    Text(label,fontSize=if(compact)12.sp else 14.sp,color=CalcAccent,maxLines=1)
++                                }
++                            }
++                        }
++                    }
++                    val rows=listOf(listOf("AC","±","%","÷"),listOf("7","8","9","×"),
++                        listOf("4","5","6","−"),listOf("1","2","3","+"),listOf("⌫","0",".","="))
++                    rows.forEach { row ->
++                        Row(Modifier.fillMaxWidth().padding(vertical=gap),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
++                            row.forEach { symbol ->
++                                val bg=when(symbol) {"="->CalcAccent;"÷","×","−","+"->CalcOperator;else->CalcButton}
++                                Button(onClick={process(symbol)},modifier=Modifier.weight(1f).height(keyHeight),
++                                    contentPadding=PaddingValues(0.dp),shape=RoundedCornerShape(20.dp),
++                                    colors=ButtonDefaults.buttonColors(containerColor=bg,
++                                        contentColor=if(symbol=="=")Color.White else CalcText),
++                                    elevation=null) {
++                                    Text(symbol,fontSize=numberSize,fontWeight=FontWeight.Normal,maxLines=1)
++                                }
++                            }
++                        }
++                    }
++                    if(!compact) {
++                        Row(Modifier.fillMaxWidth().padding(top=6.dp),horizontalArrangement=Arrangement.End) {
++                            TextButton(onClick={memory=display.toBigDecimalOrNull()}){Text("M+",color=CalcMuted)}
++                            TextButton(onClick={memory=null}){Text("MC",color=CalcMuted)}
++                        }
++                    }
++                }
++            }
++        }
++        if(showHistory) {
++            val items=remember(showHistory,historyRev) {CalcHistory.read(ctx)}
++            AlertDialog(onDismissRequest={showHistory=false},title={Text("计算历史")},
++                text={Column(Modifier.fillMaxWidth().heightIn(max=380.dp).verticalScroll(rememberScrollState())) {
++                    if(items.isEmpty())Text("暂无计算记录",color=CalcMuted)
++                    items.reversed().forEach { value ->
++                        Text(value,modifier=Modifier.fillMaxWidth().clickable {
++                            display=value.substringAfterLast(" = ");showHistory=false
++                        }.padding(vertical=12.dp),fontSize=15.sp)
++                    }
++                }},confirmButton={TextButton(onClick={showHistory=false}){Text("关闭")}},
++                dismissButton={TextButton(onClick={CalcHistory.clear(ctx);historyRev++;showHistory=false}){Text("清空")}})
++        }
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalendarApp.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalendarApp.kt
+new file mode 100644
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalendarApp.kt
+@@ -0,0 +1,352 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.Manifest
++import android.content.Intent
++import android.content.pm.PackageManager
++import android.os.Build
++import android.os.SystemClock
++import android.provider.CalendarContract
++import android.widget.Toast
++import androidx.activity.compose.rememberLauncherForActivityResult
++import androidx.activity.result.contract.ActivityResultContracts
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.lazy.grid.GridCells
++import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
++import androidx.compose.foundation.lazy.grid.items
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.input.KeyboardType
++import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.ui.text.style.TextAlign
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import androidx.core.content.ContextCompat
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import java.time.LocalDate
++import java.time.YearMonth
++import java.time.temporal.TemporalAdjusters
++import java.time.DayOfWeek
++import java.util.UUID
++
++private val CalBackground=Color(0xFFF9FAFC)
++private val CalSurface=Color.White
++private val CalInk=Color(0xFF18242D)
++private val CalSecondary=Color(0xFF737F89)
++private val CalBrand=Color(0xFF146D5C)
++private val CalSoft=Color(0xFFE2F2EB)
++private val CalDays=listOf("一","二","三","四","五","六","日")
++private val CalRepeat=listOf("none" to "不重复","daily" to "每天","weekly" to "每周","monthly" to "每月")
++private val CalReminder=listOf(-1 to "不提醒",0 to "准时",5 to "提前 5 分钟",15 to "提前 15 分钟",60 to "提前 1 小时")
++
++@Composable
++internal fun MokCalendarApp(onUnlock:(String)->Unit) {
++    val ctx=LocalContext.current
++    val today=remember {LocalDate.now()}
++    var month by remember {mutableStateOf(YearMonth.now())}
++    var selected by remember {mutableStateOf(today)}
++    var tab by remember {mutableStateOf("month")}
++    var query by remember {mutableStateOf("")}
++    var searchOpen by remember {mutableStateOf(false)}
++    var passwordDialog by remember {mutableStateOf(false)}
++    var code by remember {mutableStateOf("")}
++    var tapCount by remember {mutableIntStateOf(0)}
++    var lastTap by remember {mutableLongStateOf(0L)}
++    var editing by remember {mutableStateOf<AgendaEvent?>(null)}
++    var showEditor by remember {mutableStateOf(false)}
++    var update by remember {mutableIntStateOf(0)}
++    var imported by remember {mutableStateOf(false)}
++    var remote by remember {mutableStateOf<List<AgendaEvent>>(emptyList())}
++    val base=remember(update) {MokAgenda.read(ctx)}
++    val items=base+remote
++    val restore=MokDisguise.calendarUnlock(ctx)
++    val pinLength=MokDisguise.pinLength(ctx)
++    val notePermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
++        if(!ok)Toast.makeText(ctx,"未开启通知，可在系统设置中允许后使用提醒",Toast.LENGTH_LONG).show()
++    }
++    val readPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
++        imported=ok
++        if(!ok)Toast.makeText(ctx,"没有读取权限，将只显示本地日程",Toast.LENGTH_SHORT).show()
++    }
++    LaunchedEffect(imported,month,update) {
++        remote=if(imported)withContext(Dispatchers.IO){systemCalendarEvents(ctx,month)}else emptyList()
++    }
++    val filtered=items.filter {
++        (query.isBlank() || it.title.contains(query,true) || it.note.contains(query,true) || it.place.contains(query,true)) &&
++            (tab!="agenda" || !runCatching {LocalDate.parse(it.date)}.getOrDefault(today).isBefore(today))
++    }
++    fun triggerToday() {
++        val now=SystemClock.elapsedRealtime()
++        tapCount=if(now-lastTap<1000L)tapCount+1 else 1
++        lastTap=now
++        month=YearMonth.now();selected=today
++        if(restore=="today-triple"&&tapCount>=3){passwordDialog=true;tapCount=0}
++    }
++    fun submitSearch() {
++        if(restore=="search" && query.length==pinLength && query.all {it in '0'..'9'}) {
++            val value=query;query="";searchOpen=false;onUnlock(value)
++        }
++    }
++    MaterialTheme(colorScheme=lightColorScheme(primary=CalBrand,onPrimary=Color.White,
++        background=CalBackground,onBackground=CalInk,surface=CalSurface,onSurface=CalInk)) {
++        Surface(Modifier.fillMaxSize(),color=CalBackground) {
++            BoxWithConstraints(Modifier.fillMaxSize()) {
++                val narrow=maxWidth<360.dp
++                val cellHeight=if(narrow)39.dp else 45.dp
++                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
++                    .padding(horizontal=16.dp,vertical=14.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
++                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
++                        horizontalArrangement=Arrangement.SpaceBetween) {
++                        Column {
++                            Text("日历",fontSize=28.sp,fontWeight=FontWeight.SemiBold,color=CalInk)
++                            Text("${today.year} 年 ${today.monthValue} 月",fontSize=12.sp,color=CalSecondary)
++                        }
++                        Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
++                            TextButton(onClick={searchOpen=!searchOpen}){Text("搜索",color=CalBrand)}
++                            FilledTonalButton(onClick={editing=null;showEditor=true},
++                                contentPadding=PaddingValues(horizontal=14.dp),colors=ButtonDefaults.filledTonalButtonColors(containerColor=CalSoft)) {
++                                Text("＋",fontSize=23.sp,color=CalBrand)
++                            }
++                        }
++                    }
++                    if(searchOpen) {
++                        OutlinedTextField(value=query,onValueChange={if(it.length<90)query=it},
++                            label={Text("搜索日程")},singleLine=true,modifier=Modifier.fillMaxWidth(),
++                            trailingIcon={TextButton(onClick={submitSearch}){Text("搜索")}})
++                    }
++                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
++                        listOf("month" to "月","week" to "周","agenda" to "日程").forEach { (value,name) ->
++                            FilterChip(selected=tab==value,onClick={tab=value},label={Text(name)},
++                                colors=FilterChipDefaults.filterChipColors(selectedContainerColor=CalSoft,
++                                    selectedLabelColor=CalBrand))
++                        }
++                        Spacer(Modifier.weight(1f))
++                        TextButton(onClick={triggerToday}){Text("今天",color=CalBrand)}
++                    }
++                    if(tab!="agenda") {
++                        Card(shape=RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=CalSurface)) {
++                            Column(Modifier.fillMaxWidth().padding(horizontal=9.dp,vertical=14.dp),
++                                verticalArrangement=Arrangement.spacedBy(4.dp)) {
++                                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
++                                    horizontalArrangement=Arrangement.SpaceBetween) {
++                                    TextButton(onClick={
++                                        if(tab=="week")selected=selected.minusWeeks(1)
++                                        else {month=month.minusMonths(1);selected=month.atDay(1)}
++                                        month=YearMonth.from(selected)
++                                    }){Text("‹",fontSize=26.sp,color=CalSecondary)}
++                                    Text("${month.year} 年 ${month.monthValue} 月",fontSize=18.sp,
++                                        fontWeight=FontWeight.SemiBold,color=CalInk)
++                                    TextButton(onClick={
++                                        if(tab=="week")selected=selected.plusWeeks(1)
++                                        else {month=month.plusMonths(1);selected=month.atDay(1)}
++                                        month=YearMonth.from(selected)
++                                    }){Text("›",fontSize=26.sp,color=CalSecondary)}
++                                }
++                                Row(Modifier.fillMaxWidth()) {
++                                    CalDays.forEach { name -> Box(Modifier.weight(1f),contentAlignment=Alignment.Center) {
++                                        Text(name,fontSize=12.sp,color=CalSecondary)
++                                    } }
++                                }
++                                val dates=if(tab=="week") {
++                                    val monday=selected.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
++                                    (0L..6L).map{monday.plusDays(it)}
++                                } else {
++                                    val offset=month.atDay(1).dayOfWeek.value-1
++                                    List(offset){null} + (1..month.lengthOfMonth()).map{month.atDay(it)}
++                                }
++                                val grids=(dates.size+6)/7
++                                LazyVerticalGrid(columns=GridCells.Fixed(7),
++                                    modifier=Modifier.fillMaxWidth().height((grids*cellHeight.value).dp),userScrollEnabled=false) {
++                                    items(dates){date ->
++                                        Box(Modifier.height(cellHeight).fillMaxWidth(),contentAlignment=Alignment.Center) {
++                                            if(date!=null) {
++                                                val hasEvents=items.any{MokAgenda.onDay(it,date)}
++                                                val isSelected=selected==date
++                                                Column(Modifier.clickable {selected=date;month=YearMonth.from(date)}
++                                                    .padding(vertical=2.dp).fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally) {
++                                                    Box(Modifier.size(if(narrow)30.dp else 34.dp)
++                                                        .background(if(isSelected)CalBrand else if(date==today)CalSoft else Color.Transparent,CircleShape),
++                                                        contentAlignment=Alignment.Center) {
++                                                        Text(date.dayOfMonth.toString(),fontSize=14.sp,
++                                                            color=if(isSelected)Color.White else if(date==today)CalBrand else CalInk)
++                                                    }
++                                                    Box(Modifier.padding(top=2.dp).size(4.dp)
++                                                        .background(if(hasEvents)CalBrand else Color.Transparent,CircleShape))
++                                                }
++                                            }
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                    }
++                    if(tab=="agenda") {
++                        val upcoming=(0..45).map{today.plusDays(it.toLong())}
++                            .flatMap {date->filtered.filter{MokAgenda.onDay(it,date)}.map{date to it}}
++                        Text("接下来的日程",fontSize=18.sp,fontWeight=FontWeight.Medium,color=CalInk)
++                        if(upcoming.isEmpty()) EmptyAgenda()
++                        upcoming.take(120).forEach{(date,e)-> AgendaTile(e,date,e.id.startsWith("external-")) {
++                            editing=e;selected=date;showEditor=true
++                        }}
++                    } else {
++                        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
++                            horizontalArrangement=Arrangement.SpaceBetween) {
++                            Column {
++                                Text("${selected.monthValue} 月 ${selected.dayOfMonth} 日",fontSize=21.sp,fontWeight=FontWeight.Medium,color=CalInk)
++                                Text(selected.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL,java.util.Locale.CHINA),
++                                    fontSize=12.sp,color=CalSecondary)
++                            }
++                            TextButton(onClick={editing=null;showEditor=true}){Text("新建日程",color=CalBrand)}
++                        }
++                        val dayEvents=filtered.filter{MokAgenda.onDay(it,selected)}.sortedBy{it.time}
++                        if(dayEvents.isEmpty()) EmptyAgenda()
++                        dayEvents.forEach{e->AgendaTile(e,selected,e.id.startsWith("external-")){
++                            editing=e;showEditor=true
++                        }}
++                    }
++                    HorizontalDivider(color=Color(0xFFE6EBEF))
++                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,
++                        verticalAlignment=Alignment.CenterVertically) {
++                        Text("系统日历",fontSize=14.sp,color=CalSecondary)
++                        TextButton(onClick={
++                            if(imported){imported=false;remote=emptyList()}
++                            else if(ContextCompat.checkSelfPermission(ctx,Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED)imported=true
++                            else readPermission.launch(Manifest.permission.READ_CALENDAR)
++                        }){Text(if(imported)"停止读取" else "读取日程",color=CalBrand)}
++                    }
++                    Spacer(Modifier.height(10.dp))
++                }
++            }
++        }
++        if(showEditor) {
++            AgendaEditor(selected,editing,
++                onDismiss={showEditor=false},
++                onSaved={e ->
++                    if(MokAgenda.put(ctx,e)) {
++                        update++
++                        showEditor=false
++                        if(e.minutes>=0 && Build.VERSION.SDK_INT>=33 &&
++                            ContextCompat.checkSelfPermission(ctx,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) {
++                            notePermission.launch(Manifest.permission.POST_NOTIFICATIONS)
++                        }
++                    } else Toast.makeText(ctx,"保存失败，请检查日程内容",Toast.LENGTH_LONG).show()
++                },onDelete={id->if(MokAgenda.remove(ctx,id)){update++;showEditor=false}},
++                onSystemCalendar={date,title->
++                    val intent=Intent(Intent.ACTION_INSERT,CalendarContract.Events.CONTENT_URI)
++                        .putExtra(CalendarContract.Events.TITLE,title)
++                        .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,date.atTime(9,0)
++                            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())
++                    runCatching{ctx.startActivity(intent)}
++                })
++        }
++        if(passwordDialog) AlertDialog(onDismissRequest={passwordDialog=false;code=""},
++            title={Text("输入数字")},text={
++                OutlinedTextField(code,{if(it.length<=pinLength && it.all(Char::isDigit))code=it},
++                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),singleLine=true)
++            },confirmButton={TextButton(onClick={val pin=code;code="";passwordDialog=false;onUnlock(pin)},
++                enabled=code.length==pinLength){Text("确定")}},
++            dismissButton={TextButton(onClick={passwordDialog=false;code=""}){Text("取消")}})
++    }
++}
++
++@Composable private fun EmptyAgenda() {
++    Card(shape=RoundedCornerShape(18.dp),colors=CardDefaults.cardColors(containerColor=CalSurface)) {
++        Column(Modifier.fillMaxWidth().padding(vertical=24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
++            Text("暂无日程",color=CalSecondary,fontSize=14.sp)
++            Text("添加新日程来安排这一天",color=CalSecondary,fontSize=12.sp)
++        }
++    }
++}
++
++@Composable private fun AgendaTile(e:AgendaEvent,date:LocalDate,external:Boolean,onClick:()->Unit) {
++    Card(onClick=onClick,shape=RoundedCornerShape(16.dp),
++        colors=CardDefaults.cardColors(containerColor=CalSurface),modifier=Modifier.fillMaxWidth()) {
++        Row(Modifier.fillMaxWidth().padding(14.dp),verticalAlignment=Alignment.CenterVertically) {
++            Box(Modifier.width(3.dp).height(38.dp).background(CalBrand,RoundedCornerShape(3.dp)))
++            Spacer(Modifier.width(12.dp))
++            Column(Modifier.weight(1f)) {
++                Text(e.title,fontSize=15.sp,color=CalInk,fontWeight=FontWeight.Medium,maxLines=2)
++                Text(listOf("${date.monthValue}/${date.dayOfMonth}",e.time.ifBlank{"全天"},e.place).filter{it.isNotBlank()}.joinToString(" · "),
++                    fontSize=12.sp,color=CalSecondary,maxLines=1)
++            }
++            if(e.minutes>=0)Text("◉",color=CalBrand,fontSize=12.sp)
++            if(external)Text("系统",color=CalSecondary,fontSize=10.sp,modifier=Modifier.padding(start=6.dp))
++        }
++    }
++}
++
++@Composable private fun AgendaEditor(date:LocalDate,event:AgendaEvent?,onDismiss:()->Unit,
++    onSaved:(AgendaEvent)->Unit,onDelete:(String)->Unit,onSystemCalendar:(LocalDate,String)->Unit) {
++    var title by remember(event?.id){mutableStateOf(event?.title.orEmpty())}
++    var place by remember(event?.id){mutableStateOf(event?.place.orEmpty())}
++    var note by remember(event?.id){mutableStateOf(event?.note.orEmpty())}
++    var time by remember(event?.id){mutableStateOf(event?.time ?: "09:00")}
++    var allDay by remember(event?.id){mutableStateOf(event?.allDay ?: false)}
++    var repeat by remember(event?.id){mutableStateOf(event?.repeat ?: "none")}
++    var minutes by remember(event?.id){mutableIntStateOf(event?.minutes ?: -1)}
++    var editDate by remember(event?.id){mutableStateOf(if(event!=null)runCatching{LocalDate.parse(event.date)}.getOrDefault(date) else date)}
++    var showDelete by remember{mutableStateOf(false)}
++    val external=event?.id?.startsWith("external-")==true
++    AlertDialog(onDismissRequest=onDismiss,shape=RoundedCornerShape(24.dp),
++        title={Text(if(event==null)"新建日程" else if(external)"系统日程" else "编辑日程",fontSize=20.sp)},
++        text={Column(Modifier.fillMaxWidth().heightIn(max=480.dp).verticalScroll(rememberScrollState()),
++            verticalArrangement=Arrangement.spacedBy(11.dp)) {
++            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
++                TextButton(onClick={editDate=editDate.minusDays(1)}){Text("‹",fontSize=24.sp)}
++                Text("${editDate.year} / ${editDate.monthValue} / ${editDate.dayOfMonth}",fontSize=15.sp)
++                TextButton(onClick={editDate=editDate.plusDays(1)}){Text("›",fontSize=24.sp)}
++            }
++            OutlinedTextField(title,{if(it.length<=90)title=it},label={Text("标题")},
++                modifier=Modifier.fillMaxWidth(),singleLine=true,readOnly=external)
++            Row(verticalAlignment=Alignment.CenterVertically) {
++                Text("全天",modifier=Modifier.weight(1f),fontSize=13.sp)
++                Switch(checked=allDay,onCheckedChange={allDay=it},enabled=!external)
++            }
++            if(!allDay) OutlinedTextField(time,{if(it.length<=5)time=it},label={Text("时间 09:30")},
++                modifier=Modifier.fillMaxWidth(),singleLine=true,readOnly=external)
++            OutlinedTextField(place,{if(it.length<=90)place=it},label={Text("地点")},
++                modifier=Modifier.fillMaxWidth(),singleLine=true,readOnly=external)
++            OutlinedTextField(note,{if(it.length<=360)note=it},label={Text("备注")},
++                modifier=Modifier.fillMaxWidth(),minLines=2,maxLines=4,readOnly=external)
++            Text("重复",color=CalSecondary,fontSize=12.sp)
++            CalRepeat.chunked(2).forEach { group ->
++                Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
++                    group.forEach { (id,label) -> FilterChip(selected=repeat==id,onClick={repeat=id},
++                        label={Text(label,fontSize=11.sp)},enabled=!external) }
++                }
++            }
++            Text("提醒",color=CalSecondary,fontSize=12.sp)
++            Column(verticalArrangement=Arrangement.spacedBy(3.dp)) {
++                CalReminder.chunked(2).forEach { group -> Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
++                    group.forEach { (value,label) -> FilterChip(selected=minutes==value,onClick={minutes=value},
++                        label={Text(label,fontSize=10.sp)},enabled=!external) }
++                } }
++            }
++            if(event!=null && !external)TextButton(onClick={showDelete=true}){Text("删除日程",color=Color(0xFFB13D3D))}
++            if(external)Text("系统日程为只读，修改请在系统日历应用中进行。",fontSize=12.sp,color=CalSecondary)
++        }},confirmButton={TextButton(onClick={
++            val valid=allDay || runCatching{java.time.LocalTime.parse(time)}.isSuccess
++            if(valid && title.isNotBlank() && !external)onSaved(AgendaEvent(event?.id?:UUID.randomUUID().toString(),
++                editDate.toString(),title.trim(),if(allDay)"" else time.trim(),note.trim(),repeat,minutes,allDay,place.trim()))
++        },enabled=title.isNotBlank() && !external){Text("保存")}},
++        dismissButton={Row {
++            TextButton(onClick={onSystemCalendar(editDate,title)}){Text("系统日历")}
++            TextButton(onClick=onDismiss){Text("取消")}
++        }})
++    if(showDelete && event!=null) AlertDialog(onDismissRequest={showDelete=false},
++        title={Text("删除此日程？")},text={Text(event.title)},
++        confirmButton={TextButton(onClick={onDelete(event.id);showDelete=false}){Text("删除")}},
++        dismissButton={TextButton(onClick={showDelete=false}){Text("保留")}})
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalendarData.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalendarData.kt
+new file mode 100644
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalendarData.kt
+@@ -0,0 +1,175 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.Manifest
++import android.app.AlarmManager
++import android.app.NotificationChannel
++import android.app.NotificationManager
++import android.app.PendingIntent
++import android.content.BroadcastReceiver
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageManager
++import android.os.Build
++import android.provider.CalendarContract
++import androidx.core.app.NotificationCompat
++import androidx.core.content.ContextCompat
++import me.weishu.kernelsu.R
++import org.json.JSONArray
++import org.json.JSONObject
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.YearMonth
++import java.time.ZoneId
++import java.util.UUID
++
++internal data class AgendaEvent(
++    val id:String,
++    val date:String,
++    val title:String,
++    val time:String="",
++    val note:String="",
++    val repeat:String="none",
++    val minutes:Int=-1,
++    val allDay:Boolean=false,
++    val place:String=""
++)
++
++internal object MokAgenda {
++    private const val PREF="moksu.local.calendar.v1"
++    private const val KEY="entries"
++    fun read(ctx:Context):List<AgendaEvent> = runCatching {
++        val input=JSONArray(ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE).getString(KEY,"[]") ?: "[]")
++        (0 until minOf(1000,input.length())).mapNotNull { i ->
++            val o=input.optJSONObject(i) ?: return@mapNotNull null
++            val date=o.optString("date")
++            val title=o.optString("title")
++            if(runCatching{LocalDate.parse(date)}.isFailure || title.isBlank()) null
++            else AgendaEvent(o.optString("id").ifBlank{UUID.randomUUID().toString()},date,
++                title.take(90),o.optString("time").take(5),o.optString("note").take(360),
++                o.optString("repeat","none").takeIf {it in setOf("none","daily","weekly","monthly")}?:"none",
++                o.optInt("minutes",-1),o.optBoolean("allDay",false),o.optString("place").take(90))
++        }
++    }.getOrDefault(emptyList())
++    private fun save(ctx:Context,entries:List<AgendaEvent>):Boolean {
++        val out=JSONArray()
++        entries.take(1000).forEach { e->out.put(JSONObject()
++            .put("id",e.id).put("date",e.date).put("title",e.title).put("time",e.time)
++            .put("note",e.note).put("repeat",e.repeat).put("minutes",e.minutes)
++            .put("allDay",e.allDay).put("place",e.place)) }
++        return ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putString(KEY,out.toString()).commit()
++    }
++    fun put(ctx:Context,event:AgendaEvent):Boolean {
++        val list=read(ctx).toMutableList()
++        if(event.title.isBlank() || event.title.length>90 || event.note.length>360)return false
++        val existing=list.indexOfFirst{it.id==event.id}
++        if(existing>=0)list[existing]=event
++        else {if(list.size>=1000)return false;list.add(event)}
++        if(!save(ctx,list))return false
++        MokAgendaReminders.cancel(ctx,event.id)
++        MokAgendaReminders.schedule(ctx,event)
++        return true
++    }
++    fun remove(ctx:Context,id:String):Boolean {
++        val original=read(ctx)
++        val updated=original.filterNot{it.id==id}
++        if(original.size==updated.size)return false
++        if(!save(ctx,updated))return false
++        MokAgendaReminders.cancel(ctx,id)
++        return true
++    }
++    fun onDay(event:AgendaEvent, day:LocalDate):Boolean = runCatching {
++        val start=LocalDate.parse(event.date)
++        if(day.isBefore(start))return@runCatching false
++        when(event.repeat) {
++            "daily" -> true
++            "weekly" -> day.dayOfWeek==start.dayOfWeek
++            "monthly" -> day.dayOfMonth==start.dayOfMonth
++            else -> day==start
++        }
++    }.getOrDefault(false)
++    fun days(ctx:Context,day:LocalDate):List<AgendaEvent> = read(ctx).filter{onDay(it,day)}.sortedBy{it.time}
++}
++
++/** Local reminders only; non-exact alarms avoid privileged exact-alarm permission. */
++internal object MokAgendaReminders {
++    private const val CHANNEL="calendar_reminders_v1"
++    private const val ACTION="me.weishu.kernelsu.mok.LOCAL_REMINDER"
++    private fun intent(ctx:Context,id:String):PendingIntent = PendingIntent.getBroadcast(ctx,id.hashCode(),
++        Intent(ctx,MokAgendaReminderReceiver::class.java).setAction(ACTION).putExtra("event_id",id),
++        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
++    fun cancel(ctx:Context,id:String) { (ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager)
++        ?.cancel(intent(ctx,id)) }
++    private fun nextMillis(e:AgendaEvent,after:Long):Long? {
++        if(e.minutes<0)return null
++        val date=runCatching{LocalDate.parse(e.date)}.getOrNull()?:return null
++        val time=runCatching{LocalTime.parse(e.time)}.getOrDefault(LocalTime.of(9,0))
++        val now=LocalDate.now().minusDays(1)
++        for(dayOffset in 0..366) {
++            val day=now.plusDays(dayOffset.toLong())
++            if(day.isBefore(date)||!MokAgenda.onDay(e,day))continue
++            val timestamp=day.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()-e.minutes*60_000L
++            if(timestamp>after+5_000L)return timestamp
++        }
++        return null
++    }
++    fun schedule(ctx:Context,e:AgendaEvent) {
++        val trigger=nextMillis(e,System.currentTimeMillis())?:return
++        runCatching {
++            (ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
++                .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,trigger,intent(ctx,e.id))
++        }
++    }
++    fun restore(ctx:Context) {MokAgenda.read(ctx).forEach{schedule(ctx,it)}}
++    fun notify(ctx:Context,e:AgendaEvent) {
++        if(Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(ctx,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return
++        val mgr=ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
++        mgr.createNotificationChannel(NotificationChannel(CHANNEL,"日历提醒",NotificationManager.IMPORTANCE_DEFAULT))
++        val open=PendingIntent.getActivity(ctx,e.id.hashCode(),Intent(ctx,MokDisguiseActivity::class.java),
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
++        val notification=NotificationCompat.Builder(ctx,CHANNEL)
++            .setSmallIcon(R.drawable.mok_calendar_icon)
++            .setContentTitle(e.title).setContentText(e.place.ifBlank{e.note.ifBlank{e.time}})
++            .setStyle(NotificationCompat.BigTextStyle().bigText(e.note.ifBlank {e.place}))
++            .setContentIntent(open).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_DEFAULT).build()
++        mgr.notify(e.id.hashCode(),notification)
++    }
++    fun isReminderAction(action:String?)=action==ACTION
++}
++
++class MokAgendaReminderReceiver:BroadcastReceiver() {
++    override fun onReceive(ctx:Context,intent:Intent) {
++        if(intent.action==Intent.ACTION_BOOT_COMPLETED || intent.action==Intent.ACTION_TIME_CHANGED ||
++            intent.action==Intent.ACTION_TIMEZONE_CHANGED) {
++            MokAgendaReminders.restore(ctx);return
++        }
++        if(!MokAgendaReminders.isReminderAction(intent.action))return
++        val id=intent.getStringExtra("event_id")?:return
++        val event=MokAgenda.read(ctx).find{it.id==id}?:return
++        MokAgendaReminders.notify(ctx,event)
++        MokAgendaReminders.schedule(ctx,event)
++    }
++}
++
++/** Read-only import, only after the user grants READ_CALENDAR; no automatic account sync. */
++internal fun systemCalendarEvents(ctx:Context,month:YearMonth):List<AgendaEvent> {
++    if(ContextCompat.checkSelfPermission(ctx,Manifest.permission.READ_CALENDAR)!=PackageManager.PERMISSION_GRANTED)return emptyList()
++    return runCatching {
++        val begin=month.atDay(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
++        val end=month.plusMonths(1).atDay(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
++        val uri=CalendarContract.Instances.CONTENT_URI.buildUpon()
++        android.content.ContentUris.appendId(uri,begin);android.content.ContentUris.appendId(uri,end)
++        val out=mutableListOf<AgendaEvent>()
++        ctx.contentResolver.query(uri.build(),arrayOf(CalendarContract.Instances.TITLE,
++            CalendarContract.Instances.BEGIN,CalendarContract.Instances.EVENT_LOCATION),null,null,null)?.use { cur->
++            while(cur.moveToNext()&&out.size<300) {
++                val timestamp=cur.getLong(1)
++                val zoned=java.time.Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault())
++                out.add(AgendaEvent("external-${timestamp}-${out.size}",zoned.toLocalDate().toString(),
++                    cur.getString(0)?:"日程",zoned.toLocalTime().toString().take(5),
++                    place=cur.getString(2).orEmpty()))
++            }
++        }
++        out
++    }.getOrDefault(emptyList())
++}
+diff --git a/manager/app/src/main/AndroidManifest.xml b/manager/app/src/main/AndroidManifest.xml
+--- a/manager/app/src/main/AndroidManifest.xml
++++ b/manager/app/src/main/AndroidManifest.xml
+@@ -5,10 +5,18 @@
+     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
++    <uses-permission android:name="android.permission.READ_CALENDAR" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+     <application android:name=".KernelSUApplication" android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:directBootAware="true" android:fullBackupContent="@xml/backup_rules" android:hasFragileUserData="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.KernelSU" android:zygotePreloadName="me.weishu.kernelsu.magica.AppZygotePreload">
++        <receiver android:name=".mok.MokAgendaReminderReceiver" android:exported="false">
++            <intent-filter>
++                <action android:name="android.intent.action.BOOT_COMPLETED" />
++                <action android:name="android.intent.action.TIME_SET" />
++                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
++            </intent-filter>
++        </receiver>
+         <receiver android:name=".mok.MokPackageEventReceiver" android:exported="false">
+             <intent-filter>
+                 <action android:name="android.intent.action.PACKAGE_ADDED" />
