@@ -115,6 +115,8 @@ def apply(root):
  change('kernel/Kbuild','KSU_EXPECTED_SIZE := 0x034d','KSU_EXPECTED_SIZE := '+public['certificate_size_hex'])
  change('kernel/Kbuild','KSU_EXPECTED_HASH := 490c6662b87ec51c8f43de6078bb42b8ab96854cc19f0f6b183995a7dde2320b','KSU_EXPECTED_HASH := '+public['certificate_sha256'])
  change('userspace/ksud/build.rs','cargo:rustc-env=KSU_PACKAGE_NAME=com.sevenk.core','cargo:rustc-env=KSU_PACKAGE_NAME=com.moksu.manager')
+ change('userspace/ksud/Cargo.toml','https://github.com/Kernel-SU/java-properties.git','https://github.com/KernelSU2/java-properties.git')
+ change('Cargo.lock','https://github.com/Kernel-SU/java-properties.git','https://github.com/KernelSU2/java-properties.git')
  for p in (here/'overlay').rglob('*'):
   if p.is_file():
    if p.is_symlink() or p.suffix not in ('.java','.kt','.xml'):raise ValueError('Unexpected overlay')

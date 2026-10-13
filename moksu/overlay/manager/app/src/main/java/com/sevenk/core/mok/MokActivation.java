@@ -22,7 +22,8 @@ public final class MokActivation {
     private static Context unlockedContext(Context context) {
         UserManager users = context.getSystemService(UserManager.class);
         if (users == null || !users.isUserUnlocked()) return null;
-        return context.createCredentialProtectedStorageContext();
+        Context app = context.getApplicationContext();
+        return app != null ? app : context;
     }
 
     private static SecretKey installationKey(boolean create) throws Exception {
