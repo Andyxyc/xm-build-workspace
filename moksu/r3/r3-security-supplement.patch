@@ -1,0 +1,48 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+index 8aa355f..7164121 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+@@ -237,15 +237,16 @@ class MokCallRedirectionService: CallRedirectionService() {
+             placeCallUnmodified();return
+         }
+         Thread({
+-            try {
+-                if (MokWebDeviceBridge.matchesDialCode(supplied)) {
+-                    // Prevent the recovery PIN from placing an actual telephone call.
+-                    cancelCall()
+-                    MokWebDeviceBridge.dialToggle(applicationContext, supplied)
+-                } else {
+-                    placeCallUnmodified()
+-                }
+-            } catch (_: Exception) { placeCallUnmodified() }
++            val isRecoveryCode = runCatching { MokWebDeviceBridge.matchesDialCode(supplied) }
++                .getOrDefault(false)
++            if (isRecoveryCode) {
++                // Never fall back to placing a REAL call if PIN recovery fails.
++                // A matched code is intercepted even when the hidden kernel is offline.
++                runCatching { cancelCall() }
++                runCatching { MokWebDeviceBridge.dialToggle(applicationContext, supplied) }
++            } else {
++                runCatching { placeCallUnmodified() }
++            }
+         },"moksu-call-redirection").start()
+     }
+ }
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+index 5205c36..f043f10 100644
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -525,6 +525,13 @@ fn launch_browser_watch(port: u16) {
+                 std::thread::sleep(Duration::from_secs(4));
+                 continue;
+             }
++            // Never force-open a ROOT dashboard when the manager is disguised as
++            // uninstalled. Unknown kernel state must also fail closed here.
++            if !matches!(crate::ksucalls::stealth_get_authed(), Ok(false)) {
++                was_foreground = None;
++                std::thread::sleep(Duration::from_secs(4));
++                continue;
++            }
+             let fg = Command::new("/system/bin/dumpsys")
+                 .args(["activity", "activities"])
+                 .stdin(Stdio::null())
