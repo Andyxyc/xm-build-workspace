@@ -1,7 +1,7 @@
 diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
 --- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
 +++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
-@@ -83,7 +83,7 @@
+@@ -83,5 +83,5 @@
      private var pinConfigured by mutableStateOf(false)
      private var pendingDisguise by mutableStateOf<String?>(null)
      private var pendingStealth by mutableStateOf(false)
