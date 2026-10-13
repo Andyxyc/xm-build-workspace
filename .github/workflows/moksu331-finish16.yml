@@ -1,0 +1,142 @@
+name: Finish moksu 3.3.1 after KMI16 fix
+on:
+  push:
+    branches: [moksu-ksu331-release-6ee3e003]
+    paths: ['.github/workflows/moksu331-finish16.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: finish16-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  fix16:
+    name: Build corrected Android16 6.12 KMI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/ylarod/ddk-min:android16-6.12-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply new 774-byte release manager cert
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          grep -q 'df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
+      - name: Corrected Linux 6.12 module
+        shell: bash
+        env:
+          KMI: android16-6.12
+        run: bash config/moksu/ksu331/build_lkm16.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu331-fixed-lkm-android16-6.12
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+  userspace:
+    name: Build 3.3.1 native core and embed all 8 KMI
+    needs: fix16
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply current release identity
+        run: python3 config/moksu/ksu331/apply_release.py source source config
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu331-lkm-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38399859940
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu331-fixed-lkm-android16-6.12
+          path: lkms
+      - name: Check all KMI files before binary build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find lkms/aarch64 -name '*_kernelsu.ko' -type f | wc -l)" -eq 8
+          test "$(find lkms/x86_64 -name '*_kernelsu.ko' -type f | wc -l)" -eq 8
+          find lkms -name '*_kernelsu.ko' -print | sort
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - name: Rust and Android NDK
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Build 3.3.1 ksud/ksuinit
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          mkdir -p out
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/ksud-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu331-fixed-userspace
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+  package:
+    name: Package validated full APK for private owner signing
+    needs: userspace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu331-manager
+          path: ui
+          run-id: 38399859940
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu331-fixed-userspace
+          path: native
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          cmdline-tools-version: 16111833
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager 'build-tools;37.0.0'
+      - name: Bundle, align and audit
+        run: python3 config/moksu/ksu331/pack_unsigned331.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu331-owner-signing-artifact
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
