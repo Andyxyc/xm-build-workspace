@@ -1,0 +1,10 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -83,7 +83,7 @@
+     private var pinConfigured by mutableStateOf(false)
+     private var pendingDisguise by mutableStateOf<String?>(null)
+     private var pendingStealth by mutableStateOf(false)
+-    private var disguiseCountdown by mutableIntStateOf(5)
++    private var disguiseCountdown by mutableStateOf(5)
+     override fun onCreate(savedInstanceState:Bundle?) {
