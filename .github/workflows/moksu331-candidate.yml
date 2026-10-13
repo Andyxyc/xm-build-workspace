@@ -42,13 +42,13 @@ jobs:
         run: |
           set -euo pipefail
           cp -r source/manager/app/src/main/res/drawable /tmp/moksu_official_drawable
-          cp -r source/manager/app/src/main/res/mipmap-anydpi-v26 /tmp/moksu_official_mipmap
+          cp -r source/manager/app/src/main/res/mipmap-anydpi /tmp/moksu_official_mipmap
       - name: Safe source merge and moksu branding
         run: |
           set -euo pipefail
           mkdir -p official/manager/app/src/main/res
           cp -r /tmp/moksu_official_drawable official/manager/app/src/main/res/drawable
-          cp -r /tmp/moksu_official_mipmap official/manager/app/src/main/res/mipmap-anydpi-v26
+          cp -r /tmp/moksu_official_mipmap official/manager/app/src/main/res/mipmap-anydpi
           python3 -m py_compile config/moksu/ksu331/merge331.py config/moksu/ksu331/resolve_for_build.py config/moksu/ksu331/apply_release.py
           python3 config/moksu/ksu331/resolve_for_build.py base old source out/moksu331-merge-audit.json
           python3 config/moksu/ksu331/apply_release.py source official config
