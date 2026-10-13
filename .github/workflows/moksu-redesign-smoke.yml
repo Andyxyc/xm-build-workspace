@@ -1,0 +1,116 @@
+name: moksu 3.3.1 control panel redesign smoke
+on:
+  push:
+    branches: [moksu-331-redesign-r1-20261013]
+    paths: ['.github/workflows/moksu-redesign-smoke.yml','moksu/redesign/**']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-redesign-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Apply UI, root permission and credential patch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {repository: hartgerinktarcila-design/7kimisu, ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c, path: old, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d, path: source, fetch-depth: 0, persist-credentials: false}
+      - name: Run pinned source migration
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 -m py_compile config/moksu/redesign/apply_redesign.py
+          python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
+          python3 config/moksu/features/port_web.py source old
+          python3 config/moksu/features/port_web_compat.py source old
+          python3 config/moksu/features/port_android.py source old
+          python3 config/moksu/redesign/apply_redesign.py source config/moksu/redesign
+          node --check source/userspace/ksud/assets/webadmin/app.js
+          test "$(grep -c 'pub fn get_app_profile' source/userspace/ksud/src/ksucalls.rs)" -eq 1
+          test "$(grep -c '"/api/access/change"' source/userspace/ksud/src/webadmin.rs)" -eq 1
+          test "$(grep -c '.perm_check = manager_or_root' source/kernel/supercall/dispatch.c)" -ge 2
+          cp -a config/moksu source/moksu-build
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-redesign-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-redesign-source
+          path: out/
+          retention-days: 14
+  android:
+    name: Rebuilt Android moksu interface
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-redesign-source, path: input}
+      - name: Extract reviewed source
+        run: |
+          set -euo pipefail
+          mkdir -p source out
+          tar -xzf input/moksu-redesign-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile UI
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-redesign-ui-staging.apk"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-redesign-android, path: out/, retention-days: 14}
+  native:
+    name: Compile secured webadmin and Root permission bridge
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-redesign-source, path: input}
+      - name: Extract native sources
+        run: |
+          set -euo pipefail
+          mkdir -p source out
+          tar -xzf input/moksu-redesign-source.tar.gz -C source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-stealth-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38412422406
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Compile Rust userspace (smoke, old stealth KMI not for release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/ksud-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-redesign-native-smoke, path: out/, retention-days: 14}
