@@ -1,0 +1,60 @@
+name: moksu 7SU stealth kernel compile gate
+on:
+  push:
+    branches: [moksu-331-restore-7su-20261013]
+    paths:
+      - 'moksu/features/port_stealth.py'
+      - '.github/workflows/moksu-stealth-check.yml'
+permissions:
+  contents: read
+concurrency:
+  group: stealth-kernel-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  kernel:
+    name: Real stealth kernel / aarch64+x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    container:
+      image: ghcr.io/ylarod/ddk-min:android13-5.15-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply KSU 3.3.1 signing and 7SU stealth code
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
+          grep -q "ksu_stealth_is_enabled()" source/kernel/supercall/dispatch.c
+          grep -q "KSU_IOCTL_STEALTH_SET" source/uapi/supercall.h
+          test "$(grep -c 'KSU_IOCTL_STEALTH_SET' source/kernel/supercall/dispatch.c)" -eq 1
+      - name: Compile real stealth core for both architectures
+        shell: bash
+        env:
+          KMI: android13-5.15
+        run: |
+          set -euo pipefail
+          bash config/moksu/ksu331/build_lkm.sh 2>&1 | tee /tmp/stealth-kmi.log
+          mkdir -p out
+          cp /tmp/stealth-kmi.log out/stealth-kmi.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-7su-stealth-kernel-test
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
