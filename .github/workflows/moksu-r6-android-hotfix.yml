@@ -1,0 +1,96 @@
+name: moksu R6 Compose hotfix Android compile
+on:
+  push:
+    branches: [moksu-331-r6-hotfix-20261014]
+    paths:
+      - '.github/workflows/moksu-r6-android-hotfix.yml'
+      - 'moksu/r6/r6-compose-state-hotfix.patch'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r6-hotfix-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r6-source
+          path: input
+          run-id: 38474139444
+          github-token: ${{ github.token }}
+      - name: Apply R6 Compose patch to successfully merged R6 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -s input/moksu-r6-source.tar.gz
+          tar -xzf input/moksu-r6-source.tar.gz -C source
+          cd source
+          git apply --check ../config/moksu/r6/r6-compose-state-hotfix.patch
+          git apply ../config/moksu/r6/r6-compose-state-hotfix.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt')
+          s=p.read_text()
+          assert 'private var disguiseCountdown by mutableStateOf(5)' in s
+          assert 'mutableIntStateOf' not in s
+          assert s.count('disguiseCountdown>0')+s.count('disguiseCountdown > 0')>=2
+          PY
+          node --check userspace/ksud/assets/webadmin/app.js
+          cd ..
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r6-hotfix-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r6-hotfix-source
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-24.04
+    needs: source
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r6-hotfix-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r6-hotfix-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Assemble actual R6 hotfix APK
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1-R6 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R6-hotfix.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-r6-hotfix-manager-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/moksu-r6-hotfix-manager-unsigned.apk"
+          sha256sum "$GITHUB_WORKSPACE/out/moksu-r6-hotfix-manager-unsigned.apk" > "$GITHUB_WORKSPACE/out/moksu-r6-hotfix.sha256"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r6-hotfix-android
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
