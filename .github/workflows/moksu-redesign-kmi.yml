@@ -1,0 +1,71 @@
+name: moksu 3.3.1 direct-grant KMI 8x2
+on:
+  push:
+    branches: [moksu-331-redesign-r1-20261013]
+    paths: ['.github/workflows/moksu-redesign-kmi.yml']
+permissions:
+  contents: read
+concurrency:
+  group: moksu-redesign-kmi-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  kernel:
+    name: Hidden mode + direct grant ${{ matrix.kmi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        kmi: [android12-5.10, android13-5.10, android13-5.15, android14-5.15, android14-6.1, android15-6.6, android16-6.12, android17-6.18]
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply genuine KernelSU 3.3.1 manager signature and custom hidden mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
+          python3 config/moksu/redesign/patch_kernel_perm.py source
+          grep -q 'KSU_PACKAGE_NAME ?= com.moksu.manager' source/kernel/Kbuild
+          grep -q 'KSU_EXPECTED_HASH ?= df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
+      - name: Kernel build and symbol check
+        shell: bash
+        env:
+          KMI: ${{ matrix.kmi }}
+        run: |
+          set -euo pipefail
+          if [[ "$KMI" == android16-6.12 ]]; then
+            bash config/moksu/ksu331/build_lkm16.sh 2>&1 | tee /tmp/build.log
+          else
+            bash config/moksu/ksu331/build_lkm.sh 2>&1 | tee /tmp/build.log
+          fi
+          cp /tmp/build.log out/kernel.log
+          for arch in aarch64 x86_64; do
+            file="out/$arch/${KMI}_kernelsu.ko"
+            test -s "$file"
+            grep -aq 'ksu_stealth_is_enabled' "$file"
+            sha256sum "$file"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-redesign-kmi-${{ matrix.kmi }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
