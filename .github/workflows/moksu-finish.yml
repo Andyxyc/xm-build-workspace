@@ -48,7 +48,7 @@ jobs:
         working-directory: source/manager
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=2.29.4 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-build.log"
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=2.29.5 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-build.log"
           python3 - <<'PY'
           import pathlib, shutil, os, zipfile
           matches=list(pathlib.Path('app/build/outputs/apk/release').glob('*.apk'))
