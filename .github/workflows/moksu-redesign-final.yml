@@ -2,7 +2,7 @@ name: moksu v3.3.1 redesigned root + web release
 on:
   push:
     branches: [moksu-331-redesign-r1-20261013]
-    paths: ['moksu/redesign/full-build-trigger.txt']
+    paths: ['moksu-redesign-full-build-trigger.txt']
 permissions:
   contents: read
   actions: read
