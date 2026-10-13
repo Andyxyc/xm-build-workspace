@@ -1,0 +1,21 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -220,7 +220,7 @@
+         commitStealth(false)
+     }
+     /** An independent choice, not a request to flip the kernel Root state. */
+-    private fun setUninstalledDisplay(value: Boolean) {
++    private fun toggleUninstalledDisplay(value: Boolean) {
+         if (busy || value == uninstalledDisplay) return
+         if (value) {
+             if (!MokDisguise.configured(this)) {
+@@ -464,7 +464,7 @@
+                         Text("只改变管理器首页；与桌面图标独立",
+                             fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                     }
+-                    Switch(checked=uninstalledDisplay,onCheckedChange={setUninstalledDisplay(it)},enabled=!busy)
++                    Switch(checked=uninstalledDisplay,onCheckedChange={toggleUninstalledDisplay(it)},enabled=!busy)
+                 }
+                 HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+                 Text("桌面图标",fontSize=14.sp,fontWeight=FontWeight.Medium)
