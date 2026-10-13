@@ -1,0 +1,1566 @@
+diff --git a/manager/app/src/main/AndroidManifest.xml b/manager/app/src/main/AndroidManifest.xml
+index dec340f..9b33c55 100644
+--- a/manager/app/src/main/AndroidManifest.xml
++++ b/manager/app/src/main/AndroidManifest.xml
+@@ -9,11 +9,6 @@
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+     <application android:name=".KernelSUApplication" android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:directBootAware="true" android:fullBackupContent="@xml/backup_rules" android:hasFragileUserData="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.KernelSU" android:zygotePreloadName="me.weishu.kernelsu.magica.AppZygotePreload">
+-        <service android:name=".mok.MokCallRedirectionService"
+-            android:exported="true"
+-            android:permission="android.permission.BIND_CALL_REDIRECTION_SERVICE">
+-            <intent-filter><action android:name="android.telecom.CallRedirectionService" /></intent-filter>
+-        </service>
+         <receiver android:name=".mok.MokPackageEventReceiver" android:exported="false">
+             <intent-filter>
+                 <action android:name="android.intent.action.PACKAGE_ADDED" />
+@@ -21,21 +16,9 @@
+                 <data android:scheme="package" />
+             </intent-filter>
+         </receiver>
+-        <receiver android:name=".mok.MokDialCodeReceiver" android:exported="false">
+-            <intent-filter>
+-                <action android:name="android.provider.Telephony.SECRET_CODE" />
+-                <action android:name="android.telephony.action.SECRET_CODE" />
+-                <data android:scheme="android_secret_code" android:host="*" />
+-            </intent-filter>
+-        </receiver>
+-        <activity android:name="me.weishu.kernelsu.mok.MokRecoveryActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/Theme.KernelSU" />
+         <activity android:name="me.weishu.kernelsu.mok.MoksuExtrasActivity" android:exported="false" android:directBootAware="false" android:theme="@style/Theme.KernelSU" />
+         <activity android:name="me.weishu.kernelsu.mok.MokLoginActivity" android:exported="false" android:directBootAware="false" android:excludeFromRecents="true" android:theme="@style/Theme.KernelSU" android:windowSoftInputMode="adjustResize" />
+         <activity android:name=".ui.MainActivity" android:exported="true" android:theme="@style/Theme.KernelSU.Starting" android:windowSoftInputMode="adjustResize">
+-            <intent-filter>
+-                <action android:name="android.intent.action.MAIN" />
+-                <category android:name="android.intent.category.LAUNCHER" />
+-            </intent-filter>
+             <intent-filter>
+                 <action android:name="android.intent.action.VIEW" />
+                 <category android:name="android.intent.category.DEFAULT" />
+@@ -53,6 +36,19 @@
+                 <data android:host="webui" android:scheme="ksu" />
+             </intent-filter>
+         </activity>
++        <activity android:name=".mok.MokDisguiseActivity" android:exported="false" android:theme="@style/Theme.KernelSU" />
++        <activity-alias android:name=".mok.MokManagerLauncher" android:targetActivity=".ui.MainActivity"
++            android:enabled="true" android:exported="true" android:label="@string/app_name" android:icon="@mipmap/ic_launcher">
++            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
++        </activity-alias>
++        <activity-alias android:name=".mok.MokCalculatorLauncher" android:targetActivity=".mok.MokDisguiseActivity"
++            android:enabled="false" android:exported="true" android:label="计算器" android:icon="@drawable/mok_calc_icon">
++            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
++        </activity-alias>
++        <activity-alias android:name=".mok.MokCalendarLauncher" android:targetActivity=".mok.MokDisguiseActivity"
++            android:enabled="false" android:exported="true" android:label="日历" android:icon="@drawable/mok_calendar_icon">
++            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
++        </activity-alias>
+         <activity android:name=".ui.webui.WebUIActivity" android:autoRemoveFromRecents="true" android:configChanges="density|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|fontScale|keyboard|keyboardHidden" android:documentLaunchMode="intoExisting" android:exported="false" android:taskAffinity="${applicationId}.webui" android:theme="@style/Theme.KernelSU.WebUI" />
+         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true">
+             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/filepaths" />
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDeviceCode.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDeviceCode.kt
+new file mode 100644
+index 0000000..7a273cb
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDeviceCode.kt
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.content.Context
++import java.security.SecureRandom
++
++/** User-shareable installation identifier, not IMEI, SIM, serial, Android ID or hardware fingerprint. */
++object MokDeviceCode {
++    private val valid = Regex("MO-[0-9A-F]{24}")
++    @Synchronized fun get(context: Context): String {
++        val prefs = context.getSharedPreferences("moksu.device-code.v1", Context.MODE_PRIVATE)
++        val old = prefs.getString("code", "") ?: ""
++        if (valid.matches(old)) return old
++        val value = ByteArray(12).also(SecureRandom()::nextBytes)
++        val code = "MO-" + value.joinToString("") { "%02X".format(it.toInt() and 0xff) }
++        if (!prefs.edit().putString("code",code).commit()) return ""
++        return code
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+new file mode 100644
+index 0000000..48911e2
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -0,0 +1,275 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.content.ComponentName
++import android.content.Context
++import android.content.Intent
++import android.content.pm.PackageManager
++import android.os.Bundle
++import android.os.SystemClock
++import android.security.keystore.KeyGenParameterSpec
++import android.security.keystore.KeyProperties
++import android.view.WindowManager
++import androidx.activity.ComponentActivity
++import androidx.activity.compose.setContent
++import androidx.compose.foundation.ExperimentalFoundationApi
++import androidx.compose.foundation.background
++import androidx.compose.foundation.combinedClickable
++import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.lazy.grid.GridCells
++import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
++import androidx.compose.foundation.lazy.grid.items
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.input.KeyboardType
++import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import me.weishu.kernelsu.Natives
++import me.weishu.kernelsu.ui.MainActivity
++import me.weishu.kernelsu.ui.UiMode
++import me.weishu.kernelsu.ui.theme.KernelSUTheme
++import java.math.BigDecimal
++import java.math.MathContext
++import java.security.KeyStore
++import java.security.MessageDigest
++import java.time.LocalDate
++import java.time.YearMonth
++import java.util.UUID
++import javax.crypto.KeyGenerator
++import javax.crypto.Mac
++import javax.crypto.SecretKey
++
++/** The package id cannot be modified at runtime. Three launcher aliases have distinct labels/icons. */
++object MokDisguise {
++    const val NORMAL = "normal"
++    const val CALCULATOR = "calculator"
++    const val CALENDAR = "calendar"
++    private const val PREF = "moksu.disguise.v1"
++    private const val KEY_ALIAS = "moksu.disguise.recovery.hmac.v1"
++    private val sixDigits = Regex("[0-9]{6}")
++    private val names = mapOf(
++        NORMAL to "me.weishu.kernelsu.mok.MokManagerLauncher",
++        CALCULATOR to "me.weishu.kernelsu.mok.MokCalculatorLauncher",
++        CALENDAR to "me.weishu.kernelsu.mok.MokCalendarLauncher"
++    )
++
++    fun mode(context: Context): String = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++        .getString("mode", NORMAL).orEmpty().takeIf { names.containsKey(it) } ?: NORMAL
++
++    private fun key(): SecretKey {
++        val ks = KeyStore.getInstance("AndroidKeyStore")
++        ks.load(null)
++        (ks.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
++        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_HMAC_SHA256, "AndroidKeyStore")
++        gen.init(KeyGenParameterSpec.Builder(KEY_ALIAS,
++            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
++            .setDigests(KeyProperties.DIGEST_SHA256).build())
++        return gen.generateKey()
++    }
++    private fun tag(pin: String): String {
++        val mac = Mac.getInstance("HmacSHA256")
++        mac.init(key())
++        return android.util.Base64.encodeToString(mac.doFinal(
++            ("moksu-disguise-pin-v1\u0000" + pin).toByteArray(Charsets.UTF_8)), android.util.Base64.NO_WRAP)
++    }
++    fun configured(context: Context): Boolean = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++        .getString("pin-tag", null)?.isNotBlank() == true
++    /** No six-digit plaintext or unsalted offline-bruteforceable hash is persisted. */
++    fun setPin(context: Context, first: String, second: String): Boolean {
++        if (!sixDigits.matches(first) || first != second) return false
++        return runCatching {
++            val value = tag(first)
++            context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
++                .putString("pin-tag", value).putInt("attempts",0)
++                .putLong("lock-until",0).commit() && configured(context)
++        }.getOrDefault(false)
++    }
++    @Synchronized fun verify(context: Context, entered: String): Boolean {
++        if (!sixDigits.matches(entered)) return false
++        val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++        if (SystemClock.elapsedRealtime() < prefs.getLong("lock-until",0)) return false
++        val stored = prefs.getString("pin-tag",null) ?: return false
++        val good = runCatching {
++            MessageDigest.isEqual(stored.toByteArray(Charsets.US_ASCII),
++                tag(entered).toByteArray(Charsets.US_ASCII))
++        }.getOrDefault(false)
++        if (good) {
++            prefs.edit().putInt("attempts",0).putLong("lock-until",0).commit()
++        } else {
++            val n = prefs.getInt("attempts",0) + 1
++            prefs.edit().putInt("attempts",if(n>=5)0 else n)
++                .putLong("lock-until",if(n>=5)SystemClock.elapsedRealtime()+300_000L else 0L)
++                .commit()
++        }
++        return good
++    }
++
++    /** Enable incoming launcher first, then disable old aliases; leave current package and signing unchanged. */
++    @Synchronized fun setMode(context: Context, next: String): Boolean {
++        if (!names.containsKey(next) || (next != NORMAL && !configured(context))) return false
++        val pm = context.packageManager
++        val previous = mode(context)
++        val target = ComponentName(context, names.getValue(next))
++        return runCatching {
++            pm.setComponentEnabledSetting(target, PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
++                PackageManager.DONT_KILL_APP)
++            for ((type, alias) in names) if (type != next) {
++                pm.setComponentEnabledSetting(ComponentName(context,alias),
++                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
++            }
++            check(context.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putString("mode",next).commit())
++            true
++        }.getOrElse {
++            // Never strand the user with no launcher icon: attempt to reinstate former alias.
++            runCatching {
++                pm.setComponentEnabledSetting(ComponentName(context,names.getValue(previous)),
++                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,PackageManager.DONT_KILL_APP)
++            }
++            false
++        }
++    }
++}
++
++/** Native, functional calculator/calendar front surfaces, with an explicit recovery gesture.
++ * A long-press on = (calculator) or on the displayed month (calendar) is required.
++ */
++class MokDisguiseActivity : ComponentActivity() {
++    override fun onCreate(savedInstanceState:Bundle?) {
++        super.onCreate(savedInstanceState)
++        val mode = MokDisguise.mode(this)
++        // A disabled alias may be retained in an OEM launcher cache; do not expose control panel.
++        if (mode == MokDisguise.NORMAL) { finish(); return }
++        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
++        setContent {
++            KernelSUTheme(uiMode = UiMode.Material) {
++                Surface(Modifier.fillMaxSize(),color=MaterialTheme.colorScheme.background) {
++                    if (mode == MokDisguise.CALENDAR) CalendarFace { reveal(it) }
++                    else CalculatorFace { reveal(it) }
++                }
++            }
++        }
++    }
++    private fun reveal(pin: String) {
++        if (!MokDisguise.verify(this, pin)) return
++        // Allow manager login only after the native kernel confirms hidden mode was lifted.
++        val previous = runCatching { Natives.stealthState() }.getOrDefault(-1)
++        if (previous == 1) {
++            if (!runCatching { Natives.stealthSet(false) }.getOrDefault(false) ||
++                runCatching { Natives.stealthState() }.getOrDefault(-1) != 0) return
++        }
++        startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
++        finish()
++    }
++}
++
++@OptIn(ExperimentalFoundationApi::class)
++@Composable private fun CalculatorFace(onUnlock:(String)->Unit) {
++    var display by remember { mutableStateOf("0") }
++    var previous by remember { mutableStateOf<BigDecimal?>(null) }
++    var op by remember { mutableStateOf<String?>(null) }
++    var fresh by remember { mutableStateOf(true) }
++    fun process(key:String) {
++        when(key) {
++            "AC" -> {display="0";previous=null;op=null;fresh=true}
++            "±" -> {display=if(display.startsWith("-"))display.drop(1) else "-$display"}
++            "%" -> { display=runCatching { BigDecimal(display).divide(BigDecimal(100)).stripTrailingZeros().toPlainString() }.getOrDefault(display) }
++            "+", "−", "×", "÷" -> {
++                previous=display.toBigDecimalOrNull();op=key;fresh=true
++            }
++            "=" -> {
++                val a=previous;val b=display.toBigDecimalOrNull()
++                if (a!=null && b!=null && op!=null) {
++                    display=runCatching { when(op) {
++                        "+" -> a.add(b); "−" -> a.subtract(b)
++                        "×" -> a.multiply(b); else -> a.divide(b,MathContext.DECIMAL64)
++                    }.stripTrailingZeros().toPlainString() }.getOrDefault("错误")
++                }
++                previous=null;op=null;fresh=true
++            }
++            else -> if(key.matches(Regex("[0-9.]"))) {
++                if(key=="." && !fresh && display.contains('.')) return
++                display=when {
++                    fresh && key=="." -> "0."
++                    fresh || display=="0" -> key
++                    display.length>=18 -> display
++                    else -> display+key
++                }
++                fresh=false
++            }
++        }
++    }
++    Column(Modifier.fillMaxSize().padding(horizontal=20.dp, vertical=16.dp),verticalArrangement=Arrangement.Bottom) {
++        Text(display,modifier=Modifier.fillMaxWidth().padding(end=10.dp,bottom=22.dp),
++            fontSize=48.sp,textAlign=androidx.compose.ui.text.style.TextAlign.End,maxLines=1)
++        val rows=listOf(listOf("AC","±","%","÷"),listOf("7","8","9","×"),listOf("4","5","6","−"),listOf("1","2","3","+"),listOf("0",".","="))
++        rows.forEach { row ->
++            Row(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
++                row.forEach { key ->
++                    val bg=if(key in listOf("÷","×","−","+","=")) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
++                    Box(Modifier.weight(if(key=="0"&&row.size==3)2f else 1f).height(66.dp)
++                        .background(bg,RoundedCornerShape(38.dp))
++                        .combinedClickable(onClick={ process(key) },onLongClick={
++                            if(key=="=" && display.matches(Regex("[0-9]{6}"))) onUnlock(display)
++                        }),contentAlignment=Alignment.Center) {
++                        Text(key,fontSize=24.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurface)
++                    }
++                }
++            }
++        }
++    }
++}
++
++@OptIn(ExperimentalFoundationApi::class)
++@Composable private fun CalendarFace(onUnlock:(String)->Unit) {
++    var month by remember { mutableStateOf(YearMonth.now()) }
++    var selected by remember { mutableStateOf(LocalDate.now()) }
++    var showPin by remember { mutableStateOf(false) }
++    var entry by remember { mutableStateOf("") }
++    val today = remember { LocalDate.now() }
++    val days = listOf("一","二","三","四","五","六","日")
++    Column(Modifier.fillMaxSize().padding(horizontal=18.dp, vertical=28.dp)) {
++        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
++            Text("日历",fontSize=30.sp,fontWeight=FontWeight.SemiBold)
++            TextButton(onClick={ month=YearMonth.now();selected=today }) { Text("今天") }
++        }
++        Spacer(Modifier.height(26.dp))
++        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
++            TextButton(onClick={month=month.minusMonths(1)}) {Text("‹",fontSize=28.sp)}
++            Box(Modifier.combinedClickable(onClick={},onLongClick={showPin=true}),contentAlignment=Alignment.Center) {
++                Text("${month.year}年 ${month.monthValue}月",fontSize=20.sp,fontWeight=FontWeight.Medium)
++            }
++            TextButton(onClick={month=month.plusMonths(1)}) {Text("›",fontSize=28.sp)}
++        }
++        Spacer(Modifier.height(24.dp))
++        Row(Modifier.fillMaxWidth()) { days.forEach { d -> Box(Modifier.weight(1f),contentAlignment=Alignment.Center) { Text(d,color=MaterialTheme.colorScheme.onSurfaceVariant) } } }
++        Spacer(Modifier.height(12.dp))
++        val offset=month.atDay(1).dayOfWeek.value-1
++        val dates=(0 until offset).map { null }+(1..month.lengthOfMonth()).map {month.atDay(it)}
++        LazyVerticalGrid(columns=GridCells.Fixed(7),modifier=Modifier.fillMaxWidth().height(365.dp),userScrollEnabled=false) {
++            items(dates) { date ->
++                Box(Modifier.fillMaxWidth().height(50.dp),contentAlignment=Alignment.Center) {
++                    if(date!=null) {
++                        val active=selected==date
++                        TextButton(onClick={selected=date},contentPadding=PaddingValues(0.dp),
++                            colors=ButtonDefaults.textButtonColors(containerColor=if(active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)) {
++                            Text(date.dayOfMonth.toString(),fontSize=16.sp,color=if(date==today)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
++                        }
++                    }
++                }
++            }
++        }
++        Spacer(Modifier.height(10.dp))
++        Text("${selected.monthValue}月${selected.dayOfMonth}日 · ${selected.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL,java.util.Locale.CHINA)}",fontSize=16.sp)
++    }
++    if(showPin) AlertDialog(onDismissRequest={showPin=false;entry=""},title={Text("输入六位数字")},
++        text={OutlinedTextField(entry,{if(it.length<=6&&it.all(Char::isDigit))entry=it},singleLine=true,
++            keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword),visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation())},
++        confirmButton={TextButton(onClick={val p=entry;entry="";showPin=false;onUnlock(p)},enabled=entry.length==6){Text("确定")}},
++        dismissButton={TextButton(onClick={showPin=false;entry=""}){Text("取消")}})
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt
+new file mode 100644
+index 0000000..570092f
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt
+@@ -0,0 +1,88 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.content.Context
++import android.net.Uri
++import me.weishu.kernelsu.R
++import java.io.File
++import java.security.MessageDigest
++import java.security.Signature
++import java.security.cert.CertificateFactory
++import java.time.Instant
++import java.util.Base64
++import java.util.UUID
++
++/** Offline, owner-issued, device-specific permit for boot patch and direct flash.
++ * Canonical signed UTF-8 format is fixed and size limited. No fixed card/password in APK.
++ * This gates the app's operation entrypoints; root owners still have independent fastboot/ADB.
++ */
++object MokFlashPermit {
++    const val HEADER = "MOKSU-FLASH-1"
++    private const val FILE = "owner-flash-authorization.txt"
++    private const val MAX = 4096
++    private val devicePattern = Regex("MO-[0-9A-F]{24}")
++    private val serialPattern = Regex("[0-9a-fA-F-]{36}")
++
++    data class Permit(val device: String, val expiry: Instant, val operations: Set<String>, val serial: String)
++
++    private fun parseAndVerify(context: Context, raw: ByteArray): Permit? = runCatching {
++        if(raw.size > MAX || raw.isEmpty()) return null
++        val text = raw.toString(Charsets.UTF_8)
++        val lines = text.trimEnd('\n').split('\n')
++        if(lines.size != 6 || lines[0] != HEADER || lines.any { it.contains('\r') }) return null
++        val device = lines[1].removePrefix("device=")
++        val expires = lines[2].removePrefix("expires=")
++        val operations = lines[3].removePrefix("operations=")
++        val serial = lines[4].removePrefix("serial=")
++        if(!lines[1].startsWith("device=") || !lines[2].startsWith("expires=") ||
++            !lines[3].startsWith("operations=") || !lines[4].startsWith("serial=") ||
++            !lines[5].startsWith("signature=")) return null
++        if(!devicePattern.matches(device) || device != MokDeviceCode.get(context)) return null
++        val until = Instant.parse(expires)
++        if(until.isBefore(Instant.now()) || until.isAfter(Instant.now().plusSeconds(31L*24*3600))) return null
++        if(!serialPattern.matches(serial)) return null
++        val scopes=operations.split(',').toSet()
++        if(scopes.isEmpty() || scopes.any { it !in setOf("patch","flash") } || scopes.joinToString(",") != operations) return null
++        val signBytes = (lines.take(5).joinToString("\n")+"\n").toByteArray(Charsets.UTF_8)
++        val encoded = lines[5].removePrefix("signature=")
++        val sig = Base64.getDecoder().decode(encoded)
++        val cert=context.resources.openRawResource(R.raw.moksu_flash_verify_cert).use { stream ->
++            CertificateFactory.getInstance("X.509").generateCertificate(stream)
++        }
++        val verify=Signature.getInstance("SHA256withRSA")
++        verify.initVerify(cert.publicKey)
++        verify.update(signBytes)
++        if(!verify.verify(sig)) return null
++        Permit(device, until, scopes, serial)
++    }.getOrNull()
++
++    private fun file(context: Context): File = File(context.filesDir, FILE)
++    fun authorized(context: Context, need: String = "patch"): Boolean =
++        file(context).takeIf { it.isFile && it.length() in 1..MAX.toLong() }?.let {
++            parseAndVerify(context, it.readBytes())?.operations?.contains(need)
++        } ?: false
++
++    /** Content must have been selected by the user. No public key path or remote URLs accepted. */
++    fun importFromUri(context: Context, uri: Uri): Boolean = runCatching {
++        val bytes=context.contentResolver.openInputStream(uri)?.use { stream ->
++            val out=java.io.ByteArrayOutputStream()
++            val buf=ByteArray(512)
++            while(out.size()<=MAX) {
++                val amount=stream.read(buf)
++                if(amount<0)break
++                out.write(buf,0,amount)
++            }
++            out.toByteArray()
++        } ?: return false
++        if(parseAndVerify(context,bytes)==null) return false
++        val target=file(context)
++        val tmp=File.createTempFile("flash-permit-", ".tmp",context.filesDir)
++        try {
++            tmp.outputStream().use { it.write(bytes);it.fd.sync() }
++            check(tmp.renameTo(target))
++            target.setReadable(false,false);target.setReadable(true,true)
++        } finally { tmp.delete() }
++        authorized(context)
++    }.getOrDefault(false)
++    fun forget(context: Context) { file(context).delete() }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt
+index 5b1ffff..dc66ea3 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokLoginActivity.kt
+@@ -2,6 +2,9 @@
+ package me.weishu.kernelsu.mok
+ 
+ import android.os.Bundle
++import android.content.ClipData
++import android.content.ClipboardManager
++import android.content.Context
+ import android.view.WindowManager
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
+@@ -94,9 +97,17 @@ class MokLoginActivity : ComponentActivity() {
+                                 modifier = Modifier.size(64.dp)
+                             )
+                         },
+-                        title = { Text("moksu") },
++                        title = { Text("moksu · 定制") },
+                         text = {
+                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                                Text("闲鱼 心中都是莫 · 定制")
++                                Text("首次安装请将下方设备码发给作者获取开通帮助。设备码是本次安装的随机标识，不包含 IMEI 等硬件信息。")
++                                val deviceCode = remember { MokDeviceCode.get(this@MokLoginActivity) }
++                                Text(deviceCode)
++                                TextButton(onClick={
++                                    val clip=getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
++                                    clip.setPrimaryClip(ClipData.newPlainText("设备码",deviceCode))
++                                }) {Text("复制设备码")}
+                                 Text("输入卡密以登录")
+                                 OutlinedTextField(
+                                     value = card,
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokRecoveryActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokRecoveryActivity.kt
+deleted file mode 100644
+index e2c2890..0000000
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokRecoveryActivity.kt
++++ /dev/null
+@@ -1,95 +0,0 @@
+-package me.weishu.kernelsu.mok
+-
+-import android.content.Intent
+-import android.os.Bundle
+-import android.view.WindowManager
+-import androidx.activity.ComponentActivity
+-import androidx.activity.compose.setContent
+-import androidx.compose.foundation.layout.Arrangement
+-import androidx.compose.foundation.layout.Column
+-import androidx.compose.foundation.layout.fillMaxSize
+-import androidx.compose.foundation.layout.fillMaxWidth
+-import androidx.compose.foundation.layout.padding
+-import androidx.compose.material3.Button
+-import androidx.compose.material3.MaterialTheme
+-import androidx.compose.material3.OutlinedTextField
+-import androidx.compose.material3.Scaffold
+-import androidx.compose.material3.Text
+-import androidx.compose.material3.TextButton
+-import androidx.compose.runtime.Composable
+-import androidx.compose.runtime.getValue
+-import androidx.compose.runtime.mutableStateOf
+-import androidx.compose.runtime.setValue
+-import androidx.compose.ui.Modifier
+-import androidx.compose.ui.text.input.KeyboardType
+-import androidx.compose.foundation.text.KeyboardOptions
+-import androidx.compose.ui.text.input.PasswordVisualTransformation
+-import androidx.compose.ui.unit.dp
+-import androidx.lifecycle.lifecycleScope
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.launch
+-import kotlinx.coroutines.withContext
+-import me.weishu.kernelsu.Natives
+-import me.weishu.kernelsu.ui.MainActivity
+-
+-/** Verified access: never pretend an unrecognized kernel is healthy. */
+-class MokRecoveryActivity:ComponentActivity() {
+-    private var input by mutableStateOf("")
+-    private var useCard by mutableStateOf(false)
+-    private var busy by mutableStateOf(false)
+-    private var info by mutableStateOf("")
+-    override fun onCreate(savedInstanceState:Bundle?) {
+-        super.onCreate(savedInstanceState)
+-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+-        setContent { RecoveryScreen() }
+-    }
+-    private fun submit() {
+-        if (busy) return
+-        val code=input.trim()
+-        if ((!useCard && !code.matches(Regex("[0-9]{4,12}"))) || (useCard && code.length !in 8..128)) {
+-            info=if (useCard) "请输入原有访问卡密" else "请输入已设置的数字恢复码"
+-            return
+-        }
+-        busy=true;info="正在验证…"
+-        lifecycleScope.launch {
+-            val ok=withContext(Dispatchers.IO) {
+-                if (useCard) {
+-                    val valid=MokActivation.activate(this@MokRecoveryActivity,code) == MokActivation.Result.SUCCESS
+-                    if (!valid) false else {
+-                        val previous=runCatching { Natives.stealthState() }.getOrDefault(-1)
+-                        if (previous == 1) runCatching { Natives.stealthSet(false) }.getOrDefault(false)
+-                        runCatching { Natives.stealthState() }.getOrDefault(-1) == 0
+-                    }
+-                } else MokWebDeviceBridge.dialToggle(this@MokRecoveryActivity,code)
+-            }
+-            input="";busy=false
+-            if (ok) {
+-                info="验证成功，正在返回管理器"
+-                startActivity(Intent(this@MokRecoveryActivity,MainActivity::class.java)
+-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+-                finish()
+-            } else info="验证失败或内核不可用，请检查恢复码与内核版本"
+-        }
+-    }
+-    @Composable private fun RecoveryScreen() {
+-        MaterialTheme {
+-            Scaffold { padding ->
+-                Column(modifier=Modifier.fillMaxSize().padding(padding).padding(24.dp),
+-                    verticalArrangement=Arrangement.spacedBy(16.dp)) {
+-                    Text("管理器验证",style=MaterialTheme.typography.headlineMedium)
+-                    Text("验证完成后重新检测内核状态",style=MaterialTheme.typography.bodyMedium)
+-                    OutlinedTextField(value=input,onValueChange={if(it.length<=128)input=it},
+-                        modifier=Modifier.fillMaxWidth(),label={Text(if(useCard)"访问卡密" else "数字恢复码")},
+-                        singleLine=true,visualTransformation=PasswordVisualTransformation(),
+-                        keyboardOptions=KeyboardOptions(keyboardType=if(useCard) KeyboardType.Password else KeyboardType.NumberPassword),
+-                        enabled=!busy)
+-                    Button(onClick={submit()},enabled=!busy,modifier=Modifier.fillMaxWidth()) { Text("验证并恢复") }
+-                    TextButton(onClick={ input="";info="";useCard=!useCard },enabled=!busy) {
+-                        Text(if(useCard)"使用数字恢复码" else "使用原有访问卡密")
+-                    }
+-                    if(info.isNotBlank())Text(info,style=MaterialTheme.typography.bodySmall)
+-                }
+-            }
+-        }
+-    }
+-}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+index 1fcc34e..6bcf402 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+@@ -9,15 +9,9 @@ import android.graphics.Bitmap
+ import android.graphics.Canvas
+ import android.os.Build
+ import android.os.SystemClock
+-import android.telecom.CallRedirectionService
+-import android.telecom.PhoneAccountHandle
+-import android.net.Uri
+ import android.util.Base64
+ import android.util.Log
+-import me.weishu.kernelsu.Natives
+-import me.weishu.kernelsu.ui.MainActivity
+ import me.weishu.kernelsu.ui.util.WebAdminCli
+-import me.weishu.kernelsu.ui.util.getRootShell
+ import org.json.JSONArray
+ import org.json.JSONObject
+ import java.io.ByteArrayOutputStream
+@@ -75,9 +69,9 @@ internal object MokWebDeviceBridge {
+ 
+     private fun iconBase64(pm: PackageManager, pkg: String): String = runCatching {
+         val drawable = pm.getApplicationIcon(pkg)
+-        val image = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
++        val image = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
+         val canvas = Canvas(image)
+-        drawable.setBounds(0, 0, 48, 48)
++        drawable.setBounds(0, 0, 40, 40)
+         drawable.draw(canvas)
+         val bytes = ByteArrayOutputStream().use { out ->
+             image.compress(Bitmap.CompressFormat.PNG, 100, out)
+@@ -92,7 +86,11 @@ internal object MokWebDeviceBridge {
+         val label = app.loadLabel(pm)?.toString()?.trim().orEmpty().take(100).ifBlank { pkg }
+         JSONObject().put("pkg",pkg).put("label",label)
+             .put("icon",iconBase64(pm,pkg)).put("sha256",certificateSha(pm,pkg))
+-    }.getOrNull()
++    }.getOrElse {
++        // Package visibility differs on some ROMs and secondary-user profiles.
++        // Sync package id anyway; never fabricate a recognizable app name/icon.
++        JSONObject().put("pkg",pkg).put("label",pkg).put("icon","").put("sha256","")
++    }
+ 
+     fun syncAsync(context: Context) {
+         val now = SystemClock.elapsedRealtime()
+@@ -102,6 +100,9 @@ internal object MokWebDeviceBridge {
+             try {
+                 val base = baseUrl() ?: return@Thread
+                 val pm = app.packageManager
++                // Device code is random per app installation; never send a hardware identifier.
++                val code=MokDeviceCode.get(app)
++                if(code.isNotBlank()) request(base,"/api/device/code",mapOf("code" to code))
+                 // Sync the EXACT packages shown by Root daemon rather than an unrelated
+                 // installed-package enumeration. This fixes blank labels/icons when
+                 // Android package visibility and daemon UID list differ.
+@@ -152,79 +153,6 @@ internal object MokWebDeviceBridge {
+         request(base,"/api/browser/auto").optBoolean("enabled",false) to base
+     }.getOrNull()
+ 
+-    /** Four digits are intercepted only when the user grants the system's call-redirection
+-     * role. Read the same root-owned PIN file used by ksud, even if the web server is off.
+-     * Never log or persist the plaintext PIN in the manager app.
+-     */
+-    private fun configuredDialCode(): String? {
+-        val out = ArrayList<String>()
+-        val errors = ArrayList<String>()
+-        val result = runCatching {
+-            getRootShell().newJob()
+-                .add("cat /data/adb/sevenk/stealth_code 2>/dev/null")
+-                .to(out, errors).exec()
+-        }.getOrNull()
+-        if (result?.code != 0) return null
+-        // Never log this value or use a hardcoded 4-digit unlock PIN.
+-        return out.joinToString("").trim().takeIf { it.matches(Regex("[0-9]{4,12}")) }
+-    }
+-
+-    fun isFourDigitDialConfigured(): Boolean = configuredDialCode()?.length == 4
+-
+-    /** Save recovery digits independently of the web server. Atomic replace, root-only
+-     * permissions and read-back. Do not log the value or put it in SharedPreferences. */
+-    fun setFourDigitCode(code: String): Boolean {
+-        if (!code.matches(Regex("[0-9]{4}"))) return false
+-        val out = ArrayList<String>()
+-        val errors = ArrayList<String>()
+-        // Strict decimal input is the only interpolated value; no shell metacharacters.
+-        val command = """umask 077
+-            mkdir -p /data/adb/sevenk || exit 1
+-            tmp=${'$'}(mktemp /data/adb/sevenk/stealth_code.XXXXXX) || exit 2
+-            trap 'rm -f "${'$'}tmp"' EXIT
+-            printf '%s' '$code' > "${'$'}tmp" || exit 3
+-            chmod 600 "${'$'}tmp" || exit 4
+-            mv -f "${'$'}tmp" /data/adb/sevenk/stealth_code || exit 5
+-            trap - EXIT""".trimIndent()
+-        val result = runCatching {
+-            getRootShell().newJob().add(command).to(out, errors).exec()
+-        }.getOrNull()
+-        return result?.code == 0 && configuredDialCode() == code
+-    }
+-
+-    fun dialEntryEnabled(context: Context): Boolean =
+-        context.getSharedPreferences("moksu.recovery", Context.MODE_PRIVATE)
+-            .getBoolean("dial-entry-enabled", false)
+-
+-    fun setDialEntryEnabled(context: Context, enabled: Boolean) {
+-        context.getSharedPreferences("moksu.recovery", Context.MODE_PRIVATE)
+-            .edit().putBoolean("dial-entry-enabled", enabled).apply()
+-    }
+-
+-    fun matchesDialCode(supplied: String): Boolean {
+-        if (!supplied.matches(Regex("[0-9]{4,12}"))) return false
+-        // Legacy R2 5-digit *#*#...#*#* secret codes must remain an emergency
+-        // fallback for previously hidden devices lacking a configured code file.
+-        val expected = configuredDialCode() ?: "70707"
+-        return supplied == expected
+-    }
+-
+-    fun dialToggle(context: Context, supplied: String): Boolean {
+-        if (!matchesDialCode(supplied)) return false
+-        val before = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-        if (before !in 0..1) return false
+-        if (!runCatching { Natives.stealthSet(before == 0) }.getOrDefault(false)) return false
+-        val after = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-        if (after == before || after !in 0..1) return false
+-        if (after == 0) {
+-            runCatching {
+-                context.startActivity(Intent(context, MainActivity::class.java)
+-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+-            }
+-        }
+-        return true
+-    }
+-
+ }
+ 
+ /** Only receives OS package events. No package-name-only authorization is permitted. */
+@@ -234,52 +162,10 @@ class MokPackageEventReceiver : BroadcastReceiver() {
+         if (intent.action != Intent.ACTION_PACKAGE_ADDED && intent.action != Intent.ACTION_PACKAGE_REPLACED) return
+         val pending = goAsync()
+         Thread({
+-            try { MokWebDeviceBridge.applyPackageRule(context.applicationContext, pkg) }
++            try { MokWebDeviceBridge.applyPackageRule(context.applicationContext, pkg)
++                  MokWebDeviceBridge.syncAsync(context.applicationContext) }
+             catch (_: Exception) { /* leave ungranted, never silently bypass identity */ }
+             finally { pending.finish() }
+         }, "moksu-package").start()
+     }
+ }
+-
+-/** Android standard secret code: *#*#1234#*#*; plain digits cannot trigger OS callbacks. */
+-class MokDialCodeReceiver : BroadcastReceiver() {
+-    override fun onReceive(context: Context, intent: Intent) {
+-        val code = intent.data?.host ?: return
+-        if (!code.matches(Regex("[0-9]{4,12}"))) return
+-        val pending = goAsync()
+-        Thread({
+-            try { MokWebDeviceBridge.dialToggle(context.applicationContext,code) }
+-            catch (_: Exception) { /* unsupported dialer or kernel: no action */ }
+-            finally { pending.finish() }
+-        },"moksu-dial").start()
+-    }
+-}
+-
+-/** Requires the user to grant Android's call redirection role in Settings.
+- * Only intercepts a call when the entered digits exactly match the locally configured PIN.
+- * Every other call is passed through unchanged; this is not a general dialer monitor.
+- */
+-class MokCallRedirectionService: CallRedirectionService() {
+-    override fun onPlaceCall(handle: Uri, initialPhoneAccount: PhoneAccountHandle,
+-                             allowInteractiveResponse: Boolean) {
+-        if (!MokWebDeviceBridge.dialEntryEnabled(applicationContext)) {
+-            placeCallUnmodified(); return
+-        }
+-        val supplied=if(handle.scheme == "tel") handle.schemeSpecificPart.orEmpty() else ""
+-        if (!supplied.matches(Regex("[0-9]{4}"))) {
+-            placeCallUnmodified();return
+-        }
+-        Thread({
+-            val isRecoveryCode = runCatching { MokWebDeviceBridge.matchesDialCode(supplied) }
+-                .getOrDefault(false)
+-            if (isRecoveryCode) {
+-                // Never fall back to placing a REAL call if PIN recovery fails.
+-                // A matched code is intercepted even when the hidden kernel is offline.
+-                runCatching { cancelCall() }
+-                runCatching { MokWebDeviceBridge.dialToggle(applicationContext, supplied) }
+-            } else {
+-                runCatching { placeCallUnmodified() }
+-            }
+-        },"moksu-call-redirection").start()
+-    }
+-}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+index 68c0cd3..c67efc6 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -35,6 +35,10 @@ import androidx.compose.material3.HorizontalDivider
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.OutlinedButton
+ import androidx.compose.material3.Switch
++import androidx.compose.material3.FilterChip
++import androidx.compose.material3.Surface
++import me.weishu.kernelsu.ui.UiMode
++import me.weishu.kernelsu.ui.theme.KernelSUTheme
+ import androidx.compose.material3.Text
+ import androidx.compose.material3.darkColorScheme
+ import androidx.compose.runtime.Composable
+@@ -69,86 +73,48 @@ class MoksuExtrasActivity:ComponentActivity() {
+     private var stealthSupported by mutableStateOf(false)
+     private var stealthEnabled by mutableStateOf(false)
+     private var notice by mutableStateOf("")
+-    private var callRedirectEnabled by mutableStateOf(false)
++    private var disguiseMode by mutableStateOf(MokDisguise.NORMAL)
+     private var showPinSetup by mutableStateOf(false)
+     private var firstPin by mutableStateOf("")
+     private var secondPin by mutableStateOf("")
+     private var pinSaving by mutableStateOf(false)
+-    private val dialRoleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+-        val rm = getSystemService(RoleManager::class.java)
+-        val granted = rm?.isRoleHeld(RoleManager.ROLE_CALL_REDIRECTION) == true
+-        MokWebDeviceBridge.setDialEntryEnabled(this, granted)
+-        callRedirectEnabled = granted
+-        notice = if (granted) "四位拨号入口已开启" else "系统没有授权拨号入口，开关保持关闭"
+-    }
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         if (!MokAuthGate.ensureAccess(this)) return
+         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+-        setContent {
+-            MaterialTheme(colorScheme=darkColorScheme(
+-                primary=Violet,secondary=Mint,background=Night,
+-                surface=Panel,onSurface=Color(0xFFEFF3FF))) { Screen() }
+-        }
++        disguiseMode = MokDisguise.mode(this)
++        setContent { KernelSUTheme(uiMode=UiMode.Material) {
++            Surface(color=MaterialTheme.colorScheme.background) { Screen() }
++        } }
+         refresh()
+     }
+     override fun onResume() {
+         super.onResume()
+         if (!MokAuthGate.ensureAccess(this)) return
+-        val rm = getSystemService(RoleManager::class.java)
+-        callRedirectEnabled = MokWebDeviceBridge.dialEntryEnabled(this) &&
+-            rm?.isRoleHeld(RoleManager.ROLE_CALL_REDIRECTION) == true
+-    }
+-    /** The switch is the source of truth, not an 'enable' button. */
+-    private fun setDialRecovery(checked: Boolean) {
+-        if (busy) return
+-        if (!checked) {
+-            MokWebDeviceBridge.setDialEntryEnabled(this, false)
+-            callRedirectEnabled = false
+-            notice = "四位拨号入口已关闭"
+-            return
+-        }
+-        busy = true
+-        lifecycleScope.launch {
+-            val ready = withContext(Dispatchers.IO) { MokWebDeviceBridge.isFourDigitDialConfigured() }
+-            busy = false
+-            if (!ready) {
+-                showPinSetup = true
+-                notice = "先设置四位数字密码，再打开拨号开关"
+-                return@launch
+-            }
+-            val rm = getSystemService(RoleManager::class.java)
+-            if (rm?.isRoleAvailable(RoleManager.ROLE_CALL_REDIRECTION) != true) {
+-                notice = "此拨号器不支持呼叫重定向，无法保证四位拨号恢复"
+-                return@launch
+-            }
+-            if (rm.isRoleHeld(RoleManager.ROLE_CALL_REDIRECTION)) {
+-                MokWebDeviceBridge.setDialEntryEnabled(this@MoksuExtrasActivity, true)
+-                callRedirectEnabled = true
+-                notice = "四位拨号入口已开启"
+-            } else {
+-                runCatching { dialRoleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_CALL_REDIRECTION)) }
+-                    .onFailure { notice = "系统拨号权限请求失败，开关保持关闭" }
+-            }
+-        }
++        disguiseMode = MokDisguise.mode(this)
+     }
+-
+     private fun saveRecoveryPin() {
+         if (pinSaving) return
+-        if (!firstPin.matches(Regex("[0-9]{4}")) || firstPin != secondPin) {
+-            notice = "两次密码必须相同，且都为四位数字"
++        if (!firstPin.matches(Regex("[0-9]{6}")) || firstPin != secondPin) {
++            notice = "请两次输入相同的六位数字"
+             return
+         }
+-        val input = firstPin
+         pinSaving = true
+-        lifecycleScope.launch {
+-            val ok = withContext(Dispatchers.IO) { MokWebDeviceBridge.setFourDigitCode(input) }
+-            firstPin = ""; secondPin = ""; pinSaving = false
+-            if (ok) {
+-                showPinSetup = false
+-                notice = "四位密码已设置。请再开启拨号开关，并在隐藏前验证恢复能力"
+-            } else notice = "密码保存或回读失败；原密码没有被确认更改"
++        val one=firstPin; val two=secondPin
++        val ok=MokDisguise.setPin(this, one, two)
++        firstPin=""; secondPin=""; pinSaving=false
++        if(ok) { showPinSetup=false;notice="六位恢复密码已保存" }
++        else notice="密码保存失败，未修改原设置"
++    }
++
++    private fun setDisguise(mode: String) {
++        if (busy) return
++        if (mode != MokDisguise.NORMAL && !MokDisguise.configured(this)) {
++            showPinSetup=true;notice="请先设置六位恢复密码";return
+         }
++        val ok=MokDisguise.setMode(this,mode)
++        if(ok) { disguiseMode=mode;notice="桌面入口已切换；部分系统需稍等图标刷新" }
++        else notice="切换失败，已尽力恢复上一个桌面入口"
+     }
+     private fun refresh() {
+         if (busy) return
+@@ -197,22 +163,12 @@ class MoksuExtrasActivity:ComponentActivity() {
+     }
+     private fun setStealth(value:Boolean) {
+         if(busy||!stealthSupported)return
+-        // Require a working recovery path BEFORE hiding the manager interface.
+-        // This is a system phone-role grant, not Accessibility permission.
+-        if (value && !callRedirectEnabled) {
+-            notice="请先启用四位拨号恢复入口并授予系统呼叫重定向角色，避免无法恢复"
+-            return
++        // Only enter kernel hide mode after a real, testable six-digit recovery path exists.
++        if (value && (disguiseMode == MokDisguise.NORMAL || !MokDisguise.configured(this))) {
++            notice="请先设置六位密码并选择计算器或日历入口，确保可以恢复";return
+         }
+         busy=true
+         lifecycleScope.launch {
+-            if (value) {
+-                val configured=withContext(Dispatchers.IO) { MokWebDeviceBridge.isFourDigitDialConfigured() }
+-                if (!configured) {
+-                    notice="请先在网页版设置四位数字恢复码，再开启隐藏"
+-                    busy=false
+-                    return@launch
+-                }
+-            }
+             val check=withContext(Dispatchers.IO){
+                 val ok=runCatching { Natives.stealthSet(value) }.getOrDefault(false)
+                 val actual=runCatching { Natives.stealthState() }.getOrDefault(-1)
+@@ -249,8 +205,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+         Card(
+             modifier=Modifier.fillMaxWidth(),
+             shape=RoundedCornerShape(22.dp),
+-            colors=CardDefaults.cardColors(containerColor=Panel),
+-            border=BorderStroke(1.dp,Violet.copy(alpha=.23f))
++            colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceContainerLow),
+         ) {
+             Column(modifier=Modifier.fillMaxWidth().padding(17.dp),
+                 verticalArrangement=Arrangement.spacedBy(8.dp),content=body)
+@@ -260,16 +215,16 @@ class MoksuExtrasActivity:ComponentActivity() {
+         if (showPinSetup) {
+             AlertDialog(
+                 onDismissRequest = { if (!pinSaving) { showPinSetup=false;firstPin="";secondPin="" } },
+-                title = { Text("设置四位密码") },
++                title = { Text("设置六位密码") },
+                 text = {
+                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                         OutlinedTextField(
+-                            value=firstPin, onValueChange={v -> if(v.length<=4 && v.all { it in '0'..'9' }) firstPin=v},
+-                            singleLine=true, label={Text("输入四位数字")},
++                            value=firstPin, onValueChange={v -> if(v.length<=6 && v.all { it in '0'..'9' }) firstPin=v},
++                            singleLine=true, label={Text("输入六位数字")},
+                             visualTransformation=PasswordVisualTransformation(),
+                             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
+                         OutlinedTextField(
+-                            value=secondPin, onValueChange={v -> if(v.length<=4 && v.all { it in '0'..'9' }) secondPin=v},
++                            value=secondPin, onValueChange={v -> if(v.length<=6 && v.all { it in '0'..'9' }) secondPin=v},
+                             singleLine=true, label={Text("再次输入确认")},
+                             visualTransformation=PasswordVisualTransformation(),
+                             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
+@@ -280,29 +235,27 @@ class MoksuExtrasActivity:ComponentActivity() {
+             )
+         }
+         Column(
+-            modifier=Modifier.fillMaxSize().background(
+-                Brush.verticalGradient(listOf(Color(0xFF151633),Night,Color(0xFF091D26))))
++            modifier=Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                 .verticalScroll(rememberScrollState()).padding(18.dp),
+             verticalArrangement=Arrangement.spacedBy(16.dp)
+         ) {
+-            Text("moksu",fontSize=36.sp,color=Color.White,fontWeight=FontWeight.Bold)
+-            Text("心中都是莫  ·  专属管理",fontSize=12.sp,color=Mint,letterSpacing=1.sp)
+-            Text("专属控制台",fontSize=21.sp,fontWeight=FontWeight.SemiBold)
++            Text("扩展功能",fontSize=29.sp,color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.Bold)
++            Text("moksu · 闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+             PanelCard {
+                 Row(modifier=Modifier.fillMaxWidth(),
+                     horizontalArrangement=Arrangement.SpaceBetween) {
+                     Column(modifier=Modifier.weight(1f)) {
+                         Text("WEB 网页管理器",fontWeight=FontWeight.Bold,fontSize=18.sp)
+                         Text("本机访问 / 高强度专属密钥 / ksud 托管",
+-                            fontSize=12.sp,color=Color(0xFFB0BFD9))
++                            fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                     }
+                     Switch(checked=webEnabled,onCheckedChange={setWeb(it)},enabled=!busy)
+                 }
+-                Text(webState,fontSize=13.sp,color=Color(0xFFD1D9E9))
++                Text(webState,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 if(webEnabled && webUrl.startsWith("http://127.0.0.1:")) {
+-                    Text("网页访问密钥",fontSize=13.sp,color=Mint)
++                    Text("网页访问密钥",fontSize=13.sp,color=MaterialTheme.colorScheme.primary)
+                     Text(if(revealAccessToken) webUrl.substringAfterLast("/") else "••••••••••••••••",
+-                        fontSize=12.sp,color=Color(0xFFD1D9E9))
++                        fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                         OutlinedButton(onClick={revealAccessToken=!revealAccessToken}) {
+                             Text(if(revealAccessToken) "隐藏密钥" else "显示密钥")
+@@ -319,8 +272,8 @@ class MoksuExtrasActivity:ComponentActivity() {
+                         notice=if(url.startsWith("http://127.0.0.1:"))
+                             WebAdminCli.openInBrowser(this@MoksuExtrasActivity,url)?:"正在打开浏览器"
+                         else "未获取到安全的本机地址"
+-                    },enabled=!busy&&webEnabled,colors=ButtonDefaults.buttonColors(containerColor=Violet)) {
+-                        Text("打开网页",color=Night)
++                    },enabled=!busy&&webEnabled,colors=ButtonDefaults.buttonColors(containerColor=MaterialTheme.colorScheme.primary)) {
++                        Text("打开网页",color=MaterialTheme.colorScheme.onPrimary)
+                     }
+                     OutlinedButton(onClick={
+                         if(WebAdminCli.copyUrl(this@MoksuExtrasActivity,webUrl))
+@@ -334,7 +287,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+             }
+             PanelCard {
+                 Text("浏览器自动入口",fontSize=18.sp,fontWeight=FontWeight.Bold)
+-                Text("可在网页版开启。使用后台 Root 服务检测浏览器启动，不需要无障碍权限。",fontSize=12.sp,color=Color(0xFFB2BED7))
++                Text("可在网页版开启。使用后台 Root 服务检测浏览器启动，不需要无障碍权限。",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 OutlinedButton(onClick={
+                     if(webEnabled && webUrl.startsWith("http://127.0.0.1:")) {
+                         WebAdminCli.openInBrowser(this@MoksuExtrasActivity,webUrl)
+@@ -343,26 +296,32 @@ class MoksuExtrasActivity:ComponentActivity() {
+             }
+             PanelCard {
+                 Text("专属隐藏模式",fontSize=18.sp,fontWeight=FontWeight.Bold)
+-                Text(stealthState,fontSize=13.sp,color=Color(0xFFD1D9E9))
++                Text(stealthState,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+-                    Text("隐藏管理状态",fontSize=14.sp,color=Mint)
++                    Text("隐藏管理状态",fontSize=14.sp,color=MaterialTheme.colorScheme.primary)
+                     Switch(checked=stealthEnabled,onCheckedChange={setStealth(it)},
+                         enabled=!busy&&stealthSupported)
+                 }
+                 HorizontalDivider(color=Color(0xFF30445B))
+-                Text("在系统拨号器输入已设置的四位数字并按拨号键。需系统支持并授权呼叫重定向；普通号码不拦截。",fontSize=12.sp,color=Color(0xFFB2BED7))
+-                Row(modifier=Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween) {
+-                    Text("四位拨号入口", fontSize=14.sp,color=Mint)
+-                    Switch(checked=callRedirectEnabled,onCheckedChange={setDialRecovery(it)},enabled=!busy)
++                Text("桌面显示",fontSize=14.sp,fontWeight=FontWeight.Medium)
++                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
++                    FilterChip(selected=disguiseMode==MokDisguise.NORMAL,
++                        onClick={setDisguise(MokDisguise.NORMAL)},label={Text("管理器")})
++                    FilterChip(selected=disguiseMode==MokDisguise.CALCULATOR,
++                        onClick={setDisguise(MokDisguise.CALCULATOR)},label={Text("计算器")})
++                    FilterChip(selected=disguiseMode==MokDisguise.CALENDAR,
++                        onClick={setDisguise(MokDisguise.CALENDAR)},label={Text("日历")})
+                 }
+-                OutlinedButton(onClick={ firstPin="";secondPin="";showPinSetup=true },enabled=!busy) { Text("设置密码") }
++                Text("计算器输入六位数字后长按等号恢复；日历长按月份标题后输入六位数字恢复。",
++                    fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                OutlinedButton(onClick={firstPin="";secondPin="";showPinSetup=true},enabled=!busy) {Text("设置密码")}
+                 Text("使用与本版本匹配的隐藏内核后可以启用；若未装配套内核，请先安装再操作。",
+-                    fontSize=12.sp,color=Color(0xFFB2BED7))
++                    fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 OutlinedButton(onClick={refresh()},enabled=!busy){Text("重新读取内核")}
+             }
+-            if(notice.isNotBlank())PanelCard{Text(notice,fontSize=13.sp,color=Mint)}
++            if(notice.isNotBlank())PanelCard{Text(notice,fontSize=13.sp,color=MaterialTheme.colorScheme.primary)}
+             Spacer(Modifier.height(6.dp))
+-            Text("moksu · 心中都是莫",
++            Text("moksu · 闲鱼 心中都是莫 · 定制",
+                 fontSize=11.sp,color=Color(0xFF91A0B8))
+         }
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+index c899253..c587be1 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.launch
+ import me.weishu.kernelsu.R
+ import me.weishu.kernelsu.Natives
++import me.weishu.kernelsu.mok.MokFlashPermit
+ import me.weishu.kernelsu.getKernelVersion
+ import me.weishu.kernelsu.ui.LocalUiMode
+ import me.weishu.kernelsu.ui.UiMode
+@@ -59,6 +60,22 @@ fun InstallScreen() {
+     val loadingDialog = rememberLoadingDialog()
+ 
+     var installMethod by rememberSaveable { mutableStateOf<InstallMethod?>(null) }
++    var permitFirst by rememberSaveable { mutableStateOf(false) }
++    var permitSecond by rememberSaveable { mutableStateOf(false) }
++    var importStage by remember { mutableStateOf(0) }
++    var proposedMethod by remember { mutableStateOf<InstallMethod?>(null) }
++    val permitPicker = rememberLauncherForActivityResult(
++        ActivityResultContracts.OpenDocument()
++    ) { uri ->
++        if (uri == null) { importStage=0; return@rememberLauncherForActivityResult }
++        val accepted=MokFlashPermit.importFromUri(context, uri)
++        if (accepted) {
++            if(importStage==1) { permitFirst=true;permitSecond=false;proposedMethod?.let {installMethod=it} }
++            if(importStage==2) {permitSecond=true}
++        }
++        importStage=0
++    }
++
+     var downloadDialogShown by rememberSaveable { mutableStateOf(false) }
+     var remotePartitions by rememberSaveable { mutableStateOf(emptyList<String>()) }
+     var remotePartitionSelectionIndex by rememberSaveable { mutableIntStateOf(0) }
+@@ -158,7 +175,11 @@ fun InstallScreen() {
+ 
+     val blockModulesInvalidMessage = stringResource(R.string.install_block_modules_invalid)
+     val onInstall = {
+-        if (!isBlockModulesValid(effectiveBlockModules)) {
++        val requiredScope = if(installMethod is InstallMethod.DirectInstall ||
++            installMethod is InstallMethod.DirectInstallToInactiveSlot) "flash" else "patch"
++        if (!permitFirst || !permitSecond || !MokFlashPermit.authorized(context, requiredScope)) {
++            showMessage("需两次读取作者签名的设备专属授权 TXT 文件，确认后才能修补或刷写")
++        } else if (!isBlockModulesValid(effectiveBlockModules)) {
+             showMessage(blockModulesInvalidMessage)
+         } else installMethod?.let { method ->
+             // Guard action itself, not just list items, against restored/stale choice.
+@@ -291,10 +312,20 @@ fun InstallScreen() {
+     )
+     val actions = InstallScreenActions(
+         onBack = dropUnlessResumed { navigator.pop() },
+-        onSelectMethod = { method -> installMethod = method },
+-        onDownloadFile = { downloadDialogShown = true },
++        onSelectMethod = { method ->
++            permitFirst=false;permitSecond=false
++            proposedMethod=method
++            importStage=1
++            permitPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
++        },
++        onDownloadFile = {
++            if(permitFirst && MokFlashPermit.authorized(context,"patch")) downloadDialogShown=true
++            else showMessage("请先读取设备专属授权 TXT 文件")
++        },
+         onSelectBootImage = {
+-            selectImageLauncher.launch(Intent(Intent.ACTION_GET_CONTENT).apply { type = "application/octet-stream" })
++            if(!permitFirst || !MokFlashPermit.authorized(context,"patch")) {
++                showMessage("请先读取设备专属授权 TXT 文件")
++            } else selectImageLauncher.launch(Intent(Intent.ACTION_GET_CONTENT).apply { type = "application/octet-stream" })
+         },
+         onUploadLkm = {
+             selectLkmLauncher.launch(Intent(Intent.ACTION_GET_CONTENT).apply { type = "application/octet-stream" })
+@@ -311,6 +342,16 @@ fun InstallScreen() {
+             }
+         },
+         onNext = {
++            val required = if (installMethod is InstallMethod.DirectInstall ||
++                installMethod is InstallMethod.DirectInstallToInactiveSlot) "flash" else "patch"
++            if (!permitFirst || !MokFlashPermit.authorized(context,required)) {
++                proposedMethod=installMethod
++                importStage=1
++                permitPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
++            } else if (!permitSecond) {
++                importStage=2
++                permitPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
++            } else {
+             val isLkmSelected = lkmSelection != LkmSelection.KmiNone
+             val isKmiUnknown = currentKmi.isBlank()
+             val isKmiUnresolved = when (installMethod) {
+@@ -325,6 +366,7 @@ fun InstallScreen() {
+             } else {
+                 onInstall()
+             }
++            }
+         },
+         onAdvancedOptionsClicked = {
+             advancedOptionsShown = !advancedOptionsShown
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt
+index 35742ad..0e1bec3 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt
+@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
+ import kotlinx.parcelize.Parcelize
+ import me.weishu.kernelsu.BuildConfig
+ import me.weishu.kernelsu.Natives
++import me.weishu.kernelsu.mok.MokFlashPermit
+ import me.weishu.kernelsu.core.tasks.BootKernelVersion
+ import me.weishu.kernelsu.core.tasks.ExtractImage
+ import me.weishu.kernelsu.core.tasks.ProbeResult
+@@ -355,6 +356,12 @@ fun installBoot(
+     onStdout: (String) -> Unit,
+     onStderr: (String) -> Unit,
+ ): FlashResult {
++    // Last line of defence: enforce owner permit at the real boot-patch entrypoint.
++    val scope = if (bootUri == null) "flash" else "patch"
++    if (!MokFlashPermit.authorized(ksuApp, scope)) {
++        onStderr("缺少有效的设备专属刷写授权文件")
++        return FlashResult(-1, "缺少有效的设备专属刷写授权文件", false)
++    }
+     val resolver = ksuApp.contentResolver
+ 
+     val bootFile = bootUri?.let { uri ->
+@@ -424,6 +431,10 @@ fun downloadBoot(
+     onStdout: (String) -> Unit,
+     onStderr: (String) -> Unit,
+ ): FlashResult {
++    if (!MokFlashPermit.authorized(ksuApp, "patch")) {
++        onStderr("缺少有效的设备专属修补授权文件")
++        return FlashResult(-1, "缺少有效的设备专属修补授权文件", false)
++    }
+     val bootFile = File(ksuApp.cacheDir, "download-boot.img")
+     var probedKmi: String? = null
+     try {
+diff --git a/manager/app/src/main/res/drawable/mok_calc_icon.xml b/manager/app/src/main/res/drawable/mok_calc_icon.xml
+new file mode 100644
+index 0000000..cbf8c4c
+--- /dev/null
++++ b/manager/app/src/main/res/drawable/mok_calc_icon.xml
+@@ -0,0 +1,5 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
++ <path android:fillColor="#2469D9" android:pathData="M19,14 L89,14 Q94,14 94,20 L94,88 Q94,94 88,94 L20,94 Q14,94 14,88 L14,20 Q14,14 19,14Z"/>
++ <path android:fillColor="#EAF2FF" android:pathData="M25,25 L83,25 L83,42 L25,42Z"/>
++ <path android:strokeColor="#FFFFFF" android:strokeWidth="7" android:strokeLineCap="round" android:pathData="M30,56 L43,56 M37,49 L37,63 M59,55 L78,55 M30,77 L44,77 M58,74 L78,74 M58,81 L78,81"/>
++</vector>
+diff --git a/manager/app/src/main/res/drawable/mok_calendar_icon.xml b/manager/app/src/main/res/drawable/mok_calendar_icon.xml
+new file mode 100644
+index 0000000..08ddd07
+--- /dev/null
++++ b/manager/app/src/main/res/drawable/mok_calendar_icon.xml
+@@ -0,0 +1,7 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
++ <path android:fillColor="#FFFFFF" android:pathData="M18,18 L90,18 L90,92 L18,92Z"/>
++ <path android:fillColor="#E75B59" android:pathData="M18,18 L90,18 L90,44 L18,44Z"/>
++ <path android:strokeColor="#E75B59" android:strokeWidth="5" android:strokeLineCap="round" android:pathData="M34,12 L34,28 M73,12 L73,28"/>
++ <path android:strokeColor="#627185" android:strokeWidth="4" android:pathData="M29,59 L43,59 M55,59 L69,59 M29,72 L43,72 M55,72 L69,72"/>
++ <path android:strokeColor="#C9D1DC" android:strokeWidth="2" android:pathData="M18,18 L90,18 L90,92 L18,92Z"/>
++</vector>
+diff --git a/manager/app/src/main/res/raw/moksu_flash_verify_cert.der b/manager/app/src/main/res/raw/moksu_flash_verify_cert.der
+new file mode 100644
+index 0000000000000000000000000000000000000000..7747392d8abe54e406b81ead70de1cef1955ea11
+GIT binary patch
+literal 774
+zcmXqLVrDXEVtloLnTe5!iIZXRRL?atw7Q-d@Un4gwRyCC=VfH%W@RwYGvqelWMd9x
+zVH0L@_A}%M$^$uE!fX+liTS?yhI|G*AOU7!*4+H;;!*<zab6=cLjyx&Ln9M2Bhx4e
+zej`I8GXqOQOQ-<JCN?oDAv=nZm4Ug5k)HwRcrK<UMn;CMf(z~+G_O~&?z5ROm9M+_
+z&-cue!aN5T-TB<lmUDzhYS|I%?SV(FCoT$j81I#2`udo|yev*x#^p&TQqE0Z=Ke`&
+zN61r7L7h_$J4Bbgf2yAIARt-!a@tk9WPX9_=Z-d)@87-nKGV9$ae?u}$<G<hZpNm+
+zT^Jo~xIEur#mmc&3(FQ8oiCISe7F6d(KP$UBYbnTls_F5VJ&zdqyF&d(kyO%hP{HO
+z$LmrH<M>|Qf0HCXiPg11Li^p6O%Hb~9&r&+xNxbZWq!87oNez{ltt)2h|b&idK>?C
+zuV*LU+&r~6$w-VTM@39qIQGt-&l9x+r=@+A+`9C;=LV_ITMQcXr)}E3Ig^Q*k%4is
+zqJg}DEHEZy`B=nQL_%AI3SPdec=T%9ym`edSM^;jC~ig$L}1JU1Cfy-d|{jNWHl9)
+zmDa5(5>`7uITw9A)c)q<`nhqHQu7T}c;22e)vh?ZF+{QAhx31xMGKTpu$kWxJ>tD6
+zC98Jf%9l?jZ!LQM+4O40;|-4+KC|4}B{x^mc2VFZ#s$4EPyLST{(5K)L(^R@4y|u_
+z3$(@ZJ|5q_#`9r&h3;PwuBoq=9l6D~;s=|MMg5!;3mbwW+`{XUewb#8JazW4P>MBe
+zP<kF(GPQ=`0himW|NUFSx|fP|XKYLV(K746{k=aFmiaurUAH<tbji}MeltIsot%<o
+zSrgDRt@XwZ@9A5g&9vRVD7d6?f5d-QcJKcsTpYefHolH@n5wm?@zSSxM>oxyH)oq7
+HJIe(CVyQYS
+
+literal 0
+HcmV?d00001
+
+diff --git a/tools/issue_flash_permit.py b/tools/issue_flash_permit.py
+new file mode 100644
+index 0000000..39cb04e
+--- /dev/null
++++ b/tools/issue_flash_permit.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++"""Issue device-bound, signed moksu flash permit (never embeds issuer secret into Android APK).
++Usage (on owner's own PC, with original signing P12 kept private):
++  python issue_flash_permit.py --p12 /private/signing-key.p12 \
++    --device MO-0123456789ABCDEF01234567 --hours 24 --out flash-permit.txt
++Requires: pip install cryptography
++Enter P12 password in a concealed prompt. The signer's cert must match moksu v3.3.1.
++"""
++from __future__ import annotations
++import argparse
++import base64
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++import getpass
++import os
++import re
++import uuid
++import hashlib
++
++EXPECTED_CERT_SHA256="df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8"
++
++
++def sign(p12_path: Path, device: str, hours: int, out: Path, operations: str="patch,flash") -> str:
++    from cryptography.hazmat.primitives.serialization import pkcs12, Encoding
++    from cryptography.hazmat.primitives.asymmetric import padding, rsa
++    from cryptography.hazmat.primitives import hashes
++    if not re.fullmatch(r"MO-[0-9A-F]{24}",device): raise ValueError("invalid device installation code")
++    if not 1<=hours<=24*30:raise ValueError("validity must be 1..720h")
++    if operations not in {"patch","flash","patch,flash"}:raise ValueError("invalid operations")
++    if out.exists():raise FileExistsError(f"Output exists; refusing overwrite: {out}")
++    pw=getpass.getpass("P12 password: ")
++    try:
++        key, cert, _=pkcs12.load_key_and_certificates(p12_path.read_bytes(), pw.encode())
++    finally:
++        del pw
++    if cert is None or key is None or not isinstance(key, rsa.RSAPrivateKey):raise ValueError("RSA signing certificate/private key not found")
++    if hashlib.sha256(cert.public_bytes(Encoding.DER)).hexdigest()!=EXPECTED_CERT_SHA256:
++        raise ValueError("signing key certificate does not match moksu original")
++    expiry=(datetime.now(timezone.utc)+timedelta(hours=hours)).replace(microsecond=0).isoformat().replace("+00:00","Z")
++    content=f"MOKSU-FLASH-1\ndevice={device}\nexpires={expiry}\noperations={operations}\nserial={uuid.uuid4()}\n"
++    signature=key.sign(content.encode(), padding.PKCS1v15(), hashes.SHA256())
++    token=content+"signature="+base64.b64encode(signature).decode()+"\n"
++    fd=os.open(out,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
++    try:
++        with os.fdopen(fd,'w',encoding='utf-8',newline='\n') as f:f.write(token)
++    except BaseException:
++        out.unlink(missing_ok=True);raise
++    return hashlib.sha256(token.encode()).hexdigest()
++
++if __name__=="__main__":
++    ap=argparse.ArgumentParser()
++    ap.add_argument("--p12",type=Path,required=True,help="Original PKCS12 in secure location")
++    ap.add_argument("--device",required=True,help="Device installation code displayed by manager")
++    ap.add_argument("--hours",type=int,default=24,help="Permit validity up to 720 hours")
++    ap.add_argument("--operations",choices=("patch","flash","patch,flash"),default="patch,flash")
++    ap.add_argument("--out",type=Path,required=True,help="New signed TXT path (never overwrite)")
++    args=ap.parse_args()
++    sha=sign(args.p12,args.device,args.hours,args.out,args.operations)
++    print(f"Signed permit created: {args.out} (SHA-256 {sha})")
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index 5da74ef..db845f5 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -27,6 +27,7 @@ var state = {
+   appSearch: "",
+   appFilter: "all",     // all | granted | plain | system
+   autoGrantRules: [],
++  metadataRetries: 0,
+   // 超级用户日志
+   sulog: [],
+   sulogQuery: "",
+@@ -227,18 +228,13 @@ function stealthRow(s) {
+ 
+   var sw = el("div", "sw" + (s.stealth ? " on" : ""));
+   sw.setAttribute("role", "switch");
+-  sw.title = s.stealth ? "点击关闭隐身" : "点击开启隐身";
++  sw.title = s.stealth ? "关闭隐身" : "在 Android 管理器设置恢复方式后开启";
++  sw.setAttribute("aria-checked",s.stealth ? "true" : "false");
+   sw.onclick = function () {
+     if (state.busy) return;
+     var want = !s.stealth;
+     if (want) {
+-      var code = s.stealthCode || "";
+-      var how = "可用管理器内的卡密/数字验证入口恢复。拨号器需启用系统的呼叫重定向角色，或使用兼容特殊密令。";
+-      confirmSheet("开启隐身模式？",
+-        "开启后将限制管理器的敏感入口，但安装判断不被伪造。" +
+-        "桌面图标保持可见。\n\n" + how +
+-        "\n\n网页版开启时也可以在这里关闭。",
+-        "开启", function () { setStealth(true); });
++      toast("请在 Android 管理器设置六位密码和桌面入口后开启");
+     } else {
+       confirmSheet("关闭隐身模式？", "关闭后管理器界面立即恢复正常显示。", "关闭",
+         function () { setStealth(false); });
+@@ -249,6 +245,7 @@ function stealthRow(s) {
+ }
+ 
+ function setStealth(enable) {
++  if(enable) {toast("请先在手机管理器设置六位密码和伪装入口");return;}
+   state.busy = true;
+   post("/api/stealth", { enable: enable ? "1" : "0" }).then(function (r) {
+     toast(r.message || (r.ok ? "已切换" : (r.error || "操作失败")));
+@@ -312,32 +309,26 @@ function renderStatus(s) {
+   device.appendChild(row("cpu","内核版本",s.kernel));
+   device.appendChild(row("layers","KMI",s.kmi));
+   device.appendChild(row("hard-drive","运行模式",s.lkm ? "LKM" : (s.gki ? "GKI" : "未确认")));
++  var installCode=el("div","device-code-line");
++  var codeValue=el("strong","device-id-value","等待 Android 管理器同步设备码");
++  installCode.appendChild(el("span",null,"本机安装设备码"));
++  installCode.appendChild(codeValue);
++  var copyId=el("button","btn","复制设备码");
++  copyId.onclick=function(){if(codeValue.textContent.indexOf("MO-")===0) copyText(codeValue.textContent,function(){toast("设备码已复制")});};
++  installCode.appendChild(copyId);
++  device.appendChild(installCode);
+   box.appendChild(device);
++  get("/api/device/code").then(function(v){
++    if(v&&v.ok&&/^MO-[0-9A-F]{24}$/.test(v.code||"")) codeValue.textContent=v.code;
++    else codeValue.textContent="尚未同步，请打开 Android 管理器";
++  }).catch(function(){codeValue.textContent="暂时不可用";});
+ 
+   var privacy=el("div","card tight");
+   var title3=el("div","card-title");title3.appendChild(ic("lock"));title3.appendChild(el("span",null,"隐藏与恢复"));privacy.appendChild(title3);
+   privacy.appendChild(row("terminal","Root shell",s.rootShell ? "可用" : "不可用",true,s.rootShell ? "ok" : "warn"));
+   privacy.appendChild(row("shield","安全模式",s.safeMode ? "开启" : "关闭",true,s.safeMode ? "warn" : "ok"));
+   privacy.appendChild(stealthRow(s));
+-  var codeArea=el("div","code-controls");
+-  var hint=el("div","fld-h","可设置 4 位数字密令；系统拨号器的四位直拨需要支持呼叫重定向功能。");
+-  codeArea.appendChild(hint);
+-  var line=el("div","security-actions");
+-  var input=el("input","code-input");input.type="password";input.autocomplete="off";input.inputMode="numeric";input.maxLength=4;input.minLength=4;input.placeholder="新的 4 位数字";
+-  input.setAttribute("aria-label","新的四位恢复码");
+-  var save=el("button","btn","设置密令");
+-  save.onclick=function(){
+-    var pin=input.value.trim();
+-    if(!/^[0-9]{4}$/.test(pin)){toast("请填写恰好 4 位数字");return;}
+-    save.disabled=true;
+-    post("/api/stealth-code",{code:pin}).then(function(v){
+-      if(!v.ok)throw new Error(v.error||"保存失败");
+-      input.value=""; toast("密令已更新");
+-    }).catch(function(e){toast("修改失败："+e.message);})
+-      .then(function(){save.disabled=false;});
+-  };
+-  line.appendChild(input);line.appendChild(save);codeArea.appendChild(line);
+-  privacy.appendChild(codeArea);
++  privacy.appendChild(el("div","hint","恢复入口由 Android 管理器中的计算器或日历管理；网页不保存恢复密码。"));
+   box.appendChild(privacy);
+ 
+   var network=el("div","card tight");
+@@ -621,6 +612,11 @@ function loadApps() {
+   get("/api/apps").then(function (r) {
+     state.apps = (r && r.list) ? r.list : [];
+     renderApps();
++    if (state.tab === "users" && state.metadataRetries < 2 &&
++        state.apps.some(function(a){return !a.label || a.label === a.pkg || !a.icon;})) {
++      state.metadataRetries++;
++      setTimeout(function(){if(state.tab === "users")loadApps();},6500);
++    }
+   }).catch(function (e) {
+     clear(box);
+     var emp = el("div", "empty err");
+@@ -694,7 +690,7 @@ function renderApps() {
+   }
+   var named = list.filter(function (g) { return g.primary.label && g.primary.label !== g.primary.pkg; }).length;
+   if (named < list.length) {
+-    var msg=el("div","metadata-hint", "已同步 " + named + "/" + list.length + " 组应用名称。未识别的应用请打开 Android 管理器刷新同步；包名仅作为附加信息。 ");
++    var msg=el("div","metadata-hint", "已获取 " + named + "/" + list.length + " 组应用资料。应用名称尚未取得时会直接显示包名；可打开 Android 管理器刷新图标。 ");
+     box.appendChild(msg);
+   }
+   list.forEach(function (g) { box.appendChild(appCard(g)); });
+@@ -770,14 +766,14 @@ function appCard(g) {
+   var mt = el("div", "mt");
+   var nm = el("div", "m-name");
+   nm.appendChild(el("span", null, g.primary.label && g.primary.label !== g.primary.pkg
+-    ? g.primary.label : (g.system ? "系统应用" : "未识别的应用")));
++    ? g.primary.label : g.primary.pkg));
+   if (g.granted) nm.appendChild(tagNode("shield-check", "已授权", "ok"));
+   if (g.configured && !g.granted) nm.appendChild(tagNode("settings-2", "已配置", "dim"));
+   if (g.system) nm.appendChild(tagNode("cpu", "系统", "dim"));
+   if (g.userId > 0) nm.appendChild(tagNode("users", "分身 " + g.userId, "dim"));
+   mt.appendChild(nm);
+   mt.appendChild(el("div", "m-meta",
+-    "UID " + g.uid + (g.apps.length > 1 ? " · 同组 " + g.apps.length + " 个应用" : "")));
++    g.primary.pkg + " · UID " + g.uid + (g.apps.length > 1 ? " · 同组 " + g.apps.length + " 个应用" : "")));
+   if (g.apps.length > 1) {
+     mt.appendChild(el("div", "m-desc", g.apps.map(function (a) { return a.pkg; }).join("\n")));
+   }
+@@ -1352,7 +1348,7 @@ function renderAbout() {
+   t1.appendChild(ic("info"));
+   t1.appendChild(el("span", null, "关于"));
+   c1.appendChild(t1);
+-  c1.appendChild(row("package", "网页管理器", "moksu · 心中都是莫"));
++  c1.appendChild(row("package", "网页管理器", "moksu · 闲鱼 心中都是莫 · 定制"));
+   c1.appendChild(row("shield", "访问范围", "仅本机 127.0.0.1", true, "ok"));
+   c1.appendChild(row("link", "访问鉴权", "专属链接（地址里带 256 位随机密钥）", true, "ok"));
+   c1.appendChild(row("ban", "防爆破", "密钥 256 位随机，猜不出来", true, "ok"));
+@@ -1424,7 +1420,7 @@ function show(tab) {
+   window.scrollTo(0, 0);
+   if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+   if (tab === "status") loadStatus();
+-  if (tab === "users") { loadGrantRules(); loadApps(); }
++  if (tab === "users") { state.metadataRetries=0; loadGrantRules(); loadApps(); }
+   if (tab === "modules") loadModules();
+   if (tab === "sulog") loadSulog();
+   if (tab === "security") renderSecurity();
+diff --git a/userspace/ksud/assets/webadmin/index.html b/userspace/ksud/assets/webadmin/index.html
+index a5d1c46..bb09af6 100644
+--- a/userspace/ksud/assets/webadmin/index.html
++++ b/userspace/ksud/assets/webadmin/index.html
+@@ -16,7 +16,7 @@
+ <body>
+ <div class="app-frame">
+   <aside class="sidebar" aria-label="主导航">
+-    <div class="brand"><span class="brand-logo" aria-hidden="true"><svg class="ic"><use href="#i-shield-check"/></svg></span><span class="brand-text"><strong>moksu</strong><span>心中都是莫</span></span></div>
++    <div class="brand"><span class="brand-logo" aria-hidden="true"><svg class="ic"><use href="#i-shield-check"/></svg></span><span class="brand-text"><strong>moksu</strong><span>闲鱼 心中都是莫 · 定制</span></span></div>
+     <div class="side-caption">管理</div>
+     <nav class="main-nav" aria-label="桌面导航">
+       <button type="button" data-tab="status" class="on"><svg class="ic"><use href="#i-layout-dashboard"/></svg><span>设备概览</span></button>
+@@ -32,7 +32,7 @@
+   <div class="workplace">
+     <header class="topbar">
+       <div class="top-name"><div class="crumb"><span>moksu</span> <span class="crumb-sep">/</span> <span id="crumb-current">设备概览</span></div><div class="top-subtitle">管理器网页版</div></div>
+-      <div class="top-actions"><span class="offline-pill"><span class="health-dot" aria-hidden="true"></span> 本机</span><button class="icon-btn" id="refresh" type="button" title="刷新" aria-label="刷新当前页面"><svg class="ic"><use href="#i-refresh-cw"/></svg></button><button class="icon-btn" id="theme" type="button" title="主题" aria-label="选择主题"><svg class="ic"><use href="#i-palette"/></svg></button></div>
++      <div class="top-actions"><span class="owner-credit">闲鱼 心中都是莫 · 定制</span><span class="offline-pill"><span class="health-dot" aria-hidden="true"></span> 本机</span><button class="icon-btn" id="refresh" type="button" title="刷新" aria-label="刷新当前页面"><svg class="ic"><use href="#i-refresh-cw"/></svg></button><button class="icon-btn" id="theme" type="button" title="主题" aria-label="选择主题"><svg class="ic"><use href="#i-palette"/></svg></button></div>
+     </header>
+     <main id="main">
+       <div class="page-heading"><div><h1 id="page-title">设备概览</h1><p id="page-description">设备状态与管理概览</p></div></div>
+@@ -51,7 +51,7 @@
+       </section>
+       <section id="t-security" aria-label="设置"></section>
+       <section id="t-about" aria-label="关于"></section>
+-      <footer class="app-footer">moksu · 心中都是莫</footer>
++      <footer class="app-footer">moksu · 闲鱼 心中都是莫 · 定制</footer>
+     </main>
+   </div>
+ </div>
+diff --git a/userspace/ksud/assets/webadmin/material-r4.css b/userspace/ksud/assets/webadmin/material-r4.css
+index 19f361d..0dec3d2 100644
+--- a/userspace/ksud/assets/webadmin/material-r4.css
++++ b/userspace/ksud/assets/webadmin/material-r4.css
+@@ -137,3 +137,9 @@ main section.on{display:block!important}
+  #toast{bottom:calc(86px + env(safe-area-inset-bottom));max-width:90vw}
+ }
+ @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
++
++/* R5 owner credit and installation-code, no extra fonts or remote resources. */
++.owner-credit{font-size:12px;font-weight:600;color:var(--muted);max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
++.device-code-line{margin-top:16px;padding:12px;border:1px solid var(--line,rgba(127,127,127,.22));border-radius:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
++.device-id-value{font-size:13px;letter-spacing:.025em;word-break:break-all;flex:1;min-width:140px}
++@media(max-width:700px){.owner-credit{display:none}}
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+index 4d96cd4..af12fcd 100644
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -315,6 +315,21 @@ pub fn authed_rel(path: &str, token: &str) -> Option<String> {
+ /// All paths are derived from the already protected webadmin.conf location.
+ fn grant_rules_path() -> String { format!("{}.grant-rules.json", config_path()) }
+ fn app_metadata_path() -> String { format!("{}.app-metadata.json", config_path()) }
++fn device_code_path() -> String { format!("{}.device-code", config_path()) }
++fn valid_install_code(s: &str) -> bool {
++    s.len() == 27 && s.starts_with("MO-") && s[3..].bytes().all(|b|b.is_ascii_digit() || (b'A'..=b'F').contains(&b))
++}
++fn install_code_get() -> String {
++    let code = std::fs::read_to_string(device_code_path()).unwrap_or_default();
++    if valid_install_code(code.trim()) {code.trim().to_owned()} else {String::new()}
++}
++fn install_code_save(s: &str) -> Result<String,String> {
++    if !valid_install_code(s) {return Err("设备码格式不正确".to_string());}
++    private_write(&device_code_path(),s.as_bytes()).map_err(|e|e.to_string())?;
++    if install_code_get() != s {return Err("设备码写入后校验失败".into());}
++    Ok("设备码已同步".into())
++}
++
+ 
+ fn valid_cert_sha256(s: &str) -> bool {
+     s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+@@ -955,6 +970,16 @@ fn handle(server: &Server, stream: TcpStream) -> std::io::Result<()> {
+             } else { Err("无效 UID".to_string()) };
+             respond(&mut writer, 200, JSON, result_json(out).as_bytes())
+         }
++        "/api/device/code" if method == "GET" => {
++            let code = install_code_get();
++            let body = serde_json::json!({"ok":true,"code":code}).to_string();
++            respond(&mut writer,200,JSON,body.as_bytes())
++        }
++        "/api/device/code" => {
++            require_post!();
++            let value=params.get("code").map(String::as_str).unwrap_or("");
++            respond(&mut writer,200,JSON,result_json(install_code_save(value)).as_bytes())
++        }
+         "/api/app/metadata" => {
+             require_post!();
+             let raw = params.get("data").cloned().unwrap_or_default();
+@@ -1168,18 +1193,16 @@ fn handle(server: &Server, stream: TcpStream) -> std::io::Result<()> {
+         "/api/stealth" => {
+             require_post!();
+             let enable = params.get("enable").map(String::as_str) == Some("1");
+-            let out = server.backend.set_stealth(enable);
++            // Enabling is restricted to Android manager: only it can verify that
++            // a six-digit recovery code and a selectable launcher alias exist.
++            let out = if enable {
++                Err("请在 Android 管理器内设置恢复密码后启用隐藏".to_string())
++            } else { server.backend.set_stealth(false) };
+             respond(&mut writer, 200, JSON, result_json(out).as_bytes())
+         }
+         "/api/stealth-code" => {
+             require_post!();
+-            let code = params.get("code").cloned().unwrap_or_default();
+-            let out = if valid_code(&code) {
+-                server.backend.set_stealth_code(&code)
+-            } else {
+-                Err("密令只能是 4~12 位数字".to_string())
+-            };
+-            respond(&mut writer, 200, JSON, result_json(out).as_bytes())
++            respond(&mut writer, 410, JSON, br#"{"ok":false,"error":"拨号恢复入口已停用"}"#)
+         }
+         // 其余（含模块自定义图标：前端 404 会退回首字母头像）一律 404
+         _ => respond(&mut writer, 404, PLAIN, b"Not Found"),
