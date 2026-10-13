@@ -53,7 +53,7 @@ def add_compat(new_root,old_root):
     modernpath=new/"userspace/ksud/src/module.rs"
     modern=modernpath.read_text()
     fragments=[
-       definition(oldmod,"pub struct ExecOptions"),
+       "#[derive(Default)]\n" + definition(oldmod,"pub struct ExecOptions"),
        definition(oldmod,"pub fn parse_exec_options"),
        definition(oldmod,"fn run_busybox_capture"),
        definition(oldmod,"pub fn list_package_names"),
