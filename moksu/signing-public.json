@@ -1,1 +1,1 @@
-{"certificate_sha256":"42e9789dc78d83bf117c98ab37dcdaf6d2fe52b96e7c2d74120f08eda2c446f8","certificate_size":764,"certificate_size_hex":"0x2fc","package_name":"com.moksu.manager","app_name":"moksu","version_name":"2.29.2","signing_private_key_in_repository":false}
+{"certificate_sha256":"38f3a0f16338c7d9f15b5dcfc420bea33523a98cad209c2c0020b8551be5d40f","certificate_size":1097,"certificate_size_hex":"0x449","package_name":"com.moksu.manager","app_name":"moksu","version_name":"2.29.6","signing_private_key_in_repository":false}
