@@ -40,6 +40,7 @@ jobs:
           python3 config/moksu/features/port_stealth.py source old
           python3 config/moksu/features/port_android.py source old
           python3 config/moksu/features/port_web.py source old
+          python3 config/moksu/features/port_web_compat.py source old
           mkdir -p out
           tar --exclude=.git --exclude=.gradle --exclude=target --exclude=build -czf out/moksu331-restored-source.tar.gz -C source .
       - uses: actions/setup-java@v5
@@ -91,6 +92,7 @@ jobs:
           python3 config/moksu/ksu331/apply_release.py source source config
           python3 config/moksu/features/port_stealth.py source old
           python3 config/moksu/features/port_web.py source old
+          python3 config/moksu/features/port_web_compat.py source old
           mkdir -p out
           python3 - <<'PY'
           from pathlib import Path
