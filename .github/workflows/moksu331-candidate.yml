@@ -1,11 +1,7 @@
 name: moksu 3.3.1 full-feature candidate
+# Full-fork UI migration still has compilation conflicts; run manually when fixing.
 on:
-  push:
-    branches: [moksu-ksu331-release-6ee3e003]
-    paths:
-      - 'moksu/ksu331/**'
-      - 'moksu/signing-public.json'
-      - '.github/workflows/moksu331-candidate.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
