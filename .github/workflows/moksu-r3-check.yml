@@ -47,6 +47,8 @@ jobs:
           git apply ../config/moksu/r3/r3-final-source.patch
           git apply --check ../config/moksu/r3/r3-security-supplement.patch
           git apply ../config/moksu/r3/r3-security-supplement.patch
+          git apply --check ../config/moksu/r3/r3-superuser-label.patch
+          git apply ../config/moksu/r3/r3-superuser-label.patch
           grep -q 'Never force-open a ROOT dashboard' userspace/ksud/src/webadmin.rs
           grep -q 'Never fall back to placing a REAL call' manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
           # Hidden page must not expose normal pager, modules, superuser or settings.
