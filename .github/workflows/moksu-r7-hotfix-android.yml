@@ -5,6 +5,7 @@ on:
     paths:
       - 'moksu/r7/presentation-recovery-hotfix.patch'
       - '.github/workflows/moksu-r7-hotfix-android.yml'
+      - 'moksu/r7/compose-setter-hotfix.patch'
 permissions:
   contents: read
   actions: read
@@ -41,11 +42,16 @@ jobs:
           cd source
           git apply --check ../config/moksu/r7/presentation-recovery-hotfix.patch
           git apply ../config/moksu/r7/presentation-recovery-hotfix.patch
+          git apply --check ../config/moksu/r7/compose-setter-hotfix.patch
+          git apply ../config/moksu/r7/compose-setter-hotfix.patch
           python3 - <<'PY'
           from pathlib import Path
           p=Path('manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt').read_text()
           assert 'val presentationRestored = MokDisplayState.setUninstalled' in p
           assert 'if (state != 1) Pair(state, state == 0)' in p
+          extras=Path('manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt').read_text()
+          assert 'private fun toggleUninstalledDisplay(value: Boolean)' in extras
+          assert 'private fun setUninstalledDisplay(value: Boolean)' not in extras
           PY
           cd ..
           tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r7-recovery-source.tar.gz -C source .
