@@ -174,7 +174,8 @@ def patch(repo,official,config):
         for p in srcdir.glob("ic_launcher*"):
             target=repo/(APP+"res/"+folder)/p.name
             target.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copy2(p,target)
+            if p.resolve() != target.resolve():
+                shutil.copy2(p,target)
     for rel,t in out.items():
         if rel.endswith(".xml"):xdoc(t)
         target=repo/rel
