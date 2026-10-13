@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="7k" data-scheme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b1020">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<title>moksu · 心中都是莫</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="__P__/a/themes.css">
+<link rel="stylesheet" href="__P__/a/app.css">
+</head>
+<body>
+<div class="app-frame">
+  <aside class="sidebar" aria-label="侧边导航">
+    <div class="brand">
+      <div class="brand-logo" aria-hidden="true"><span>m</span></div>
+      <div class="brand-text">
+        <strong>moksu</strong>
+        <span>心中都是莫</span>
+      </div>
+    </div>
+    <div class="side-caption">设备空间</div>
+    <nav aria-label="功能导航">
+      <button class="on" data-tab="status"><span class="nav-glyph">◈</span><span>运行概览</span></button>
+      <button data-tab="users"><span class="nav-glyph">♙</span><span>超级用户</span></button>
+      <button data-tab="modules"><span class="nav-glyph">▦</span><span>模块中心</span></button>
+      <button data-tab="sulog"><span class="nav-glyph">≡</span><span>授权日志</span></button>
+      <button data-tab="security"><span class="nav-glyph">◇</span><span>安全设置</span></button>
+      <button data-tab="about"><span class="nav-glyph">ⓘ</span><span>关于</span></button>
+    </nav>
+    <div class="side-spacer"></div>
+    <div class="side-status"><span class="health-dot" aria-hidden="true"></span>
+      <div><strong>本地安全连接</strong><small>仅限此设备访问</small></div>
+    </div>
+    <div class="side-sign">moksu <span>· 心中都是莫</span></div>
+  </aside>
+
+  <div class="workplace">
+    <header class="topbar">
+      <div class="top-name">
+        <div class="crumb">控制中心 <span class="crumb-sep">/</span> <span id="crumb-current">运行概览</span></div>
+        <div class="top-subtitle">设备状态与权限管理</div>
+      </div>
+      <div class="top-actions">
+        <span class="offline-pill"><span class="health-dot"></span> 本地运行</span>
+        <button class="icon-btn" id="refresh" title="刷新当前页面" aria-label="刷新当前页面">⟳</button>
+        <button class="icon-btn" id="theme" title="切换外观" aria-label="切换外观">◐</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">MOKSU CONTROL PANEL</p>
+          <h1 id="page-title">运行概览</h1>
+          <p id="page-description">查看内核状态、运行信息与管理入口</p>
+        </div>
+        <div class="page-mark">◈</div>
+      </div>
+
+      <section id="t-status" class="on" aria-label="运行概览"></section>
+      <section id="t-users" aria-label="超级用户">
+        <div class="section-intro"><strong>权限列表</strong><span>直接授权 · 修改高级规则</span></div>
+        <div id="user-toolbar"></div>
+        <div id="users"></div>
+      </section>
+      <section id="t-modules" aria-label="模块中心">
+        <div class="section-intro"><strong>已安装模块</strong><span>启停、动作脚本与 WebUI</span></div>
+        <div id="mod-toolbar"></div>
+        <div id="modules"></div>
+      </section>
+      <section id="t-sulog" aria-label="授权日志">
+        <div class="section-intro"><strong>权限记录</strong><span>搜索、筛选和清理</span></div>
+        <div id="sulog-toolbar"></div>
+        <div id="sulog"></div>
+      </section>
+      <section id="t-security" aria-label="安全设置"></section>
+      <section id="t-about" aria-label="关于"></section>
+      <footer class="app-footer"><span>moksu · 心中都是莫</span><span>LOCAL-FIRST · ROOT CONTROL</span></footer>
+    </main>
+  </div>
+</div>
+<div id="mask"><div class="sheet" id="sheet"></div></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="__P__/a/app.js"></script>
+</body>
+</html>
