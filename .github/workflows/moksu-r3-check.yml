@@ -49,10 +49,11 @@ jobs:
           ! grep -q 'MokRecoveryActivity::class.java' manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
           grep -q 'if (hiddenMode) return@buildList' manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
           grep -q 'method.uri == null' manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+          test ! -e manager/app/src/main/res/xml/moksu_browser_auto_service.xml
           node --check userspace/ksud/assets/webadmin/app.js
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
-          for f in ["manager/app/src/main/AndroidManifest.xml", "manager/app/src/main/res/values/strings.xml", "manager/app/src/main/res/xml/moksu_browser_auto_service.xml"]:
+          for f in ["manager/app/src/main/AndroidManifest.xml", "manager/app/src/main/res/values/strings.xml"]:
               ET.parse(f)
           PY
           cd ..
