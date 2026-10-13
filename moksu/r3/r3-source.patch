@@ -1,0 +1,1534 @@
+diff --git a/manager/app/src/main/AndroidManifest.xml b/manager/app/src/main/AndroidManifest.xml
+index 19c9bba..dec340f 100644
+--- a/manager/app/src/main/AndroidManifest.xml
++++ b/manager/app/src/main/AndroidManifest.xml
+@@ -9,9 +9,10 @@
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+     <application android:name=".KernelSUApplication" android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:directBootAware="true" android:fullBackupContent="@xml/backup_rules" android:hasFragileUserData="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.KernelSU" android:zygotePreloadName="me.weishu.kernelsu.magica.AppZygotePreload">
+-        <service android:name=".mok.MokBrowserAutoService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="@string/moksu_browser_auto_service">
+-            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+-            <meta-data android:name="android.accessibilityservice" android:resource="@xml/moksu_browser_auto_service" />
++        <service android:name=".mok.MokCallRedirectionService"
++            android:exported="true"
++            android:permission="android.permission.BIND_CALL_REDIRECTION_SERVICE">
++            <intent-filter><action android:name="android.telecom.CallRedirectionService" /></intent-filter>
+         </service>
+         <receiver android:name=".mok.MokPackageEventReceiver" android:exported="false">
+             <intent-filter>
+@@ -27,6 +28,7 @@
+                 <data android:scheme="android_secret_code" android:host="*" />
+             </intent-filter>
+         </receiver>
++        <activity android:name="me.weishu.kernelsu.mok.MokRecoveryActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/Theme.KernelSU" />
+         <activity android:name="me.weishu.kernelsu.mok.MoksuExtrasActivity" android:exported="false" android:directBootAware="false" android:theme="@style/Theme.KernelSU" />
+         <activity android:name="me.weishu.kernelsu.mok.MokLoginActivity" android:exported="false" android:directBootAware="false" android:excludeFromRecents="true" android:theme="@style/Theme.KernelSU" android:windowSoftInputMode="adjustResize" />
+         <activity android:name=".ui.MainActivity" android:exported="true" android:theme="@style/Theme.KernelSU.Starting" android:windowSoftInputMode="adjustResize">
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokAuthGate.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokAuthGate.kt
+index 9f365f4..3f3950b 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokAuthGate.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokAuthGate.kt
+@@ -4,6 +4,7 @@ package me.weishu.kernelsu.mok
+ import android.app.Activity
+ import android.content.Intent
+ import me.weishu.kernelsu.ui.MainActivity
++import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.ui.webui.WebUIActivity
+ 
+ object MokAuthGate {
+@@ -16,6 +17,11 @@ object MokAuthGate {
+     /** All Activity entry paths call this before rendering or dispatching an Intent. */
+     fun ensureAccess(activity: Activity, incoming: Intent = activity.intent): Boolean {
+         if (activity.isFinishing || activity.isDestroyed) return false
++        // Hidden home is a limited, nonprivileged UI: no card/PIN dialogs.
++        // Never exempt module WebUI, extras, flashing or normal mode.
++        if (activity is MainActivity && runCatching { Natives.stealthState() }.getOrDefault(-1) == 1) {
++            return true
++        }
+         if (MokActivation.hasAccess(activity)) return true
+         val copy = Intent(incoming).apply {
+             selector = null
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokRecoveryActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokRecoveryActivity.kt
+new file mode 100644
+index 0000000..e2c2890
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokRecoveryActivity.kt
+@@ -0,0 +1,95 @@
++package me.weishu.kernelsu.mok
++
++import android.content.Intent
++import android.os.Bundle
++import android.view.WindowManager
++import androidx.activity.ComponentActivity
++import androidx.activity.compose.setContent
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.material3.Button
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.OutlinedTextField
++import androidx.compose.material3.Scaffold
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.text.input.KeyboardType
++import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.ui.text.input.PasswordVisualTransformation
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.lifecycleScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import me.weishu.kernelsu.Natives
++import me.weishu.kernelsu.ui.MainActivity
++
++/** Verified access: never pretend an unrecognized kernel is healthy. */
++class MokRecoveryActivity:ComponentActivity() {
++    private var input by mutableStateOf("")
++    private var useCard by mutableStateOf(false)
++    private var busy by mutableStateOf(false)
++    private var info by mutableStateOf("")
++    override fun onCreate(savedInstanceState:Bundle?) {
++        super.onCreate(savedInstanceState)
++        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
++        setContent { RecoveryScreen() }
++    }
++    private fun submit() {
++        if (busy) return
++        val code=input.trim()
++        if ((!useCard && !code.matches(Regex("[0-9]{4,12}"))) || (useCard && code.length !in 8..128)) {
++            info=if (useCard) "请输入原有访问卡密" else "请输入已设置的数字恢复码"
++            return
++        }
++        busy=true;info="正在验证…"
++        lifecycleScope.launch {
++            val ok=withContext(Dispatchers.IO) {
++                if (useCard) {
++                    val valid=MokActivation.activate(this@MokRecoveryActivity,code) == MokActivation.Result.SUCCESS
++                    if (!valid) false else {
++                        val previous=runCatching { Natives.stealthState() }.getOrDefault(-1)
++                        if (previous == 1) runCatching { Natives.stealthSet(false) }.getOrDefault(false)
++                        runCatching { Natives.stealthState() }.getOrDefault(-1) == 0
++                    }
++                } else MokWebDeviceBridge.dialToggle(this@MokRecoveryActivity,code)
++            }
++            input="";busy=false
++            if (ok) {
++                info="验证成功，正在返回管理器"
++                startActivity(Intent(this@MokRecoveryActivity,MainActivity::class.java)
++                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
++                finish()
++            } else info="验证失败或内核不可用，请检查恢复码与内核版本"
++        }
++    }
++    @Composable private fun RecoveryScreen() {
++        MaterialTheme {
++            Scaffold { padding ->
++                Column(modifier=Modifier.fillMaxSize().padding(padding).padding(24.dp),
++                    verticalArrangement=Arrangement.spacedBy(16.dp)) {
++                    Text("管理器验证",style=MaterialTheme.typography.headlineMedium)
++                    Text("验证完成后重新检测内核状态",style=MaterialTheme.typography.bodyMedium)
++                    OutlinedTextField(value=input,onValueChange={if(it.length<=128)input=it},
++                        modifier=Modifier.fillMaxWidth(),label={Text(if(useCard)"访问卡密" else "数字恢复码")},
++                        singleLine=true,visualTransformation=PasswordVisualTransformation(),
++                        keyboardOptions=KeyboardOptions(keyboardType=if(useCard) KeyboardType.Password else KeyboardType.NumberPassword),
++                        enabled=!busy)
++                    Button(onClick={submit()},enabled=!busy,modifier=Modifier.fillMaxWidth()) { Text("验证并恢复") }
++                    TextButton(onClick={ input="";info="";useCard=!useCard },enabled=!busy) {
++                        Text(if(useCard)"使用数字恢复码" else "使用原有访问卡密")
++                    }
++                    if(info.isNotBlank())Text(info,style=MaterialTheme.typography.bodySmall)
++                }
++            }
++        }
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+index 03de755..21b97af 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+@@ -1,6 +1,5 @@
+ package me.weishu.kernelsu.mok
+ 
+-import android.accessibilityservice.AccessibilityService
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
+@@ -10,12 +9,15 @@ import android.graphics.Bitmap
+ import android.graphics.Canvas
+ import android.os.Build
+ import android.os.SystemClock
++import android.telecom.CallRedirectionService
++import android.telecom.PhoneAccountHandle
++import android.net.Uri
+ import android.util.Base64
+ import android.util.Log
+-import android.view.accessibility.AccessibilityEvent
+ import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.ui.MainActivity
+ import me.weishu.kernelsu.ui.util.WebAdminCli
++import me.weishu.kernelsu.ui.util.getRootShell
+ import org.json.JSONArray
+ import org.json.JSONObject
+ import java.io.ByteArrayOutputStream
+@@ -73,16 +75,16 @@ internal object MokWebDeviceBridge {
+ 
+     private fun iconBase64(pm: PackageManager, pkg: String): String = runCatching {
+         val drawable = pm.getApplicationIcon(pkg)
+-        val image = Bitmap.createBitmap(42, 42, Bitmap.Config.ARGB_8888)
++        val image = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
+         val canvas = Canvas(image)
+-        drawable.setBounds(0, 0, 42, 42)
++        drawable.setBounds(0, 0, 48, 48)
+         drawable.draw(canvas)
+         val bytes = ByteArrayOutputStream().use { out ->
+             image.compress(Bitmap.CompressFormat.PNG, 100, out)
+             out.toByteArray()
+         }
+         image.recycle()
+-        if (bytes.size > 7500) "" else "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
++        if (bytes.size > 11000) "" else "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+     }.getOrDefault("")
+ 
+     private fun record(pm: PackageManager, pkg: String): JSONObject? = runCatching {
+@@ -100,15 +102,26 @@ internal object MokWebDeviceBridge {
+             try {
+                 val base = baseUrl() ?: return@Thread
+                 val pm = app.packageManager
+-                @Suppress("DEPRECATION")
+-                val infos = pm.getInstalledPackages(0)
+-                // Server enforces 16 entries and 64 KiB body; use small chunks.
+-                infos.chunked(5).forEach { chunk ->
++                // Sync the EXACT packages shown by Root daemon rather than an unrelated
++                // installed-package enumeration. This fixes blank labels/icons when
++                // Android package visibility and daemon UID list differ.
++                val apps = request(base, "/api/apps").optJSONArray("list") ?: return@Thread
++                val pkgs = LinkedHashSet<String>()
++                for (i in 0 until apps.length()) {
++                    val pkg = apps.optJSONObject(i)?.optString("pkg").orEmpty()
++                    if (pkg.matches(Regex("[A-Za-z][A-Za-z0-9_.]{1,199}"))) pkgs.add(pkg)
++                }
++                // Bound request size: PNG <= 11 KiB, 2 icons < 64 KiB HTTP limit.
++                var failed = false
++                pkgs.chunked(2).forEach { chunk ->
+                     val array = JSONArray()
+-                    chunk.forEach { p -> record(pm,p.packageName)?.let { array.put(it) } }
+-                    if (array.length() > 0) request(base,"/api/app/metadata",mapOf("data" to array.toString()))
++                    chunk.forEach { pkg -> record(pm,pkg)?.let { array.put(it) } }
++                    if (array.length() > 0) {
++                        val response=request(base,"/api/app/metadata",mapOf("data" to array.toString()))
++                        if (!response.optBoolean("ok")) failed = true
++                    }
+                 }
+-                lastSync = SystemClock.elapsedRealtime()
++                if (!failed) lastSync = SystemClock.elapsedRealtime()
+             } catch (e: Exception) {
+                 Log.w("moksu", "应用资料同步暂不可用: ${e.javaClass.simpleName}")
+             } finally { running.set(false) }
+@@ -139,18 +152,39 @@ internal object MokWebDeviceBridge {
+         request(base,"/api/browser/auto").optBoolean("enabled",false) to base
+     }.getOrNull()
+ 
+-    fun dialToggle(context: Context, supplied: String) {
+-        val base = baseUrl() ?: return
+-        val expected = request(base,"/api/status").optString("stealthCode")
+-        if (expected.length !in 4..12 || !expected.all(Char::isDigit) || supplied != expected) return
++    /** Four digits are intercepted only when the user grants the system's call-redirection
++     * role. Read the same root-owned PIN file used by ksud, even if the web server is off.
++     * Never log or persist the plaintext PIN in the manager app.
++     */
++    fun matchesDialCode(supplied: String): Boolean {
++        if (!supplied.matches(Regex("[0-9]{4,12}"))) return false
++        val out = ArrayList<String>()
++        val err = ArrayList<String>()
++        val result = runCatching {
++            getRootShell().newJob()
++                .add("cat /data/adb/sevenk/stealth_code 2>/dev/null")
++                .to(out, err).exec()
++        }.getOrNull()
++        val expected = if (result?.code == 0) out.joinToString("").trim() else "7070"
++        return expected.matches(Regex("[0-9]{4,12}")) && supplied == expected
++    }
++
++    fun dialToggle(context: Context, supplied: String): Boolean {
++        if (!matchesDialCode(supplied)) return false
+         val before = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-        if (before !in 0..1) return
+-        val result = runCatching { Natives.stealthSet(before == 0) }.getOrDefault(false)
++        if (before !in 0..1) return false
++        if (!runCatching { Natives.stealthSet(before == 0) }.getOrDefault(false)) return false
+         val after = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-        if (result && after == 0 && before == 1) {
+-            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
++        if (after == before || after !in 0..1) return false
++        if (after == 0) {
++            runCatching {
++                context.startActivity(Intent(context, MainActivity::class.java)
++                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
++            }
+         }
++        return true
+     }
++
+ }
+ 
+ /** Only receives OS package events. No package-name-only authorization is permitted. */
+@@ -181,32 +215,27 @@ class MokDialCodeReceiver : BroadcastReceiver() {
+     }
+ }
+ 
+-/** Explicit opt-in service. Does not read screen contents or intercept dialer keystrokes. */
+-class MokBrowserAutoService : AccessibilityService() {
+-    private val browsers = setOf(
+-        "com.android.chrome", "com.microsoft.emmx", "org.mozilla.firefox",
+-        "com.brave.browser", "com.sec.android.app.sbrowser", "com.opera.browser",
+-        "mark.via", "com.kiwibrowser.browser"
+-    )
+-    @Volatile private var last = 0L
+-    private val opening = AtomicBoolean(false)
+-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+-        val browser = event.packageName?.toString() ?: return
+-        if (browser !in browsers) return
+-        val now = SystemClock.elapsedRealtime()
+-        if (now - last < 30000 || !opening.compareAndSet(false,true)) return
+-        last = now
++/** Requires the user to grant Android's call redirection role in Settings.
++ * Only intercepts a call when the entered digits exactly match the locally configured PIN.
++ * Every other call is passed through unchanged; this is not a general dialer monitor.
++ */
++class MokCallRedirectionService: CallRedirectionService() {
++    override fun onPlaceCall(handle: Uri, initialPhoneAccount: PhoneAccountHandle,
++                             allowInteractiveResponse: Boolean) {
++        val supplied=if(handle.scheme == "tel") handle.schemeSpecificPart.orEmpty() else ""
++        if (!supplied.matches(Regex("[0-9]{4}"))) {
++            placeCallUnmodified();return
++        }
+         Thread({
+             try {
+-                val status = MokWebDeviceBridge.configAutoOpen() ?: return@Thread
+-                if (!status.first) return@Thread
+-                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(status.second))
+-                    .setPackage(browser).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+-                startActivity(intent)
+-            } catch (_: Exception) { /* browser not supported: do not loop */ }
+-            finally { opening.set(false) }
+-        },"moksu-browser").start()
++                if (MokWebDeviceBridge.matchesDialCode(supplied)) {
++                    // Prevent the recovery PIN from placing an actual telephone call.
++                    cancelCall()
++                    MokWebDeviceBridge.dialToggle(applicationContext, supplied)
++                } else {
++                    placeCallUnmodified()
++                }
++            } catch (_: Exception) { placeCallUnmodified() }
++        },"moksu-call-redirection").start()
+     }
+-    override fun onInterrupt() {}
+ }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+index c1ab67f..97ee8fa 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -1,6 +1,8 @@
+ package me.weishu.kernelsu.mok
+ 
+ import android.os.Bundle
++import android.content.Intent
++import android.app.role.RoleManager
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
+ import androidx.compose.foundation.BorderStroke
+@@ -59,6 +61,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+     private var stealthSupported by mutableStateOf(false)
+     private var stealthEnabled by mutableStateOf(false)
+     private var notice by mutableStateOf("")
++    private var callRedirectEnabled by mutableStateOf(false)
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         if (!MokAuthGate.ensureAccess(this)) return
+@@ -72,6 +75,21 @@ class MoksuExtrasActivity:ComponentActivity() {
+     override fun onResume() {
+         super.onResume()
+         if (!MokAuthGate.ensureAccess(this)) return
++        val rm = getSystemService(RoleManager::class.java)
++        callRedirectEnabled = rm?.isRoleHeld(RoleManager.ROLE_CALL_REDIRECTION) == true
++    }
++    private fun enableDialRecovery() {
++        val rm=getSystemService(RoleManager::class.java)
++        if (rm?.isRoleAvailable(RoleManager.ROLE_CALL_REDIRECTION) != true) {
++            notice="当前系统拨号器不提供四位直拨的系统接口，可使用特殊密令或管理器内恢复"
++            return
++        }
++        if (rm.isRoleHeld(RoleManager.ROLE_CALL_REDIRECTION)) {
++            notice="四位数字拨号恢复已授权"
++            return
++        }
++        runCatching { startActivity(rm.createRequestRoleIntent(RoleManager.ROLE_CALL_REDIRECTION)) }
++            .onFailure { notice="无法打开系统拨号权限设置，请使用管理器内验证" }
+     }
+     private fun refresh() {
+         if (busy) return
+@@ -132,6 +150,13 @@ class MoksuExtrasActivity:ComponentActivity() {
+                 else "隐身切换失败，状态未得到内核确认"
+             stealthState=if(stealthEnabled) "内核隐身已开启" else "内核隐身已关闭"
+             busy=false
++            // Leave the privileged configuration screen immediately after hiding;
++            // the normal home must not keep displaying a root control panel.
++            if (check.first && check.second == 1 && value) {
++                startActivity(Intent(this@MoksuExtrasActivity, me.weishu.kernelsu.ui.MainActivity::class.java)
++                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
++                finish()
++            }
+         }
+     }
+     private fun rotateToken() {
+@@ -212,10 +237,12 @@ class MoksuExtrasActivity:ComponentActivity() {
+             }
+             PanelCard {
+                 Text("浏览器自动入口",fontSize=18.sp,fontWeight=FontWeight.Bold)
+-                Text("网页设置可打开或关闭；需要手动启用 Android 无障碍服务。",fontSize=12.sp,color=Color(0xFFB2BED7))
++                Text("可在网页版开启。使用后台 Root 服务检测浏览器启动，不需要无障碍权限。",fontSize=12.sp,color=Color(0xFFB2BED7))
+                 OutlinedButton(onClick={
+-                    startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+-                }) { Text("打开无障碍授权设置") }
++                    if(webEnabled && webUrl.startsWith("http://127.0.0.1:")) {
++                        WebAdminCli.openInBrowser(this@MoksuExtrasActivity,webUrl)
++                    } else notice="请先开启网页管理服务"
++                },enabled=webEnabled) { Text("打开网页设置") }
+             }
+             PanelCard {
+                 Text("专属隐藏模式",fontSize=18.sp,fontWeight=FontWeight.Bold)
+@@ -226,7 +253,13 @@ class MoksuExtrasActivity:ComponentActivity() {
+                         enabled=!busy&&stealthSupported)
+                 }
+                 HorizontalDivider(color=Color(0xFF30445B))
+-                Text("拨号盘输入 *#*#数字密令#*#* 可切换隐藏状态（实际支持取决于系统拨号器）。",fontSize=12.sp,color=Color(0xFFB2BED7))
++                Text("四位数字＋拨号键：需在系统中允许呼叫重定向；未授权时使用兼容特殊密令或管理器内验证。",fontSize=12.sp,color=Color(0xFFB2BED7))
++                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
++                    OutlinedButton(onClick={enableDialRecovery()}) { Text(if(callRedirectEnabled) "拨号入口已启用" else "启用四位拨号入口") }
++                    OutlinedButton(onClick={
++                        startActivity(Intent(this@MoksuExtrasActivity, MokRecoveryActivity::class.java))
++                    }) { Text("输入密码 / 恢复") }
++                }
+                 Text("使用与本版本匹配的隐藏内核后可以启用；若未装配套内核，请先安装再操作。",
+                     fontSize=12.sp,color=Color(0xFFB2BED7))
+                 OutlinedButton(onClick={refresh()},enabled=!busy){Text("重新读取内核")}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+index 2e03270..78755fb 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+@@ -115,7 +115,9 @@ class MainActivity : ComponentActivity() {
+     override fun onResume() {
+         super.onResume()
+         if (!me.weishu.kernelsu.mok.MokAuthGate.ensureAccess(this)) return
+-        me.weishu.kernelsu.mok.MokWebDeviceBridge.syncAsync(applicationContext)
++        if (runCatching { Natives.stealthState() }.getOrDefault(-1) != 1) {
++            me.weishu.kernelsu.mok.MokWebDeviceBridge.syncAsync(applicationContext)
++        }
+     }
+ 
+     private val intentChannel = Channel<Intent>(capacity = Channel.BUFFERED)
+@@ -138,7 +140,10 @@ class MainActivity : ComponentActivity() {
+         val isManager = Natives.isManager
+         if (isManager && Natives.kernelUAPIVersion == Natives.managerUAPIVersion) install()
+ 
+-        if (savedInstanceState == null) intent?.let { intentChannel.trySend(it) }
++        // Ignore deep links while disguised; only open the unprivileged home.
++        if (savedInstanceState == null && runCatching { Natives.stealthState() }.getOrDefault(-1) != 1) {
++            intent?.let { intentChannel.trySend(it) }
++        }
+ 
+         setContent {
+             val viewModel = viewModel<MainActivityViewModel>()
+@@ -164,6 +169,11 @@ class MainActivity : ComponentActivity() {
+             }
+ 
+             val navigator = rememberNavigator(Route.Main)
++            val hiddenMode = runCatching { Natives.stealthState() }.getOrDefault(-1) == 1
++            LaunchedEffect(hiddenMode) {
++                // A previously restored module/flash route must not survive hiding.
++                if (hiddenMode) navigator.replaceAll(listOf(Route.Main))
++            }
+             val systemDensity = LocalDensity.current
+             val density = remember(systemDensity, uiState.pageScale) {
+                 Density(systemDensity.density * uiState.pageScale, systemDensity.fontScale)
+@@ -195,9 +205,9 @@ class MainActivity : ComponentActivity() {
+                     var flashBackEnabled by remember(flashRoute) { mutableStateOf(false) }
+                     val mainScreenEntry = @Composable {
+                         MainScreen(
+-                            initialPage = selectedMainPage,
++                            initialPage = if (hiddenMode) 0 else selectedMainPage,
+                             pagerInterceptionMode = uiState.pagerInterceptionMode,
+-                            onPageChanged = viewModel::setSelectedMainPage,
++                            onPageChanged = { if (!hiddenMode) viewModel.setSelectedMainPage(it) },
+                         )
+                     }
+ 
+@@ -252,9 +262,9 @@ class MainActivity : ComponentActivity() {
+                     when (uiMode) {
+                         UiMode.Material -> androidx.compose.material3.Scaffold(
+                             containerColor = MaterialTheme.colorScheme.surfaceContainer
+-                        ) { navDisplay() }
++                        ) { if (hiddenMode) mainScreenEntry() else navDisplay() }
+ 
+-                        UiMode.Miuix -> Scaffold { navDisplay() }
++                        UiMode.Miuix -> Scaffold { if (hiddenMode) mainScreenEntry() else navDisplay() }
+                     }
+                     SideEffect { contentReady = true }
+                 }
+@@ -265,6 +275,11 @@ class MainActivity : ComponentActivity() {
+     override fun onNewIntent(intent: Intent) {
+         super.onNewIntent(intent)
+         if (!me.weishu.kernelsu.mok.MokAuthGate.ensureAccess(this, intent)) return
++        if (runCatching { Natives.stealthState() }.getOrDefault(-1) == 1) {
++            // Do not dispatch externally supplied flash / module routes in hidden mode.
++            setIntent(Intent(Intent.ACTION_MAIN).setClass(this, MainActivity::class.java))
++            return
++        }
+         setIntent(intent)
+         intentChannel.trySend(intent)
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
+index 9935b3c..ad272f2 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
+@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.vector.ImageVector
+ import androidx.compose.ui.input.nestedscroll.nestedScroll
++import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.platform.LocalUriHandler
+ import androidx.compose.ui.platform.UriHandler
+ import androidx.compose.ui.res.stringResource
+@@ -80,6 +81,7 @@ fun HomePagerMaterial(
+     bottomInnerPadding: Dp,
+ ) {
+     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
++    val hiddenMode = runCatching { Natives.stealthState() }.getOrDefault(-1) == 1
+ 
+     ExpressiveScaffold(
+         topBar = { TopBar(scrollBehavior = scrollBehavior) },
+@@ -93,18 +95,18 @@ fun HomePagerMaterial(
+                 .padding(horizontal = 16.dp),
+             verticalArrangement = Arrangement.spacedBy(13.dp)
+         ) {
+-            if (state.checkUpdateEnabled) {
++            if (!hiddenMode && state.checkUpdateEnabled) {
+                 UpdateCard(state = state, actions = actions)
+             }
+-            if (state.showManagerPrBuildWarning) {
++            if (!hiddenMode && state.showManagerPrBuildWarning) {
+                 WarningCard(stringResource(id = R.string.home_pr_build_warning), level = WarningLevel.Notice)
+-            } else if (state.showKernelPrBuildWarning) {
++            } else if (!hiddenMode && state.showKernelPrBuildWarning) {
+                 WarningCard(stringResource(id = R.string.home_pr_kernel_warning), level = WarningLevel.Notice)
+             }
+-            if (state.showGkiWarning) {
++            if (!hiddenMode && state.showGkiWarning) {
+                 WarningCard(stringResource(id = R.string.home_gki_warning), level = WarningLevel.Notice)
+             }
+-            if (state.requiresNewKernel) {
++            if (!hiddenMode && state.requiresNewKernel) {
+                 WarningCard(
+                     stringResource(
+                         id = if (state.canInstallKernelUpdate) R.string.require_kernel_version else R.string.require_kernel_version_gki
+@@ -112,21 +114,21 @@ fun HomePagerMaterial(
+                     onClick = if (state.canInstallKernelUpdate) actions.onInstallClick else null
+                 )
+             }
+-            if (state.requiresNewManager) {
++            if (!hiddenMode && state.requiresNewManager) {
+                 WarningCard(
+                     stringResource(
+                         id = R.string.require_manager_version
+                     )
+                 )
+             }
+-            if (state.showLkmUpdate) {
++            if (!hiddenMode && state.showLkmUpdate) {
+                 WarningCard(
+                     message = stringResource(R.string.home_lkm_update_available),
+                     level = WarningLevel.Notice,
+                     onClick = actions.onInstallClick,
+                 )
+             }
+-            if (state.showRootWarning) {
++            if (!hiddenMode && state.showRootWarning) {
+                 WarningCard(stringResource(id = R.string.grant_root_failed))
+             }
+             StatusCard(
+@@ -134,7 +136,7 @@ fun HomePagerMaterial(
+                 actions = actions,
+             )
+             InfoCard(systemInfo = state.systemInfo)
+-            SupportLinks(onOpenUrl = actions.onOpenUrl)
++            if (!hiddenMode) SupportLinks(onOpenUrl = actions.onOpenUrl)
+             Spacer(
+                 Modifier.height(
+                     bottomInnerPadding + if (!Natives.isFullFeatured())
+@@ -184,7 +186,7 @@ private fun TopBar(
+ ) {
+     LargeFlexibleTopAppBar(
+         title = { Text(stringResource(R.string.app_name)) },
+-        actions = { RebootListPopup() },
++        actions = { if (runCatching { Natives.stealthState() }.getOrDefault(-1) != 1) RebootListPopup() },
+         colors = expressiveTopAppBarColors(),
+         windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+         scrollBehavior = scrollBehavior
+@@ -196,15 +198,23 @@ private fun StatusCard(
+     state: HomeUiState,
+     actions: HomeActions,
+ ) {
+-    // Hidden kernel state must not be represented as an uninstalled kernel with an install action.
++    // Hidden is a PRESENTATION state: keep real root permissions unchanged.
++    // Use the same uninstalled title but route only to image repair. NEVER
++    // open a PIN/card dialog from this card.
+     if (runCatching { Natives.stealthState() }.getOrDefault(-1) == 1) {
+         Surface(
+             modifier = Modifier.fillMaxWidth(),
+             shape = MaterialTheme.shapes.large,
+-            color = MaterialTheme.colorScheme.surface,
++            color = MaterialTheme.colorScheme.errorContainer,
++            contentColor = MaterialTheme.colorScheme.onErrorContainer,
++            onClick = actions.onInstallClick,
+         ) {
+-            Text("设备状态正常", modifier = Modifier.padding(22.dp),
+-                style = MaterialTheme.typography.titleMedium)
++            ListItem(
++                headlineContent = { Text(stringResource(R.string.home_not_installed)) },
++                supportingContent = { Text("修复镜像") },
++                leadingContent = { Icon(Icons.Rounded.Warning, null) },
++                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
++            )
+         }
+         return
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
+index 697edcd..af14204 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt
+@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.vector.ImageVector
+ import androidx.compose.ui.input.nestedscroll.nestedScroll
++import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.platform.LocalUriHandler
+ import androidx.compose.ui.platform.UriHandler
+ import androidx.compose.ui.res.stringResource
+@@ -95,6 +96,7 @@ fun HomePagerMiuix(
+     bottomInnerPadding: Dp,
+ ) {
+     val scrollBehavior = MiuixScrollBehavior()
++    val hiddenMode = runCatching { Natives.stealthState() }.getOrDefault(-1) == 1
+     val enableBlur = LocalEnableBlur.current
+     val backdrop = rememberBlurBackdrop(enableBlur)
+     val blurActive = backdrop != null
+@@ -127,18 +129,18 @@ fun HomePagerMiuix(
+                         horizontalAlignment = Alignment.CenterHorizontally,
+                         verticalArrangement = Arrangement.spacedBy(12.dp),
+                     ) {
+-                        if (state.checkUpdateEnabled) {
++                        if (!hiddenMode && state.checkUpdateEnabled) {
+                             UpdateCard(state = state, actions = actions)
+                         }
+-                        if (state.showManagerPrBuildWarning) {
++                        if (!hiddenMode && state.showManagerPrBuildWarning) {
+                             WarningCard(stringResource(id = R.string.home_pr_build_warning), level = WarningLevel.Notice)
+                         } else if (state.showKernelPrBuildWarning) {
+                             WarningCard(stringResource(id = R.string.home_pr_kernel_warning), level = WarningLevel.Notice)
+                         }
+-                        if (state.showGkiWarning) {
++                        if (!hiddenMode && state.showGkiWarning) {
+                             WarningCard(stringResource(id = R.string.home_gki_warning), level = WarningLevel.Notice)
+                         }
+-                        if (state.requiresNewKernel) {
++                        if (!hiddenMode && state.requiresNewKernel) {
+                             WarningCard(
+                                 stringResource(
+                                     id = if (state.canInstallKernelUpdate) R.string.require_kernel_version else R.string.require_kernel_version_gki
+@@ -146,21 +148,21 @@ fun HomePagerMiuix(
+                                 onClick = if (state.canInstallKernelUpdate) actions.onInstallClick else null
+                             )
+                         }
+-                        if (state.requiresNewManager) {
++                        if (!hiddenMode && state.requiresNewManager) {
+                             WarningCard(
+                                 stringResource(
+                                     id = R.string.require_manager_version
+                                 )
+                             )
+                         }
+-                        if (state.showLkmUpdate) {
++                        if (!hiddenMode && state.showLkmUpdate) {
+                             WarningCard(
+                                 message = stringResource(R.string.home_lkm_update_available),
+                                 level = WarningLevel.Notice,
+                                 onClick = actions.onInstallClick,
+                             )
+                         }
+-                        if (state.showRootWarning) {
++                        if (!hiddenMode && state.showRootWarning) {
+                             WarningCard(stringResource(id = R.string.grant_root_failed))
+                         }
+                         StatusCard(
+@@ -171,7 +173,7 @@ fun HomePagerMiuix(
+                             systemInfo = state.systemInfo,
+                             modifier = Modifier.fillMaxWidth(),
+                         )
+-                        SupportLinks(
++                        if (!hiddenMode) SupportLinks(
+                             onOpenUrl = actions.onOpenUrl,
+                             modifier = Modifier.fillMaxWidth(),
+                         )
+@@ -233,7 +235,7 @@ private fun TopBar(
+             color = barColor,
+             title = stringResource(R.string.app_name),
+             actions = {
+-                RebootListPopupMiuix()
++                if (runCatching { Natives.stealthState() }.getOrDefault(-1) != 1) RebootListPopupMiuix()
+             },
+             scrollBehavior = scrollBehavior
+         )
+@@ -245,10 +247,15 @@ private fun StatusCard(
+     state: HomeUiState,
+     actions: HomeActions,
+ ) {
+-    // In hidden mode keep the install route inaccessible instead of spoofing a broken installation.
++    // A hidden manager looks uninstalled; its status card only enters image repair.
++    // Never reveal the recovery PIN dialog by tapping an ordinary UI element.
+     if (runCatching { Natives.stealthState() }.getOrDefault(-1) == 1) {
+-        Card {
+-            BasicComponent(title = "设备状态正常", summary = "")
++        Card(onClick = actions.onInstallClick) {
++            BasicComponent(
++                title = stringResource(R.string.home_not_installed),
++                summary = "修复镜像",
++                startAction = { Icon(Icons.Rounded.ErrorOutline, null) },
++            )
+         }
+         return
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+index 0e0d514..be4d450 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+@@ -23,6 +23,7 @@ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.launch
+ import me.weishu.kernelsu.R
++import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.getKernelVersion
+ import me.weishu.kernelsu.ui.LocalUiMode
+ import me.weishu.kernelsu.ui.UiMode
+@@ -48,6 +49,7 @@ import top.yukonga.miuix.kmp.basic.SnackbarHostState as MiuixSnackbarHostState
+ fun InstallScreen() {
+     val navigator = LocalNavigator.current
+     val context = LocalContext.current
++    val hiddenMode = runCatching { Natives.stealthState() }.getOrDefault(-1) == 1
+     val snackbarHost = remember { SnackbarHostState() }
+     val miuixSnackbarHost = remember { MiuixSnackbarHostState() }
+     val uiMode = LocalUiMode.current
+@@ -77,8 +79,8 @@ fun InstallScreen() {
+ 
+     // Pre-fill the block list with the known anti-root modules actually loaded
+     // on this device, once. It only takes effect once the user opts in.
+-    LaunchedEffect(Unit) {
+-        if (!blockModulesPrefilled) {
++    LaunchedEffect(hiddenMode) {
++        if (!hiddenMode && !blockModulesPrefilled) {
+             blockModulesPrefilled = true
+             val detected = getLoadedBlockableModules()
+             if (detected.isNotEmpty() && blockModules.isBlank()) {
+@@ -97,9 +99,14 @@ fun InstallScreen() {
+     val selectFileTip = stringResource(id = R.string.select_file_tip, defaultPartition)
+     val selectFileTipNoGki = stringResource(id = R.string.select_file_tip_nogki)
+     val downloadFileMsg = stringResource(id = R.string.download_dialog_msg)
+-    val installMethodOptions = remember(rootAvailable, isAbDevice, isGkiDevice, selectFileTip, selectFileTipNoGki, downloadFileMsg) {
++    val installMethodOptions = remember(rootAvailable, isAbDevice, isGkiDevice, selectFileTip, selectFileTipNoGki, downloadFileMsg, hiddenMode) {
+         buildList {
+-            add(InstallMethod.SelectFile(summary = if (isGkiDevice) selectFileTip else selectFileTipNoGki))
++            // Disguised mode exposes only the user-selected boot image patch flow.
++            // It must not offer DirectInstall even when su is technically available.
++            add(InstallMethod.SelectFile(
++                label = if (hiddenMode) R.string.moksu_repair_image else R.string.select_file,
++                summary = if (isGkiDevice) selectFileTip else selectFileTipNoGki))
++            if (hiddenMode) return@buildList
+             add(InstallMethod.DownloadFile(summary = downloadFileMsg))
+             if (rootAvailable && isGkiDevice) {
+                 add(InstallMethod.DirectInstall)
+@@ -145,6 +152,11 @@ fun InstallScreen() {
+         if (!isBlockModulesValid(effectiveBlockModules)) {
+             showMessage(blockModulesInvalidMessage)
+         } else installMethod?.let { method ->
++            // Guard action itself, not just list items, against restored/stale choice.
++            if (hiddenMode && (method !is InstallMethod.SelectFile || method.uri == null)) {
++                showMessage("请先选择需要修复的镜像文件")
++                return@let
++            }
+             navigator.push(
+                 Route.Flash(
+                     when (method) {
+@@ -238,7 +250,9 @@ fun InstallScreen() {
+     ) {
+         if (it.resultCode == Activity.RESULT_OK) {
+             it.data?.data?.let { uri ->
+-                installMethod = InstallMethod.SelectFile(uri, summary = if (isGkiDevice) selectFileTip else selectFileTipNoGki)
++                installMethod = InstallMethod.SelectFile(uri,
++                    label = if (hiddenMode) R.string.moksu_repair_image else R.string.select_file,
++                    summary = if (isGkiDevice) selectFileTip else selectFileTipNoGki)
+             }
+         }
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
+index b283d4e..3cbcbd6 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
+@@ -104,7 +104,7 @@ fun SettingPagerMaterial(
+                     SegmentedListItem(
+                         onClick = { moksuContext.startActivity(Intent(moksuContext, MoksuExtrasActivity::class.java)) },
+                         headlineContent = { Text("moksu · 心中都是莫") },
+-                        supportingContent = { Text("7SU 扩展、网页版管理器、隐身与新主题") },
++                        supportingContent = { Text("网页管理、权限及恢复设置") },
+                         leadingContent = { Icon(Icons.Filled.Security, "moksu 控制台") },
+                         trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+                     )
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
+index d6e4fa9..e16929c 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
+@@ -114,7 +114,7 @@ fun SettingPagerMiuix(
+                     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+                         ArrowPreference(
+                             title = "moksu · 心中都是莫",
+-                            summary = "7SU 网页管理器 · 隐身 · 全新 UI",
++                            summary = "网页管理 · 权限与恢复",
+                             startAction = {
+                                 Icon(
+                                     Icons.Rounded.Security,
+diff --git a/manager/app/src/main/res/values-zh-rCN/strings.xml b/manager/app/src/main/res/values-zh-rCN/strings.xml
+index 421c228..25e5189 100644
+--- a/manager/app/src/main/res/values-zh-rCN/strings.xml
++++ b/manager/app/src/main/res/values-zh-rCN/strings.xml
+@@ -333,4 +333,5 @@
+     <string name="nav_rail_collapse">收起导航栏</string>
+     <string name="settings_navigation_badge">导航栏角标</string>
+     <string name="settings_navigation_badge_summary">在导航栏显示已授权应用和已启用模块数量</string>
++    <string name="moksu_repair_image">修复镜像</string>
+ </resources>
+diff --git a/manager/app/src/main/res/values/strings.xml b/manager/app/src/main/res/values/strings.xml
+index 361ba7e..bfb2c00 100644
+--- a/manager/app/src/main/res/values/strings.xml
++++ b/manager/app/src/main/res/values/strings.xml
+@@ -341,4 +341,5 @@
+     <string name="settings_navigation_badge_summary">Show granted app and enabled module counts on the navigation bar</string>
+     <string name="moksu_browser_auto_service">moksu 浏览器自动入口</string>
+     <string name="moksu_browser_auto_description">仅在浏览器进入前台时，根据你的开关设置打开本机控制台。不读取屏幕文字。</string>
++    <string name="moksu_repair_image">Repair image</string>
+ </resources>
+diff --git a/manager/app/src/main/res/xml/moksu_browser_auto_service.xml b/manager/app/src/main/res/xml/moksu_browser_auto_service.xml
+deleted file mode 100644
+index 63277e1..0000000
+--- a/manager/app/src/main/res/xml/moksu_browser_auto_service.xml
++++ /dev/null
+@@ -1,7 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:accessibilityEventTypes="typeWindowStateChanged"
+-    android:accessibilityFeedbackType="feedbackGeneric"
+-    android:notificationTimeout="250"
+-    android:canRetrieveWindowContent="false"
+-    android:description="@string/moksu_browser_auto_description" />
+diff --git a/userspace/ksud/assets/webadmin/app.css b/userspace/ksud/assets/webadmin/app.css
+index 2a082b2..4314dc2 100644
+--- a/userspace/ksud/assets/webadmin/app.css
++++ b/userspace/ksud/assets/webadmin/app.css
+@@ -657,3 +657,111 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--card-2);padding:3
+ @media(max-width:680px){ .sheet.full {height:calc(100dvh - 14px);max-height:calc(100dvh - 14px);} }
+ /* Switching sections must not animate/retain old scroll positions. */
+ html,body { scroll-behavior:auto; overflow-anchor:none; }
++/* moksu · Material 3 adaptive interface (fresh layout, shared with built-in manager) */
++:root, [data-theme="7k"][data-scheme="dark"] {
++  --bg:#10131b; --bg-soft:#171b25; --card:#1d202b; --card-2:#252935; --card-3:#333746;
++  --line:#343846; --line-soft:rgba(229,231,255,.08); --fg:#ebecf7; --fg-dim:#c1c5d7;
++  --fg-mute:#959aaf; --accent:#b9c4ff; --accent-fg:#172753; --ok:#91dfbd;
++  --warn:#ffcf84; --bad:#ffb4ab; --info:#bac4ff;
++  --shadow:none;
++}
++[data-theme="7k"][data-scheme="light"] {
++  --bg:#f7f7ff; --bg-soft:#eef0f9; --card:#fff; --card-2:#f0eff9; --card-3:#e4e6f4;
++  --line:#dfe0ec; --line-soft:rgba(41,42,60,.08); --fg:#191d2b; --fg-dim:#555b6e;
++  --fg-mute:#70788e; --accent:#465bb6; --accent-fg:#fff; --ok:#086b49;
++  --warn:#915f00; --bad:#b3262c; --info:#405cbe; --shadow:none;
++}
++*{box-sizing:border-box}
++html{scroll-behavior:auto!important}
++body{margin:0;min-height:100vh;color:var(--fg);background:var(--bg);font-family:Roboto,"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:14px;line-height:1.55;letter-spacing:.02px}
++button, input, select, textarea{font:inherit}
++button{cursor:pointer}
++button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
++.app-frame{display:grid;grid-template-columns:274px minmax(0,1fr);min-height:100dvh;max-width:none;margin:0;gap:0}
++.sidebar{position:sticky;top:0;height:100dvh;display:flex;flex-direction:column;padding:32px 14px 17px 18px;border-right:1px solid var(--line-soft);background:var(--bg-soft);min-width:0}
++.brand{display:flex;align-items:center;gap:13px;padding:2px 15px 33px}
++.brand-logo{width:48px;height:48px;display:grid;place-items:center;border-radius:17px;background:var(--accent);color:var(--accent-fg);font-size:29px;font-weight:850;box-shadow:inset 0 -4px 0 rgba(0,0,0,.11)}
++.brand-text{display:flex;flex-direction:column;min-width:0}
++.brand-text strong{font-size:21px;font-weight:750;letter-spacing:-.75px;line-height:1.25}
++.brand-text span{font-size:11.5px;color:var(--fg-mute)}
++.side-caption{font-size:11px;color:var(--fg-mute);letter-spacing:1.6px;padding:0 20px 15px;font-weight:700}
++.sidebar nav{display:flex;flex-direction:column;gap:4px!important;padding:0!important;overflow:visible!important;flex:none}
++.sidebar nav button{display:flex;align-items:center;gap:16px;padding:11px 19px!important;margin:0;width:100%;height:51px;border:0;border-radius:27px;background:transparent;color:var(--fg-dim);font-size:14.5px;font-weight:570;text-align:left;justify-content:flex-start}
++.sidebar nav button:hover{background:color-mix(in srgb,var(--fg) 6%,transparent)}
++.sidebar nav button.on{background:color-mix(in srgb,var(--accent) 24%,var(--card-2));color:var(--fg);font-weight:740;border:0}
++.nav-glyph{width:27px;flex:none;text-align:center;font-size:25px;font-weight:450;line-height:1;opacity:.9}
++.sidebar nav button.on .nav-glyph{color:var(--accent)}
++.side-spacer{flex:1}
++.side-status{padding:15px 12px;display:flex;align-items:center;gap:11px;border-radius:22px;background:var(--card);color:var(--fg);margin:14px 0 14px;font-size:12px}
++.side-status strong,.side-status small{display:block}.side-status small{color:var(--fg-mute)}
++.health-dot{width:9px;height:9px;display:inline-block;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 13%,transparent);flex:none}
++.side-sign{color:var(--fg-dim);font-size:12px;text-align:center}.side-sign span{color:var(--fg-mute)}
++.workplace{min-width:0;background:var(--bg);min-height:100dvh}
++.topbar{height:80px;display:flex;align-items:center;gap:20px;padding:0 38px;position:sticky;top:0;z-index:6;background:color-mix(in srgb,var(--bg) 91%,transparent);backdrop-filter:blur(20px);border-bottom:1px solid var(--line-soft)}
++.top-name{display:flex;flex-direction:column;gap:0;min-width:0}
++.crumb{font-size:14px;font-weight:640;color:var(--fg)}.crumb-sep{color:var(--fg-mute);padding:0 5px}.top-subtitle{color:var(--fg-mute);font-size:12px}
++.top-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
++.offline-pill{display:flex;align-items:center;gap:9px;font-size:12px;border-radius:24px;padding:9px 14px;color:var(--fg-dim);background:var(--card);border:1px solid var(--line-soft)}
++.icon-btn{display:grid;place-items:center;flex:none;width:41px;height:41px;border:0;border-radius:50%;background:var(--card-2);color:var(--fg);font-size:23px}
++.icon-btn:active{background:var(--card-3)}
++#main{max-width:1400px;padding:28px clamp(20px,3vw,45px) 64px;margin:0 auto}
++.page-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 22px;gap:12px}
++.page-heading .eyebrow{font-size:11px;letter-spacing:2.1px;font-weight:730;color:var(--accent);margin:0 0 8px}
++#page-title{font-size:clamp(29px,3vw,41px);line-height:1.25;font-weight:770;letter-spacing:-1px;margin:0 0 6px}
++#page-description{font-size:14px;color:var(--fg-mute);margin:0}
++.page-mark{display:grid;place-items:center;min-width:58px;height:58px;font-size:27px;border-radius:24px;background:var(--card-2);color:var(--accent)}
++section{display:none;min-width:0}section.on{display:block;animation:m3-enter .19s ease-out}
++@keyframes m3-enter{from{opacity:.65;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
++.section-intro{padding:13px 2px 7px;display:flex;flex-direction:column;gap:3px;margin:0 0 8px}
++.section-intro strong{font-size:17px;font-weight:700}.section-intro span{color:var(--fg-mute);font-size:12px}
++.card{background:var(--card);border:1px solid var(--line-soft);border-radius:26px;padding:21px;box-shadow:none;margin:12px 0}
++.card.tight{padding:10px 20px}.card-title{font-size:15px;color:var(--fg);font-weight:730;display:flex;align-items:center;gap:11px;margin-bottom:15px;letter-spacing:0;text-transform:none}
++.card-title .ic{width:21px;height:21px;color:var(--accent)}
++#t-status{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch}
++#t-status:not(.on){display:none}
++#t-status > .card{margin:0}
++#t-status .hero{grid-column:1/-1;min-height:190px;display:flex;align-items:center;gap:26px;padding:31px 36px;border:0;background:linear-gradient(128deg,color-mix(in srgb,var(--accent) 23%,var(--card)),var(--card) 83%)}
++#t-status .hero .ring{width:90px;height:90px;border-radius:30px;display:grid;place-items:center;background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
++#t-status .hero.off .ring{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
++#t-status .hero .ring .ic{width:46px;height:46px}
++#t-status .hero .big{font-size:clamp(23px,3vw,34px);font-weight:770;letter-spacing:-.7px}
++#t-status .hero .small{font-size:14px;color:var(--fg-dim);margin-top:8px}
++#t-status .card:last-child:nth-child(even){grid-column:auto}
++.row{display:flex;align-items:center;gap:12px;padding:12px 1px}
++.row+.row{border-top:1px solid var(--line-soft)}
++.row .k{font-size:13px;color:var(--fg-dim);display:flex;align-items:center;gap:10px;flex:none}
++.row .v{font-size:13.5px;text-align:right;flex:1;word-break:break-word;overflow-wrap:anywhere}
++.badge{font-size:11.5px;padding:4px 11px;border-radius:15px}
++.btn{border:1px solid var(--line);background:var(--card-2);color:var(--fg);border-radius:999px;min-height:38px;padding:8px 16px;font-weight:600}
++.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:transparent}.btn.danger{background:color-mix(in srgb,var(--bad) 11%,var(--card));color:var(--bad)}
++.btn:hover{filter:brightness(1.06)}.btn:disabled{opacity:.42;cursor:not-allowed}
++.toolbar{display:flex;gap:9px;align-items:center;margin:4px 0 12px;flex-wrap:wrap}
++.search{min-width:220px;flex:1;display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line-soft);border-radius:24px;padding:0 16px;height:52px}
++.search input{border:0;background:transparent;color:var(--fg);outline:none;min-width:0;flex:1;font-size:14px}
++.chips{display:flex;gap:8px;overflow-x:auto;padding:0 0 10px;scrollbar-width:none}
++.chip{border:1px solid var(--line-soft);background:var(--card);color:var(--fg-dim);border-radius:12px;padding:8px 15px;white-space:nowrap;font-size:12.5px}
++.chip.on{border-color:var(--accent);color:var(--accent-fg);background:var(--accent)}
++.mod{border:1px solid var(--line-soft);background:var(--card);border-radius:24px;margin:10px 0;padding:18px 21px;box-shadow:none}
++.mod.off{border-style:solid;opacity:.75}.mod:hover{border-color:color-mix(in srgb,var(--accent) 37%,var(--line))}
++.mh{display:flex;align-items:center;gap:15px}
++.ava{display:grid;place-items:center;flex:none;width:52px;height:52px;border-radius:17px;overflow:hidden;background:var(--card-3);color:var(--accent);font-size:22px;font-weight:700}
++.ava img{display:block;width:100%;height:100%;object-fit:contain}
++.m-name{font-size:16px;font-weight:700;color:var(--fg);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
++.m-meta{color:var(--fg-mute);font-size:11.5px;margin-top:5px;word-break:break-all}
++.m-desc{color:var(--fg-dim);font-size:13px}
++.acts{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}.acts .sp{flex:1}
++.sw{cursor:pointer;position:relative;display:inline-block;border-radius:20px;flex:none;width:52px;height:31px;border:2px solid var(--fg-mute);background:transparent}
++.sw::after{content:"";position:absolute;top:6px;left:6px;width:15px;height:15px;border-radius:50%;background:var(--fg-mute);transition:transform .18s,background .18s}
++.sw.on{background:var(--accent);border-color:var(--accent)}.sw.on::after{background:var(--accent-fg);transform:translateX(21px);width:18px;height:18px;top:4px;left:4px}
++.tag{border-radius:9px;background:var(--card-2);color:var(--fg-dim);padding:4px 9px;font-size:11px}
++.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stat{min-height:78px;border-radius:20px;background:var(--card-2);padding:13px 16px}
++.stat .n{font-size:25px;font-weight:750}.stat .l{font-size:12px;color:var(--fg-mute)}
++.app-footer{margin:45px 0 0;padding:20px 0;text-align:center;color:var(--fg-mute);font-size:12px;border-top:1px solid var(--line-soft)}
++#mask{z-index:20}#sheet{background:var(--card)!important;border-color:var(--line)!important;border-radius:30px 30px 0 0!important}
++#toast{z-index:30;border-radius:18px!important}
++@media(max-width:1050px){.app-frame{grid-template-columns:88px minmax(0,1fr)}.sidebar{padding:20px 9px}.sidebar .brand{padding:3px 6px 25px}.brand-logo{width:52px;height:52px}.brand-text,.side-caption,.side-status,.side-sign,.sidebar nav button span:last-child{display:none}.sidebar nav button{height:60px;justify-content:center;padding:10px!important;border-radius:19px}.nav-glyph{font-size:27px}#main{padding:25px}}
++@media(max-width:680px){body{padding-bottom:calc(81px + env(safe-area-inset-bottom))}.app-frame{display:block;min-height:100dvh}.workplace{min-height:calc(100dvh - 80px)}.sidebar{position:fixed;top:auto;bottom:0;left:0;right:0;width:100%;height:calc(76px + env(safe-area-inset-bottom));z-index:12;background:color-mix(in srgb,var(--bg-soft) 96%,transparent);backdrop-filter:blur(18px);padding:6px 4px env(safe-area-inset-bottom);border-top:1px solid var(--line);border-right:0;display:block}.sidebar .brand,.sidebar .side-spacer{display:none}.sidebar nav{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0!important;width:100%}.sidebar nav button{width:100%;height:61px;min-width:0;display:flex;flex-direction:column;gap:3px;justify-content:center;align-items:center;padding:4px 0!important;border-radius:16px;background:transparent;font-size:10px;color:var(--fg-mute)}.sidebar nav button span:last-child{display:block;font-size:9.8px;line-height:1.1;white-space:nowrap}.nav-glyph{width:auto;min-height:25px;font-size:23px}.sidebar nav button.on{background:color-mix(in srgb,var(--accent) 13%,var(--card));color:var(--fg)}.sidebar nav button.on .nav-glyph{color:var(--accent)}.topbar{height:68px;padding:0 16px}.top-subtitle{display:none}.offline-pill{display:none}#main{padding:20px 16px 35px}.page-heading{margin-bottom:18px}.page-mark{height:48px;min-width:48px;border-radius:18px}#page-title{font-size:31px}#t-status{grid-template-columns:1fr;gap:10px}#t-status .hero{padding:25px 19px;min-height:150px;gap:16px}#t-status .hero .ring{width:58px;height:58px;border-radius:22px}#t-status .hero .ring .ic{width:30px;height:30px}#t-status .hero .big{font-size:22px}#t-status .hero .small{font-size:12px}.card{border-radius:23px;padding:18px}.card.tight{padding:10px 17px}.mod{border-radius:20px;padding:15px}.ava{width:46px;height:46px;border-radius:15px}.m-name{font-size:14px}.acts{gap:7px}.toolbar{flex-wrap:wrap}.search{flex-basis:100%}#t-users .section-intro{padding-top:0}.app-footer{margin-top:20px}}
++@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
++.code-controls{margin-top:16px;padding:15px;border-radius:18px;background:var(--card-2)}
++.code-controls .code-input{width:170px;max-width:100%;height:41px;padding:0 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg)}
++.metadata-hint{font-size:12px;margin:10px 0 17px;color:var(--fg-mute);padding:10px 13px;border-radius:12px;background:var(--card-2)}
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index 32f6ec2..7fb45c8 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -155,7 +155,7 @@ var THEMES = [
+ ];
+ var PROBE = { mocha: ["#1e1e2e", "#cba6f7", "#a6e3a1"], latte: ["#eff1f5", "#8839ef", "#40a02b"],
+               nord: ["#2e3440", "#88c0d0", "#a3be8c"], dracula: ["#282a36", "#bd93f9", "#50fa7b"],
+-              "7k": ["#0b0f12", "#4c9aff", "#3ddc84"], auto: ["#0b0f12", "#4c9aff", "#3ddc84"] };
++              "7k": ["#10131b", "#b9c4ff", "#91dfbd"], auto: ["#10131b", "#b9c4ff", "#91dfbd"] };
+ 
+ function applyTheme() {
+   var id = state.theme;
+@@ -233,11 +233,11 @@ function stealthRow(s) {
+     var want = !s.stealth;
+     if (want) {
+       var code = s.stealthCode || "";
+-      var how = code ? "退出方式：拨号盘输入 *#*#" + code + "#*#*" : "退出方式：本页这个开关（拨号密令未读到）";
++      var how = "可用管理器内的卡密/数字验证入口恢复。拨号器需启用系统的呼叫重定向角色，或使用兼容特殊密令。";
+       confirmSheet("开启隐身模式？",
+-        "开启后管理器界面会伪装成「未安装」，超级用户 / 模块等页面全部隐藏，" +
++        "开启后将限制管理器的敏感入口，但安装判断不被伪造。" +
+         "桌面图标保持可见。\n\n" + how +
+-        "\n\n（放心：本网页不受隐身影响，万一拨号退不出来，回到这一页关掉即可）",
++        "\n\n网页版开启时也可以在这里关闭。",
+         "开启", function () { setStealth(true); });
+     } else {
+       confirmSheet("关闭隐身模式？", "关闭后管理器界面立即恢复正常显示。", "关闭",
+@@ -274,165 +274,82 @@ function renderStatus(s) {
+   var box = $("#t-status");
+   clear(box);
+ 
+-  // 主卡：三种情况必须分开说，别把「隐身」和「没认主」混成一句
+-  //   root=true           → 已 root
+-  //   root=false + 隐身开 → 隐身中（root 其实正常，内核只是故意不认 App）
+-  //   root=false + 没隐身 → 内核还没认主（刷新/重开 App 就好）
+-  var hero = el("div", "card hero " + (s.root ? "on" : "off"));
+-  var ring = el("div", "ring");
+-  ring.appendChild(ic(s.root ? "shield-check" : (s.stealth ? "eye-off" : "shield-alert"), "ic"));
++  // Report the kernel's actual response. Stealth is not installation success.
++  var installed = s.root === true;
++  var hidden = s.stealth === true;
++  var title = installed ? "Root 已就绪" : (hidden ? "内核状态受隐藏模式影响" : "尚未识别到 Root");
++  var summary = installed
++    ? "内核连接正常 · " + String(s.manager || "moksu")
++    : hidden ? "暂时无法确定安装状态，可从隐藏设置恢复识别" : "当前未识别到可用的内核接口，请检查安装和兼容情况";
++  var hero=el("div","card hero " + (installed ? "on" : "off"));
++  var ring=el("div","ring"); ring.appendChild(ic(installed ? "shield-check" : hidden ? "eye-off" : "shield-alert"));
+   hero.appendChild(ring);
+-  var txt = el("div");
+-  if (s.root) {
+-    txt.appendChild(el("div", "big", "已 root"));
+-    txt.appendChild(el("div", "small", (s.manager || "?") + " · KernelSU " + (s.ksu || 0)));
+-  } else if (s.stealth) {
+-    txt.appendChild(el("div", "big", "隐身模式已开启"));
+-    txt.appendChild(el("div", "small", "root 本身正常 —— 内核只是故意不告诉 App「我是管理器」"));
+-  } else {
+-    txt.appendChild(el("div", "big", "未识别到 root"));
+-    txt.appendChild(el("div", "small", "内核还没把本 App 认成管理器"));
+-  }
+-  hero.appendChild(txt);
++  var content=el("div","hero-info");
++  content.appendChild(el("div","big",title));
++  content.appendChild(el("div","small",summary));
++  hero.appendChild(content);
+   box.appendChild(hero);
+ 
+-  // 认不出来时给一条明确出路
+-  if (s.managerNotRecognized) {
+-    var tip = el("div", "card tight");
+-    var th = el("div", "card-title");
+-    th.appendChild(ic("info"));
+-    th.appendChild(el("span", null, "怎么恢复"));
+-    tip.appendChild(th);
+-    tip.appendChild(el("div", "hint",
+-      "这是「内核还没认主」，不是真的没 root：\n" +
+-      "· 先点右上角刷新一次；\n" +
+-      "· 还不行就把管理器 App 重新打开一次（新进程会重新拿到内核句柄），立刻恢复；\n" +
+-      "· 不用重装、不用重启手机、也不用重刷内核。"));
+-    box.appendChild(tip);
+-  }
+-
+-  // 系统
+-  var c1 = el("div", "card tight");
+-  var t1 = el("div", "card-title");
+-  t1.appendChild(ic("cpu"));
+-  t1.appendChild(el("span", null, "系统"));
+-  c1.appendChild(t1);
+-  c1.appendChild(row("smartphone", "机型", s.model));
+-  c1.appendChild(row("cpu", "内核", s.kernel));
+-  c1.appendChild(row("layers", "KMI", s.kmi));
+-  c1.appendChild(row("hard-drive", "GKI", s.gki ? "是" : "否", true, "dim"));
+-  c1.appendChild(row("package", "LKM 模式", s.lkm ? "是" : "否", true, "dim"));
+-  box.appendChild(c1);
+-
+-  // 防护状态
+-  var c2 = el("div", "card tight");
+-  var t2 = el("div", "card-title");
+-  t2.appendChild(ic("shield"));
+-  t2.appendChild(el("span", null, "当前状态"));
+-  c2.appendChild(t2);
+-  c2.appendChild(row("terminal", "root shell", s.rootShell ? "可用" : "不可用",
+-    true, s.rootShell ? "ok" : "bad"));
+-  c2.appendChild(row("lock", "安全模式", s.safeMode ? "已开启" : "未开启", true, s.safeMode ? "warn" : "ok"));
+-  c2.appendChild(stealthRow(s));
+-  box.appendChild(c2);
+-
+-  // 服务端口（只读展示：用户 2026-09-17 拍板「照 DickSU 来，地址固定、什么都不要自定义」）
+-  var cPort = el("div", "card");
+-  var tPort = el("div", "card-title");
+-  tPort.appendChild(ic("hard-drive"));
+-  tPort.appendChild(el("span", null, "服务端口"));
+-  cPort.appendChild(tPort);
+-  cPort.appendChild(row("globe", "当前端口", String(s.port || 18427)));
+-  cPort.appendChild(el("div", "hint",
+-    "端口是固定的，不提供自定义。默认 18427；要是被别的程序占了，服务会自动往后顺延" +
+-    "（18437 / 18447 / 18457），上面这一行显示的永远是实际在用的那个。" +
+-    "想打开网页，用管理器 App 设置页里的地址最保险。"));
+-  box.appendChild(cPort);
+-
+-  // 网页地址（照 DickSU 的做法：页面直接把地址显示出来，配一个「复制」按钮）
+-  var cAddr = el("div", "card");
+-  var tAddr = el("div", "card-title");
+-  tAddr.appendChild(ic("globe"));
+-  tAddr.appendChild(el("span", null, "网页地址"));
+-  cAddr.appendChild(tAddr);
+-  var fullUrl = "http://127.0.0.1:" + (s.port || 18427) + P;
+-  cAddr.appendChild(row("link", "地址", fullUrl));
+-  var aw = el("div", "row");
+-  aw.appendChild(el("div", "sp"));
+-  var copyBtn = el("button", "btn primary");
+-  copyBtn.appendChild(ic("copy", "ic"));
+-  copyBtn.appendChild(el("span", null, "复制地址"));
+-  copyBtn.onclick = function () { copyText(fullUrl, function () { toast("地址已复制"); }); };
+-  aw.appendChild(copyBtn);
+-  cAddr.appendChild(aw);
+-  cAddr.appendChild(el("div", "hint",
+-    "地址是固定的（本机才有），不用记、也不用改。手机上任何 App 都能访问这个地址 —— " +
+-    "不用的时候可以在管理器 App 的设置里把「网页管理器」关掉，关掉后端口就不再监听。"));
+-  box.appendChild(cAddr);
+-
+-  // 隐身拨号密令（可自定义）
+-  var cCode = el("div", "card");
+-  var tCode = el("div", "card-title");
+-  tCode.appendChild(ic("dialpad"));
+-  tCode.appendChild(el("span", null, "隐身拨号密令"));
+-  cCode.appendChild(tCode);
+-  cCode.appendChild(row("eye-off", "当前密令", s.stealthCode || "（未读到）"));
+-  var editWrap = el("div", "row");
+-  var editK = el("div", "k");
+-  editK.appendChild(ic("key-round", "ic ic-sm"));
+-  editK.appendChild(el("span", null, "改成"));
+-  editWrap.appendChild(editK);
+-  var inp = el("input");
+-  inp.type = "tel";
+-  inp.inputMode = "numeric";
+-  inp.maxLength = 12;
+-  inp.placeholder = "4~12 位数字";
+-  inp.value = s.stealthCode || "";
+-  inp.className = "code-input";
+-  editWrap.appendChild(inp);
+-  var save = el("button", "btn primary");
+-  save.appendChild(el("span", null, "保存"));
+-  save.onclick = function () {
+-    if (state.busy) return;
+-    var code = (inp.value || "").replace(/[^0-9]/g, "").slice(0, 12);
+-    if (code.length < 4) { toast("密令至少 4 位数字"); return; }
+-    state.busy = true;
+-    post("/api/stealth-code", { code: code }).then(function (r) {
+-      toast(r.message || r.error || "已保存");
+-      setTimeout(loadStatus, 700);
+-    }).catch(function (e) { toast("保存失败：" + e.message); })
+-      .then(function () { state.busy = false; });
+-  };
+-  editWrap.appendChild(save);
+-  cCode.appendChild(editWrap);
+-  cCode.appendChild(el("div", "hint",
+-    "退出隐身：拨号盘输入 *#*#" + (s.stealthCode || "……") + "#*#*。" +
+-    "改完立刻生效（App 那边的密令显示会在下次打开时同步）。"));
+-  box.appendChild(cCode);
+-
+-  // 统计
+-  var c3 = el("div", "card");
+-  var t3 = el("div", "card-title");
+-  t3.appendChild(ic("layout-dashboard"));
+-  t3.appendChild(el("span", null, "统计"));
+-  c3.appendChild(t3);
+-  var stats = el("div", "stats");
+-  [
+-    { n: s.moduleCount, l: "已装模块", i: "package" },
+-    { n: s.superuserCount, l: "已授权 App", i: "users" }
+-  ].forEach(function (x) {
+-    var st = el("div", "stat");
+-    st.appendChild(ic(x.i, "ic"));
+-    var d = el("div");
+-    d.appendChild(el("div", "n", String(x.n == null ? "—" : x.n)));
+-    d.appendChild(el("div", "l", x.l));
+-    st.appendChild(d);
+-    stats.appendChild(st);
++  var summaryCard=el("div","card tight");
++  var title1=el("div","card-title"); title1.appendChild(ic("layout-dashboard"));
++  title1.appendChild(el("span",null,"使用概览")); summaryCard.appendChild(title1);
++  var stats=el("div","stats");
++  [{n:s.superuserCount,l:"已授权应用",i:"shield-check"}, {n:s.moduleCount,l:"已安装模块",i:"package"}].forEach(function(item){
++    var cell=el("div","stat");cell.appendChild(ic(item.i));
++    var tx=el("div");tx.appendChild(el("div","n",item.n == null ? "—" : String(item.n)));
++    tx.appendChild(el("div","l",item.l));cell.appendChild(tx);stats.appendChild(cell);
+   });
+-  c3.appendChild(stats);
+-  box.appendChild(c3);
++  summaryCard.appendChild(stats);
++  var quick=el("div","security-actions");
++  var toUsers=el("button","btn primary","管理权限"); toUsers.onclick=function(){show("users");};
++  var toModules=el("button","btn","查看模块");toModules.onclick=function(){show("modules");};
++  quick.appendChild(toUsers);quick.appendChild(toModules);summaryCard.appendChild(quick);
++  box.appendChild(summaryCard);
++
++  var device=el("div","card tight");
++  var title2=el("div","card-title");title2.appendChild(ic("smartphone"));title2.appendChild(el("span",null,"设备信息"));device.appendChild(title2);
++  device.appendChild(row("smartphone","机型",s.model));
++  device.appendChild(row("cpu","内核版本",s.kernel));
++  device.appendChild(row("layers","KMI",s.kmi));
++  device.appendChild(row("hard-drive","运行模式",s.lkm ? "LKM" : (s.gki ? "GKI" : "未确认")));
++  box.appendChild(device);
++
++  var privacy=el("div","card tight");
++  var title3=el("div","card-title");title3.appendChild(ic("lock"));title3.appendChild(el("span",null,"隐藏与恢复"));privacy.appendChild(title3);
++  privacy.appendChild(row("terminal","Root shell",s.rootShell ? "可用" : "不可用",true,s.rootShell ? "ok" : "warn"));
++  privacy.appendChild(row("shield","安全模式",s.safeMode ? "开启" : "关闭",true,s.safeMode ? "warn" : "ok"));
++  privacy.appendChild(stealthRow(s));
++  var codeArea=el("div","code-controls");
++  var hint=el("div","fld-h","可设置 4 位数字密令；系统拨号器的四位直拨需要支持呼叫重定向功能。");
++  codeArea.appendChild(hint);
++  var line=el("div","security-actions");
++  var input=el("input","code-input");input.type="password";input.autocomplete="off";input.inputMode="numeric";input.maxLength=4;input.minLength=4;input.placeholder="新的 4 位数字";
++  input.setAttribute("aria-label","新的四位恢复码");
++  var save=el("button","btn","设置密令");
++  save.onclick=function(){
++    var pin=input.value.trim();
++    if(!/^[0-9]{4}$/.test(pin)){toast("请填写恰好 4 位数字");return;}
++    save.disabled=true;
++    post("/api/stealth-code",{code:pin}).then(function(v){
++      if(!v.ok)throw new Error(v.error||"保存失败");
++      input.value=""; toast("密令已更新");
++    }).catch(function(e){toast("修改失败："+e.message);})
++      .then(function(){save.disabled=false;});
++  };
++  line.appendChild(input);line.appendChild(save);codeArea.appendChild(line);
++  privacy.appendChild(codeArea);
++  box.appendChild(privacy);
++
++  var network=el("div","card tight");
++  var title4=el("div","card-title");title4.appendChild(ic("globe"));title4.appendChild(el("span",null,"网页版管理"));network.appendChild(title4);
++  network.appendChild(row("link","服务端口",String(s.port || 18427)));
++  var addr=el("div","security-actions");
++  var copy=el("button","btn primary","复制本机地址");
++  copy.onclick=function(){copyText(location.origin+P,function(){toast("地址已复制，请勿向他人发送");});};
++  var settings=el("button","btn","访问设置");settings.onclick=function(){show("security");};
++  addr.appendChild(copy);addr.appendChild(settings);network.appendChild(addr);
++  box.appendChild(network);
+ }
+-
+ /* ── 模块页 ── */
+ function loadModules() {
+   var box = $("#modules");
+@@ -693,7 +610,7 @@ function openModuleWeb(m) {
+    ──────────────────────────────────────────────────────────────────
+    列表按 **uid 分组**（同一个 uid 下的多个包是一组，比如共享 uid 的套件）。
+    左边的开关 = 授权/撤销 root；点「配置」进详情改 root 配置。
+-   ⚠️ 网页拿不到 APK 里的中文应用名（要解析 resources.arsc），所以显示包名。
++   名称和图标来自 Android 包管理器同步，并非从包名猜测。
+    ══════════════════════════════════════════════════════════════════ */
+ function enc(s) { return encodeURIComponent(s == null ? "" : String(s)); }
+ 
+@@ -720,7 +637,9 @@ function groupedApps() {
+   });
+   return Object.keys(map).map(function (uid) {
+     var apps = map[uid].slice().sort(function (a, b) {
+-      return String(a.pkg).localeCompare(String(b.pkg), "en");
++      var aScore = (a.label && a.label !== a.pkg ? 2 : 0) + (a.icon ? 1 : 0);
++      var bScore = (b.label && b.label !== b.pkg ? 2 : 0) + (b.icon ? 1 : 0);
++      return bScore - aScore || String(a.pkg).localeCompare(String(b.pkg), "en");
+     });
+     return {
+       uid: parseInt(uid, 10),
+@@ -773,6 +692,11 @@ function renderApps() {
+     box.appendChild(e2);
+     return;
+   }
++  var named = list.filter(function (g) { return g.primary.label && g.primary.label !== g.primary.pkg; }).length;
++  if (named < list.length) {
++    var msg=el("div","metadata-hint", "显示 " + list.length + " 组应用 · " + named + " 组已同步名称；未同步的应用暂显示包名");
++    box.appendChild(msg);
++  }
+   list.forEach(function (g) { box.appendChild(appCard(g)); });
+ }
+ 
+@@ -1389,7 +1313,7 @@ function renderSecurity() {
+   boot.appendChild(el("div","eyebrow","BROWSER HOMEPAGE"));
+   boot.appendChild(el("div","security-title","浏览器启动页"));
+   boot.appendChild(el("p","security-subtitle",
+-    "开启后，在 Android 系统设置中手动授权 moksu 的无障碍服务。支持的浏览器进入前台时会跳转到本机管理页，可随时关闭。"));
++    "使用已获 Root 的后台服务识别浏览器进入前台，不需要无障碍权限。仅在网页服务运行时生效，支持的浏览器进入前台会打开本机管理页。"));
+   var browserWrap = el("div", "security-actions");
+   var browserSwitch = el("button", "btn", "正在读取状态…");
+   browserSwitch.disabled = true;
+@@ -1397,14 +1321,14 @@ function renderSecurity() {
+   boot.appendChild(browserWrap);
+   get("/api/browser/auto").then(function (v) {
+     var enabled=!!v.enabled;
+-    function draw() { browserSwitch.textContent = enabled ? "已启用 · 点击关闭" : "已关闭 · 点击启用"; }
++    function draw() { browserSwitch.textContent = enabled ? "已开启 · 关闭" : "已关闭 · 开启"; }
+     browserSwitch.disabled = false;
+     draw();
+     browserSwitch.onclick = function () {
+       post("/api/browser/auto", {enabled: enabled ? "0" : "1"}).then(function (r) {
+         if (!r.ok) throw new Error(r.error || "写入失败");
+         enabled = !!r.enabled; draw();
+-        toast(enabled ? "已开启，请在 Android 无障碍设置中授权" : "自动入口已关闭");
++        toast(enabled ? "已开启，重启浏览器后生效" : "自动入口已关闭");
+       }).catch(function (e) { toast("修改失败："+e.message); });
+     };
+   }).catch(function () { browserSwitch.textContent = "设置不可用，需更新 ksud"; });
+@@ -1481,7 +1405,7 @@ function fallbackCopy(text, done) {
+ /* ── 标签切换 / 刷新 ── */
+ function show(tab) {
+   state.tab = tab;
+-  var titles={status:["运行概览","查看内核状态、运行信息与管理入口"],users:["超级用户","一键授权和高级权限配置"],modules:["模块中心","安装、运行及管理功能模块"],sulog:["授权日志","回看授权和提权请求"],security:["安全设置","专属访问密钥与浏览器启动入口"],about:["关于 moksu","版本信息及开源许可"]};
++  var titles={status:["首页","设备状态与管理概览"],users:["超级用户","应用授权与配置"],modules:["模块","管理已安装模块"],sulog:["日志","Root 访问记录"],security:["设置","访问密钥、隐藏与浏览器入口"],about:["关于","moksu 与第三方许可"]};
+   var current=titles[tab]||titles.status;
+   $("#page-title").textContent=current[0];
+   $("#page-description").textContent=current[1];
+@@ -1496,8 +1420,8 @@ function show(tab) {
+   }
+   // Mobile browsers preserve the old page scroll position when a tab is replaced.
+   // Always show the heading first, including the superuser list after switching back.
+-  try { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }
+-  catch (_) { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }
++  window.scrollTo(0, 0);
++  if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+   if (tab === "status") loadStatus();
+   if (tab === "users") { loadGrantRules(); loadApps(); }
+   if (tab === "modules") loadModules();
+diff --git a/userspace/ksud/assets/webadmin/index.html b/userspace/ksud/assets/webadmin/index.html
+index 144dbfe..d9e230e 100644
+--- a/userspace/ksud/assets/webadmin/index.html
++++ b/userspace/ksud/assets/webadmin/index.html
+@@ -1,11 +1,11 @@
+ <!doctype html>
+-<html lang="zh-CN" data-theme="7k" data-scheme="dark">
++<html lang="zh-CN" data-theme="auto" data-scheme="dark">
+ <head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+ <meta name="referrer" content="no-referrer">
+ <meta name="color-scheme" content="dark light">
+-<meta name="theme-color" content="#0b1020">
++<meta name="theme-color" content="#10131f">
+ <meta http-equiv="X-Content-Type-Options" content="nosniff">
+ <title>moksu · 心中都是莫</title>
+ <link rel="icon" href="data:,">
+@@ -14,72 +14,47 @@
+ </head>
+ <body>
+ <div class="app-frame">
+-  <aside class="sidebar" aria-label="侧边导航">
++  <aside class="sidebar" aria-label="功能导航">
+     <div class="brand">
+-      <div class="brand-logo" aria-hidden="true"><span>m</span></div>
+-      <div class="brand-text">
+-        <strong>moksu</strong>
+-        <span>心中都是莫</span>
+-      </div>
++      <div class="brand-logo" aria-hidden="true">m</div>
++      <div class="brand-text"><strong>moksu</strong><span>心中都是莫</span></div>
+     </div>
+-    <div class="side-caption">设备空间</div>
+-    <nav aria-label="功能导航">
+-      <button class="on" data-tab="status"><span class="nav-glyph">◈</span><span>运行概览</span></button>
+-      <button data-tab="users"><span class="nav-glyph">♙</span><span>超级用户</span></button>
+-      <button data-tab="modules"><span class="nav-glyph">▦</span><span>模块中心</span></button>
+-      <button data-tab="sulog"><span class="nav-glyph">≡</span><span>授权日志</span></button>
+-      <button data-tab="security"><span class="nav-glyph">◇</span><span>安全设置</span></button>
+-      <button data-tab="about"><span class="nav-glyph">ⓘ</span><span>关于</span></button>
++    <div class="side-caption">管理中心</div>
++    <nav aria-label="页面">
++      <button type="button" data-tab="status" class="on"><span class="nav-glyph">⌂</span><span>首页</span></button>
++      <button type="button" data-tab="users"><span class="nav-glyph">◉</span><span>超级用户</span></button>
++      <button type="button" data-tab="modules"><span class="nav-glyph">▦</span><span>模块</span></button>
++      <button type="button" data-tab="sulog"><span class="nav-glyph">☷</span><span>日志</span></button>
++      <button type="button" data-tab="security"><span class="nav-glyph">◇</span><span>设置</span></button>
++      <button type="button" data-tab="about"><span class="nav-glyph">ⓘ</span><span>关于</span></button>
+     </nav>
+     <div class="side-spacer"></div>
+-    <div class="side-status"><span class="health-dot" aria-hidden="true"></span>
+-      <div><strong>本地安全连接</strong><small>仅限此设备访问</small></div>
+-    </div>
++    <div class="side-status" id="sidebar-connection"><span class="health-dot" aria-hidden="true"></span><div><strong>本机管理服务</strong><small>127.0.0.1 · 安全连接</small></div></div>
+     <div class="side-sign">moksu <span>· 心中都是莫</span></div>
+   </aside>
+-
+   <div class="workplace">
+     <header class="topbar">
+-      <div class="top-name">
+-        <div class="crumb">控制中心 <span class="crumb-sep">/</span> <span id="crumb-current">运行概览</span></div>
+-        <div class="top-subtitle">设备状态与权限管理</div>
+-      </div>
+-      <div class="top-actions">
+-        <span class="offline-pill"><span class="health-dot"></span> 本地运行</span>
+-        <button class="icon-btn" id="refresh" title="刷新当前页面" aria-label="刷新当前页面">⟳</button>
+-        <button class="icon-btn" id="theme" title="切换外观" aria-label="切换外观">◐</button>
+-      </div>
++      <div class="top-name"><div class="crumb">moksu <span class="crumb-sep">/</span> <span id="crumb-current">首页</span></div><div class="top-subtitle">设备与 Root 管理</div></div>
++      <div class="top-actions"><span class="offline-pill"><span class="health-dot"></span> 本机</span><button class="icon-btn" id="refresh" type="button" title="刷新" aria-label="刷新当前页面">⟳</button><button class="icon-btn" id="theme" type="button" title="切换主题" aria-label="切换主题">◐</button></div>
+     </header>
+-
+     <main id="main">
+-      <div class="page-heading">
+-        <div>
+-          <p class="eyebrow">MOKSU CONTROL PANEL</p>
+-          <h1 id="page-title">运行概览</h1>
+-          <p id="page-description">查看内核状态、运行信息与管理入口</p>
+-        </div>
+-        <div class="page-mark">◈</div>
+-      </div>
+-
+-      <section id="t-status" class="on" aria-label="运行概览"></section>
++      <div class="page-heading"><div><p class="eyebrow">MOKSU</p><h1 id="page-title">首页</h1><p id="page-description">设备状态与管理概览</p></div><div class="page-mark" aria-hidden="true">✦</div></div>
++      <section id="t-status" class="on" aria-label="首页"></section>
+       <section id="t-users" aria-label="超级用户">
+-        <div class="section-intro"><strong>权限列表</strong><span>直接授权 · 修改高级规则</span></div>
+-        <div id="user-toolbar"></div>
+-        <div id="users"></div>
++        <div class="section-intro"><strong>应用权限</strong><span>按应用名称查找、授权及管理配置</span></div>
++        <div id="user-toolbar"></div><div id="users"></div>
+       </section>
+-      <section id="t-modules" aria-label="模块中心">
+-        <div class="section-intro"><strong>已安装模块</strong><span>启停、动作脚本与 WebUI</span></div>
+-        <div id="mod-toolbar"></div>
+-        <div id="modules"></div>
++      <section id="t-modules" aria-label="模块">
++        <div class="section-intro"><strong>已安装模块</strong><span>状态、动作脚本和模块页面</span></div>
++        <div id="mod-toolbar"></div><div id="modules"></div>
+       </section>
+-      <section id="t-sulog" aria-label="授权日志">
+-        <div class="section-intro"><strong>权限记录</strong><span>搜索、筛选和清理</span></div>
+-        <div id="sulog-toolbar"></div>
+-        <div id="sulog"></div>
++      <section id="t-sulog" aria-label="日志">
++        <div class="section-intro"><strong>Root 访问记录</strong><span>筛选、搜索和管理历史</span></div>
++        <div id="sulog-toolbar"></div><div id="sulog"></div>
+       </section>
+-      <section id="t-security" aria-label="安全设置"></section>
++      <section id="t-security" aria-label="设置"></section>
+       <section id="t-about" aria-label="关于"></section>
+-      <footer class="app-footer"><span>moksu · 心中都是莫</span><span>LOCAL-FIRST · ROOT CONTROL</span></footer>
++      <footer class="app-footer"><span>moksu · 心中都是莫</span></footer>
+     </main>
+   </div>
+ </div>
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+index 654cd54..5205c36 100644
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -485,6 +485,75 @@ impl Server {
+ }
+ 
+ 
++/// Only when explicitly enabled: check the task currently in foreground using
++/// the already-privileged ksud process. No accessibility API, no screen content.
++/// Some vendor ROMs restrict shell activity queries; in that case this watcher
++/// does nothing, and the user can always open the site manually.
++#[cfg(target_os = "android")]
++fn browser_in_foreground(snapshot: &str) -> Option<&'static str> {
++    const SUPPORTED: &[&str] = &[
++        "com.android.chrome", "com.microsoft.emmx", "org.mozilla.firefox",
++        "com.brave.browser", "com.sec.android.app.sbrowser", "com.opera.browser",
++        "mark.via", "com.kiwibrowser.browser",
++    ];
++    // Prioritize resumed activity, never use a random package appearing in
++    // dumpsys's entire historical task stack.
++    for line in snapshot.lines().filter(|line| {
++        line.contains("topResumedActivity=") || line.contains("mResumedActivity:")
++            || line.contains("topResumedActivity:")
++    }) {
++        if let Some(pkg) = SUPPORTED.iter().find(|pkg| {
++            let pat = format!(" {pkg}/");
++            line.contains(&pat)
++        }) { return Some(pkg); }
++    }
++    None
++}
++
++#[cfg(target_os = "android")]
++fn launch_browser_watch(port: u16) {
++    std::thread::spawn(move || {
++        use std::process::{Command, Stdio};
++        use std::time::Instant;
++        let mut was_foreground: Option<&'static str> = None;
++        let mut last_launch = Instant::now()
++            .checked_sub(Duration::from_secs(45)).unwrap_or_else(Instant::now);
++        loop {
++            let cfg = Config::load();
++            if !cfg.browser_auto || !cfg.enabled || cfg.token.is_empty() {
++                was_foreground = None;
++                std::thread::sleep(Duration::from_secs(4));
++                continue;
++            }
++            let fg = Command::new("/system/bin/dumpsys")
++                .args(["activity", "activities"])
++                .stdin(Stdio::null())
++                .output()
++                .ok()
++                .and_then(|result| if result.status.success() {
++                    String::from_utf8(result.stdout).ok()
++                } else { None })
++                .and_then(|text| browser_in_foreground(&text));
++            if let Some(browser) = fg {
++                if was_foreground != Some(browser) && last_launch.elapsed() > Duration::from_secs(22) {
++                    let url = url_with(port, &cfg.token);
++                    // No shell interpolation: arguments are passed directly to am.
++                    // Access token may appear briefly in the Android activity intent;
++                    // this is why the feature defaults to OFF and supports reset-token.
++                    let started = Command::new("/system/bin/am")
++                        .args(["start", "--user", "0", "-a", "android.intent.action.VIEW",
++                               "-p", browser, "-d", &url])
++                        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
++                        .status();
++                    if started.is_ok_and(|s| s.success()) { last_launch = Instant::now(); }
++                }
++            }
++            was_foreground = fg;
++            std::thread::sleep(Duration::from_millis(1600));
++        }
++    });
++}
++
+ /// 启动监听（阻塞在 accept 循环；调用方负责放进线程）
+ pub fn serve(server: &Arc<Server>) -> std::io::Result<()> {
+     // 逐个试候选端口：某台手机上 18427 可能被别的 App 占了，自动顺延
+@@ -537,6 +606,8 @@ pub fn serve(server: &Arc<Server>) -> std::io::Result<()> {
+     let _ = listener.set_nonblocking(false);
+     // ⚠️ 日志里**绝不写 token**（logcat 别的 App 也读得到）。
+     info!("网页管理器已启动：http://127.0.0.1:{port}{PATH}/<专属密钥>（仅本机；密钥在 webadmin.conf）");
++    #[cfg(target_os = "android")]
++    launch_browser_watch(port);
+     for stream in listener.incoming() {
+         match stream {
+             Ok(mut s) => {
+diff --git a/userspace/ksud/src/webadmin_ksud.rs b/userspace/ksud/src/webadmin_ksud.rs
+index c63e3fb..8ad1771 100644
+--- a/userspace/ksud/src/webadmin_ksud.rs
++++ b/userspace/ksud/src/webadmin_ksud.rs
+@@ -129,7 +129,7 @@ impl Backend for KsudBackend {
+         // 现在只记"改了几位数字"，足够证明"确实写过一次"，又拿不到本体。
+         // ⚠️ 下面返回给**已鉴权调用方**的那句话仍带新密令（用户自己要看），那是有意的。
+         log_line(&format!("隐身密令已更新（{} 位数字，日志不记录本体）", code.len()));
+-        Ok(format!("已改成 {code}（退出隐身拨 *{code}#*#*）"))
++        Ok("恢复密令已更新".to_string())
+     }
+ 
+     fn superusers(&self) -> Value {
+@@ -1378,7 +1378,7 @@ fn stealth_enabled() -> bool {
+ 
+ /// 隐身密令（退出隐身用；只有拿到口令的本机页面能看）
+ fn stealth_code() -> String {
+-    std::fs::read_to_string("/data/adb/sevenk/stealth_code").map_or_else(|_| "70707".to_string(), |s| s.trim().to_string())
++    std::fs::read_to_string("/data/adb/sevenk/stealth_code").map_or_else(|_| "7070".to_string(), |s| s.trim().to_string())
+ }
+ 
+ /// 模块 id 列表（判空用）
