@@ -1,0 +1,36 @@
+name: moksu R2 official Android signing tools
+on:
+  push:
+    branches: [moksu-331-r2-20261014]
+    paths: ['.github/workflows/moksu-r2-sign-tools.yml']
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Download official SDK build-tools and export executable signer without keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'build-tools;37.0.0'
+          root="$ANDROID_HOME/build-tools/37.0.0"
+          test -x "$root/zipalign"
+          test -x "$root/apksigner"
+          test -f "$root/lib/apksigner.jar"
+          test -x "$root/aapt"
+          mkdir -p out
+          cd "$root"
+          files=(zipalign apksigner aapt lib/apksigner.jar)
+          if test -d lib64; then files+=(lib64); fi
+          tar -czf "$GITHUB_WORKSPACE/out/moksu-r2-sdk-build-tools-37-signing-tools.tar.gz" "${files[@]}"
+          sha256sum zipalign apksigner aapt lib/apksigner.jar > "$GITHUB_WORKSPACE/out/official-sign-tools.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r2-official-signing-tools
+          path: out/
+          retention-days: 7
+          if-no-files-found: error
