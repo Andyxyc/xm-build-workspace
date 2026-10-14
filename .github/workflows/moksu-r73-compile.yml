@@ -1,0 +1,207 @@
+name: moksu R7.3 manager native and KMI verification
+on:
+  push:
+    branches: [moksu-331-r73-20261014]
+    paths:
+      - 'moksu/r73/moksu-v3.3.2-R7.3-source.patch'
+      - '.github/workflows/moksu-r73-compile.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r73-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Apply final R7.3 patch on verified R7.1 source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r72-source
+          path: input
+          run-id: 38513741602
+          github-token: ${{ github.token }}
+      - name: Verify exact reviewed patch and build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -s input/moksu-r72-source.tar.gz
+          tar -xzf input/moksu-r72-source.tar.gz -C source
+          cd source
+          git apply --check ../config/moksu/r73/moksu-v3.3.2-R7.3-source.patch
+          git apply ../config/moksu/r73/moksu-v3.3.2-R7.3-source.patch
+          node --check userspace/ksud/assets/webadmin/app.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root=Path('manager/app/src/main')
+          ET.parse(root/'AndroidManifest.xml')
+          ET.parse(root/'res/values/strings.xml')
+          code=(root/'java/me/weishu/kernelsu/ui/screen/home/HomeUiState.kt').read_text()
+          assert 'customManagerBuild' in code
+          assert 'showLkmUpdate' in code and 'hasUpdate' in code
+          patch=(root/'java/me/weishu/kernelsu/mok/MokFlashPermit.kt').read_text()
+          assert 'object MokFlashPermit' in patch
+          assert 'com.lumera.dayframe' in (Path('userspace/ksud/build.rs')).read_text()
+          manifest=(root/'AndroidManifest.xml').read_text()
+          assert 'moksuAppInfoIcon' in manifest
+          assert 'passwordStage=3' in (root/'java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt').read_text()
+          PY
+          cd ..
+          # Keep the matching scripts already in the R7.2 source archive; do not overwrite the R7.3 changes.
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r73-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r73-source, path: out/, retention-days: 14, if-no-files-found: warn}
+  android:
+    name: Compile R7.3 manager (unsigned)
+    runs-on: ubuntu-24.04
+    needs: source
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r73-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r73-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile unsigned APK preserving existing manager version
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=日常工具 -PKSU_PACKAGE_NAME=com.lumera.dayframe -PKSU_VERSION_NAME=3.3.2-R7.3 -PKSU_VERSION_CODE=32682 -PMOKSU_APP_INFO_MODE=calculator 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R73.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-r73-manager-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/moksu-r73-manager-unsigned.apk"
+          sha256sum "$GITHUB_WORKSPACE/out/moksu-r73-manager-unsigned.apk" > "$GITHUB_WORKSPACE/out/android-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r73-android, path: out/, retention-days: 14, if-no-files-found: warn}
+  rust:
+    name: Compile R7.3 ksud userspace
+    runs-on: ubuntu-24.04
+    needs: [source, kernel]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r73-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r73-source.tar.gz -C source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-r73-kmi-*
+          path: lkms
+          merge-multiple: true
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Install Rust Android toolchains
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Build Android ksud for both architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash source/moksu-build/ksu331/build_userspace.sh 2>&1 | tee out/rust-R73.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r73-native, path: out/, retention-days: 14, if-no-files-found: warn}
+
+  kernel:
+    name: Hidden mode + direct grant ${{ matrix.kmi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        kmi: [android12-5.10, android13-5.10, android13-5.15, android14-5.15, android14-6.1, android15-6.6, android16-6.12, android17-6.18]
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: hartgerinktarcila-design/7kimisu
+          ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c
+          path: old
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply genuine KernelSU 3.3.1 manager signature and custom hidden mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 config/moksu/ksu331/apply_release.py source source config
+          python3 config/moksu/features/port_stealth.py source old
+          python3 config/moksu/redesign/patch_kernel_perm.py source
+          sed -i 's/KSU_PACKAGE_NAME ?= com.moksu.manager/KSU_PACKAGE_NAME ?= com.lumera.dayframe/' source/kernel/Kbuild
+          grep -q 'KSU_PACKAGE_NAME ?= com.lumera.dayframe' source/kernel/Kbuild
+          grep -q 'KSU_EXPECTED_HASH ?= df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
+      - name: Kernel build and symbol check
+        shell: bash
+        env:
+          KMI: ${{ matrix.kmi }}
+        run: |
+          set -euo pipefail
+          if [[ "$KMI" == android16-6.12 ]]; then
+            bash config/moksu/ksu331/build_lkm16.sh 2>&1 | tee /tmp/build.log
+          else
+            bash config/moksu/ksu331/build_lkm.sh 2>&1 | tee /tmp/build.log
+          fi
+          cp /tmp/build.log out/kernel.log
+          for arch in aarch64 x86_64; do
+            file="out/$arch/${KMI}_kernelsu.ko"
+            test -s "$file"
+            grep -aq 'ksu_stealth_is_enabled' "$file"
+            sha256sum "$file"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r73-kmi-${{ matrix.kmi }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
