@@ -1,0 +1,712 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+index 93255a9..bbc0c20 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -206,28 +206,25 @@ class MokDisguiseActivity : ComponentActivity() {
+         if (recovering || !MokDisguise.verify(this, pin)) return
+         recovering = true
+         lifecycleScope.launch {
+-            // Presentation is independent of kernel stealth: a valid PIN must always be
+-            // able to exit the "uninstalled" UI even on a device without the stealth ioctl.
+-            val kernelResult = withContext(Dispatchers.IO) {
++            // The "uninstalled" presentation is the SAME kernel stealth state.
++            // Do not report recovered until the kernel (or local daemon fallback) confirms off.
++            val kernelRestored = withContext(Dispatchers.IO) {
+                 val state = runCatching { Natives.stealthState() }.getOrDefault(-1)
+-                if (state != 1) Pair(state, state == 0)
+-                else Pair(state, runCatching {
+-                    Natives.stealthSet(false) && Natives.stealthState() == 0
+-                }.getOrDefault(false) || MokWebRecovery.disableStealth())
++                state == 0 || (state == 1 && (
++                    runCatching { Natives.stealthSet(false) && Natives.stealthState() == 0 }
++                        .getOrDefault(false) || MokWebRecovery.disableStealth()))
+             }
+-            val presentationRestored = MokDisplayState.setUninstalled(this@MokDisguiseActivity, false)
++            val presentationRestored = kernelRestored &&
++                MokDisplayState.setUninstalled(this@MokDisguiseActivity, false)
+             recovering = false
+             if (presentationRestored) {
+                 startActivity(Intent(this@MokDisguiseActivity, MainActivity::class.java)
+                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+-                if (kernelResult.first == 1 && !kernelResult.second) {
+-                    Toast.makeText(this@MokDisguiseActivity,
+-                        "桌面显示已恢复，内核隐藏仍开启，请在网页版检查", Toast.LENGTH_LONG).show()
+-                }
++
+                 finish()
+             } else {
+                 Toast.makeText(this@MokDisguiseActivity,
+-                    "无法恢复本地显示设置，请从网页版检查后重试", Toast.LENGTH_LONG).show()
++                    "内核隐藏尚未关闭，请从网页版关闭后再试", Toast.LENGTH_LONG).show()
+             }
+         }
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt
+index 36989be..8820a92 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt
+@@ -2,18 +2,36 @@
+ package me.weishu.kernelsu.mok
+ 
+ import android.content.Context
++import android.util.Log
++import me.weishu.kernelsu.Natives
+ 
+-/** Purely a manager UI presentation option. Never claims to remove root. */
++/** ONE source of truth: kernel stealth. A previous local flag is a fallback
++ * ONLY if the kernel API is temporarily unavailable, never an independent setting. */
+ internal object MokDisplayState {
+     private const val PREF = "moksu.presentation.v1"
+     private const val KEY = "uninstalled_ui"
+-    fun showUninstalled(context: Context): Boolean =
+-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
++    private fun actual(): Int = runCatching { Natives.stealthState() }.getOrDefault(-1)
+ 
+-    fun setUninstalled(context: Context, enabled: Boolean): Boolean {
+-        val result = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+-            .edit().putBoolean(KEY, enabled).commit()
+-        if (result) MokWebDeviceBridge.syncAppearanceAsync(context.applicationContext)
+-        return result
++    fun showUninstalled(context: Context): Boolean {
++        val prefs=context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++        return when (actual()) {
++            1 -> { if (!prefs.getBoolean(KEY,false)) prefs.edit().putBoolean(KEY,true).apply(); true }
++            0 -> { if (prefs.getBoolean(KEY,false)) prefs.edit().putBoolean(KEY,false).apply(); false }
++            else -> prefs.getBoolean(KEY,false) // last verified state, fail closed in UI
++        }
++    }
++
++    /** Changes the actual kernel state and checks readback BEFORE reporting success. */
++    @Synchronized fun setUninstalled(context: Context, enabled: Boolean): Boolean {
++        val requested=if(enabled) 1 else 0
++        val before=actual()
++        if (before != 0 && before != 1) return false
++        if (before != requested && !runCatching { Natives.stealthSet(enabled) }.getOrDefault(false)) return false
++        if (actual() != requested) return false
++        val saved=context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++            .edit().putBoolean(KEY,enabled).commit()
++        if (!saved) Log.w("moksu", "Hidden mode is active but recovery mirror could not be saved")
++        MokWebDeviceBridge.syncAppearanceAsync(context.applicationContext)
++        return true // confirmed kernel state is authoritative, not a local pref
+     }
+ }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+index ba232c2..4c4f62e 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokWebDeviceBridge.kt
+@@ -109,21 +109,6 @@ internal object MokWebDeviceBridge {
+         },"moksu-appearance-sync").start()
+     }
+ 
+-    /** Web can request restoration; Android remains the sole writer of app private prefs. */
+-    fun applyWebRestoreRequest(context:Context,onFinished:()->Unit={}) {
+-        val app=context.applicationContext
+-        Thread({
+-            runCatching {
+-                val base=baseUrl() ?: return@Thread
+-                val obj=request(base,"/api/appearance")
+-                if(obj.optBoolean("known")&&obj.optBoolean("disableRequested")&&
+-                    MokDisplayState.showUninstalled(app)) {
+-                    if(MokDisplayState.setUninstalled(app,false)) onFinished()
+-                }
+-            }.onFailure{Log.w("moksu","网页恢复请求暂不可用: ${it.javaClass.simpleName}")}
+-        },"moksu-web-restore-check").start()
+-    }
+-
+     fun syncAsync(context: Context) {
+         syncAppearanceAsync(context)
+         val now = SystemClock.elapsedRealtime()
+@@ -183,7 +168,24 @@ internal object MokWebDeviceBridge {
+ 
+     fun configAutoOpen(): Pair<Boolean,String>? = runCatching {
+         val base = baseUrl() ?: return null
+-        request(base,"/api/browser/auto").optBoolean("enabled",false) to base
++        val v=request(base,"/api/browser/auto")
++        if (!v.optBoolean("ok",false) || !v.has("enabled")) return null
++        v.optBoolean("enabled") to base
++    }.getOrNull()
++
++    fun setBrowserAuto(enabled: Boolean): Boolean? = runCatching {
++        val base = baseUrl() ?: return null
++        val reply=request(base,"/api/browser/auto",mapOf("enabled" to if(enabled) "1" else "0"))
++        if (!reply.optBoolean("ok",false)) return null
++        val saved=request(base,"/api/browser/auto")
++        if (!saved.optBoolean("ok",false) || saved.optBoolean("enabled") != enabled) return null
++        enabled
++    }.getOrNull()
++
++    fun currentWebBuild(): String? = runCatching {
++        val base = baseUrl() ?: return null
++        val data=request(base,"/api/build")
++        if(!data.optBoolean("ok",false)) null else data.optString("web").takeIf{it.isNotBlank()}
+     }.getOrNull()
+ 
+ }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+index 981a1ed..c922b3a 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -71,11 +71,13 @@ class MoksuExtrasActivity:ComponentActivity() {
+     private var webUrl by mutableStateOf("")
+     private var revealAccessToken by mutableStateOf(false)
+     private var webState by mutableStateOf("正在读取状态")
++    private var browserAutoEnabled by mutableStateOf(false)
++    private var browserAutoKnown by mutableStateOf(false)
++    private var browserAutoSaving by mutableStateOf(false)
++    private var webBackendBuild by mutableStateOf("")
+     private var stealthState by mutableStateOf("正在检测内核")
+     private var stealthSupported by mutableStateOf(false)
+     private var stealthEnabled by mutableStateOf(false)
+-    private var uninstalledDisplay by mutableStateOf(false)
+-    private var pendingDisplay by mutableStateOf(false)
+     private var notice by mutableStateOf("")
+     private var disguiseMode by mutableStateOf(MokDisguise.NORMAL)
+     private var showPinSetup by mutableStateOf(false)
+@@ -94,7 +96,6 @@ class MoksuExtrasActivity:ComponentActivity() {
+         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+         disguiseMode = MokDisguise.mode(this)
+         pinConfigured = MokDisguise.configured(this)
+-        uninstalledDisplay = MokDisplayState.showUninstalled(this)
+         selectedUnlockMethod = MokDisguise.calculatorUnlockMethod(this)
+         calendarUnlockMethod = MokDisguise.calendarUnlockMethod(this)
+         setContent { KernelSUTheme(uiMode=UiMode.Material) {
+@@ -107,7 +108,6 @@ class MoksuExtrasActivity:ComponentActivity() {
+         if (!MokAuthGate.ensureAccess(this)) return
+         disguiseMode = MokDisguise.mode(this)
+         pinConfigured = MokDisguise.configured(this)
+-        uninstalledDisplay = MokDisplayState.showUninstalled(this)
+         selectedUnlockMethod = MokDisguise.calculatorUnlockMethod(this)
+         calendarUnlockMethod = MokDisguise.calendarUnlockMethod(this)
+         MokWebDeviceBridge.syncAppearanceAsync(applicationContext)
+@@ -161,15 +161,25 @@ class MoksuExtrasActivity:ComponentActivity() {
+         busy=true
+         lifecycleScope.launch {
+             val info=withContext(Dispatchers.IO) {
++                val before=WebAdminCli.status()
++                if (before.startsWith("enabled=1 ")) WebAdminCli.sync()
+                 val status=WebAdminCli.status()
+-                val url=if (status.contains("enabled")||status.contains("开启")||status.contains("运行"))
+-                    WebAdminCli.url() else ""
++                val url=if (status.startsWith("enabled=1 ")) WebAdminCli.url() else ""
+                 Triple(status,url,runCatching { Natives.kernelUAPIVersion }.getOrDefault(-1))
+             }
+             webState=info.first.ifBlank { "无法连接 ksud，请检查 Root 和服务版本" }
+             webUrl=info.second
+             webEnabled=webUrl.startsWith("http://127.0.0.1:")
+-            if (webEnabled) MokWebDeviceBridge.syncAsync(applicationContext)
++            if (webEnabled) {
++                MokWebDeviceBridge.syncAsync(applicationContext)
++                val webInfo=withContext(Dispatchers.IO){
++                    Pair(MokWebDeviceBridge.configAutoOpen(), MokWebDeviceBridge.currentWebBuild())
++                }
++                browserAutoKnown=webInfo.first!=null
++                browserAutoEnabled=webInfo.first?.first==true
++                webBackendBuild=webInfo.second.orEmpty()
++                if (webBackendBuild != "R7.1") notice="网页版后台未更新，打开网页服务设置后点击刷新；旧页面可能仍在运行"
++            }
+             val state = withContext(Dispatchers.IO) {
+                 runCatching { Natives.stealthState() }.getOrDefault(-1)
+             }
+@@ -219,37 +229,6 @@ class MoksuExtrasActivity:ComponentActivity() {
+         }
+         commitStealth(false)
+     }
+-    /** An independent choice, not a request to flip the kernel Root state. */
+-    private fun toggleUninstalledDisplay(value: Boolean) {
+-        if (busy || value == uninstalledDisplay) return
+-        if (value) {
+-            if (!MokDisguise.configured(this)) {
+-                showPinSetup = true
+-                notice = "先保存六位恢复密码"
+-                return
+-            }
+-            if (!webEnabled) {
+-                notice = "请先开启网页版并确认网页能恢复访问"
+-                return
+-            }
+-            pendingDisplay = true
+-            disguiseCountdown = 5
+-            return
+-        }
+-        commitUninstalledDisplay(false)
+-    }
+-    private fun commitUninstalledDisplay(value: Boolean) {
+-        if (MokDisplayState.setUninstalled(this,value)) {
+-            uninstalledDisplay=value
+-            notice=if(value) "已切换为原生未安装页面" else "已恢复正常管理页面"
+-            if(value) {
+-                startActivity(Intent(this, me.weishu.kernelsu.ui.MainActivity::class.java)
+-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+-                finish()
+-            }
+-        } else notice="修改失败，原状态未改变"
+-    }
+-
+     private fun commitStealth(value:Boolean) {
+         if(busy||!stealthSupported)return
+         // Only enter kernel hide mode after a real, testable six-digit recovery path exists.
+@@ -259,7 +238,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+         busy=true
+         lifecycleScope.launch {
+             val check=withContext(Dispatchers.IO){
+-                val ok=runCatching { Natives.stealthSet(value) }.getOrDefault(false)
++                val ok=MokDisplayState.setUninstalled(this@MoksuExtrasActivity, value)
+                 val actual=runCatching { Natives.stealthState() }.getOrDefault(-1)
+                 Pair(ok,actual)
+             }
+@@ -301,22 +280,6 @@ class MoksuExtrasActivity:ComponentActivity() {
+         }
+     }
+     @Composable private fun Screen() {
+-        if (pendingDisplay) {
+-            LaunchedEffect(pendingDisplay) {
+-                disguiseCountdown = 5
+-                repeat(5) { delay(1000); disguiseCountdown -= 1 }
+-            }
+-            AlertDialog(onDismissRequest={pendingDisplay=false},
+-                title={Text("显示为未安装")},
+-                text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+-                    Text("仅改变管理器中的显示，设备实际 Root 不会被卸载。")
+-                    Text("恢复前请保存网页版地址并确认可以关闭隐藏。")
+-                    Text("遇到无法进入的情况，可通过已保存的网页版关闭隐藏。")
+-                    Text(if(disguiseCountdown>0) "${disguiseCountdown} 秒后可确认" else "可以继续")
+-                }},confirmButton={TextButton(onClick={pendingDisplay=false;commitUninstalledDisplay(true)},
+-                    enabled=disguiseCountdown==0){Text("确认启用")}},
+-                dismissButton={TextButton(onClick={pendingDisplay=false}){Text("取消")}})
+-        }
+         if (pendingStealth) {
+             LaunchedEffect(pendingStealth) {
+                 disguiseCountdown = 5
+@@ -330,7 +293,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+                         "恢复：输入六位密码，再按计算器等号。"
+                     else "恢复：长按日历月份标题，输入六位密码。")
+                     Text("恢复不成功时，使用保存的网页版链接关闭隐藏。")
+-                    Text("请不要直接卸载管理器；先验证网页能独立恢复。")
++                    Text("需要更完整的桌面隐藏时，建议使用网页版管理器。确认网页版能够恢复后，可考虑卸载桌面端管理器。")
+                     Text(if (disguiseCountdown>0) "请阅读操作说明（${disguiseCountdown} 秒）" else "可以继续")
+                 } },
+                 confirmButton = { TextButton(onClick={pendingStealth=false;commitStealth(true)},
+@@ -394,7 +357,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+             verticalArrangement=Arrangement.spacedBy(16.dp)
+         ) {
+             Text("扩展功能",fontSize=29.sp,color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.Bold)
+-            Text("moksu · 闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++            Text("v3.3.2 · R7.1  |  闲鱼 心中都是莫 · 定制",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+             PanelCard {
+                 Row(modifier=Modifier.fillMaxWidth(),
+                     horizontalArrangement=Arrangement.SpaceBetween) {
+@@ -440,33 +403,48 @@ class MoksuExtrasActivity:ComponentActivity() {
+                 }
+             }
+             PanelCard {
+-                Text("浏览器自动入口",fontSize=18.sp,fontWeight=FontWeight.Bold)
+-                Text("可在网页版开启。使用后台 Root 服务检测浏览器启动，不需要无障碍权限。",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween,
++                    verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
++                    Column(Modifier.weight(1f)) {
++                        Text("打开浏览器，自动进入网页版管理器",fontSize=16.sp,fontWeight=FontWeight.Medium)
++                        Text(if(browserAutoKnown) "勾选开启，取消勾选关闭" else "正在读取网页版设置",
++                            fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++                    }
++                    Checkbox(checked=browserAutoEnabled,
++                        onCheckedChange={next ->
++                            if(!browserAutoSaving && webEnabled) {
++                                browserAutoSaving=true
++                                lifecycleScope.launch {
++                                    val result=withContext(Dispatchers.IO) {
++                                        MokWebDeviceBridge.setBrowserAuto(next)
++                                    }
++                                    if(result!=null) {
++                                        browserAutoEnabled=result
++                                        browserAutoKnown=true
++                                        notice=if(result) "已开启浏览器自动入口" else "已关闭浏览器自动入口"
++                                    } else notice="保存失败，请检查网页后台版本"
++                                    browserAutoSaving=false
++                                }
++                            }
++                        },enabled=webEnabled && browserAutoKnown && !browserAutoSaving)
++                }
++                Text("网页版后台："+(webBackendBuild.ifBlank { "未识别（可能运行旧版）" }),fontSize=12.sp,
++                    color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 OutlinedButton(onClick={
+                     if(webEnabled && webUrl.startsWith("http://127.0.0.1:")) {
+                         WebAdminCli.openInBrowser(this@MoksuExtrasActivity,webUrl)
+                     } else notice="请先开启网页管理服务"
+-                },enabled=webEnabled) { Text("打开网页设置") }
++                },enabled=webEnabled) { Text("打开网页版") }
+             }
+             PanelCard {
+-                Text("专属隐藏模式",fontSize=18.sp,fontWeight=FontWeight.Bold)
++                Text("隐身模式",fontSize=18.sp,fontWeight=FontWeight.Bold)
+                 Text(stealthState,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+-                    Text("隐藏管理状态",fontSize=14.sp,color=MaterialTheme.colorScheme.primary)
++                    Text("内核隐身（打开后显示未安装）",fontSize=14.sp,color=MaterialTheme.colorScheme.primary)
+                     Switch(checked=stealthEnabled,onCheckedChange={setStealth(it)},
+                         enabled=!busy&&stealthSupported)
+                 }
+                 HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,
+-                    verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+-                    Column(Modifier.weight(1f)) {
+-                        Text("打开后显示未安装",fontWeight=FontWeight.Medium)
+-                        Text("只改变管理器首页；与桌面图标独立",
+-                            fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+-                    }
+-                    Switch(checked=uninstalledDisplay,onCheckedChange={toggleUninstalledDisplay(it)},enabled=!busy)
+-                }
+-                HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+                 Text("桌面图标",fontSize=14.sp,fontWeight=FontWeight.Medium)
+                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                     FilterChip(selected=disguiseMode==MokDisguise.NORMAL,
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+index 2ec48ea..20f14cf 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+@@ -128,9 +128,6 @@ class MainActivity : ComponentActivity() {
+         super.onResume()
+         if (!me.weishu.kernelsu.mok.MokAuthGate.ensureAccess(this)) return
+         presentationRefresh++
+-        me.weishu.kernelsu.mok.MokWebDeviceBridge.applyWebRestoreRequest(applicationContext) {
+-            runOnUiThread { presentationRefresh++ }
+-        }
+         me.weishu.kernelsu.mok.MokWebDeviceBridge.syncAppearanceAsync(applicationContext)
+         if (!restrictedPresentation())
+             me.weishu.kernelsu.mok.MokWebDeviceBridge.syncAsync(applicationContext)
+@@ -155,6 +152,14 @@ class MainActivity : ComponentActivity() {
+ 
+         val isManager = Natives.isManager
+         if (isManager && Natives.kernelUAPIVersion == Natives.managerUAPIVersion) install()
++        // The web UI lives in a persistent ksud process, NOT in this APK's WebView.
++        // After an APK upgrade the old process continues serving OLD assets until sync.
++        // Only touch an already enabled local web service; keep the token intact.
++        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
++            if (me.weishu.kernelsu.ui.util.WebAdminCli.status().startsWith("enabled=1 ")) {
++                me.weishu.kernelsu.ui.util.WebAdminCli.sync()
++            }
++        }
+ 
+         // Ignore deep links while disguised; only open the unprivileged home.
+         if (savedInstanceState == null && !restrictedPresentation()) {
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+index c587be1..9187d9a 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+@@ -50,7 +50,7 @@ import top.yukonga.miuix.kmp.basic.SnackbarHostState as MiuixSnackbarHostState
+ fun InstallScreen() {
+     val navigator = LocalNavigator.current
+     val context = LocalContext.current
+-    val hiddenMode = runCatching { Natives.stealthState() }.getOrDefault(-1) == 1
++    val hiddenMode = me.weishu.kernelsu.mok.MokDisplayState.showUninstalled(context)
+     val snackbarHost = remember { SnackbarHostState() }
+     val miuixSnackbarHost = remember { MiuixSnackbarHostState() }
+     val uiMode = LocalUiMode.current
+diff --git a/manager/build.gradle.kts b/manager/build.gradle.kts
+index 0e1db37..e691de3 100644
+--- a/manager/build.gradle.kts
++++ b/manager/build.gradle.kts
+@@ -12,8 +12,8 @@ extra["androidBuildToolsVersion"] = "37.0.0"
+ extra["androidCompileNdkVersion"] = libs.versions.ndk.get()
+ extra["androidSourceCompatibility"] = JavaVersion.VERSION_21
+ extra["androidTargetCompatibility"] = JavaVersion.VERSION_21
+-extra["managerVersionCode"] = getVersionCode()
+-extra["managerVersionName"] = getVersionName()
++extra["managerVersionCode"] = (providers.gradleProperty("KSU_VERSION_CODE").orNull?.toIntOrNull() ?: getVersionCode())
++extra["managerVersionName"] = (providers.gradleProperty("KSU_VERSION_NAME").orNull ?: getVersionName())
+ 
+ fun getGitCommitCount(): Int {
+     val process = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "--count", "HEAD"))
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index d96bf09..7b50555 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -12,8 +12,19 @@
+ // 🔐 访问鉴权（2026-09-18）：地址里必须带**专属密钥**（`{PATH}/{token}`）。
+ // 服务端把带密钥的完整前缀注入到下面的 P 里，所以本文件所有请求天然带密钥 ——
+ // 本文件里**不要**自己拼 /x7k9f 或任何不带密钥的地址。
+-var APP_REVISION = "R7 2026-10-14";
+-var P = "__P__";          // 路径前缀（服务端注入，**含访问密钥**）
++var APP_REVISION = "R7.1 2026-10-14";
++var P = "__P__";
++function showRunningBuild() {
++  var badge=document.querySelector("#runtime-revision");
++  if(!badge)return;
++  get("/api/build").then(function(v) {
++    if(!v.ok || !v.web)throw new Error("missing build");
++    badge.textContent="网页后台 "+v.web;
++    badge.title="正在运行的 ksud 版本："+v.web+" / 管理器："+(v.manager||"未知");
++    if(v.web!=="R7.1")badge.textContent="后台未更新 · "+v.web;
++  }).catch(function(){badge.textContent="旧版后台未更新";badge.title="请打开新版 Android 管理器，同步 ksud 网页服务";});
++}
++          // 路径前缀（服务端注入，**含访问密钥**）
+ var NS = "http://www.w3.org/2000/svg";
+ 
+ var state = {
+@@ -250,8 +261,12 @@ function setStealth(enable) {
+   if(enable) {toast("请先在手机管理器设置六位密码和伪装入口");return;}
+   state.busy = true;
+   post("/api/stealth", { enable: enable ? "1" : "0" }).then(function (r) {
+-    toast(r.message || (r.ok ? "已切换" : (r.error || "操作失败")));
+-    setTimeout(loadStatus, 500);
++    if(!r.ok) throw new Error(r.error||"内核未确认恢复");
++    return get("/api/status").then(function(v) {
++      if(v.stealth !== enable) throw new Error("后台内核状态与请求不一致");
++      toast(enable?"隐身已开启":"隐身已关闭，打开管理器将恢复正常显示");
++      loadStatus();
++    });
+   }).catch(function (e) { toast("操作失败：" + e.message); })
+     .then(function () { state.busy = false; });
+ }
+@@ -282,33 +297,24 @@ function addAppearanceSummary(container) {
+   var inner=el("div","appearance-state");
+   inner.appendChild(el("div","security-subtitle","正在读取桌面端设置…"));
+   container.appendChild(inner);
+-  get("/api/appearance").then(function(v) {
++  Promise.all([get("/api/appearance"),get("/api/status")]).then(function(results) {
++    var v=results[0],live=results[1];
++    v.kernelStealth=typeof live.stealth === "boolean" ? live.stealth : null;
+     clear(inner);
+     if(!v.ok || !v.known) {
+-      inner.appendChild(el("div","security-subtitle","尚未同步，请打开一次桌面端管理器。后台服务仍可独立使用。"));
++      inner.appendChild(el("div","security-subtitle","桌面入口尚未同步；内核隐藏状态仍从后台实时读取。"));
++      inner.appendChild(row("eye-off","内核隐身",v.kernelStealth===true?"已开启（显示未安装）":v.kernelStealth===false?"已关闭":"未知"));
+       return;
+     }
+     var seen=Number(v.seenAt||0);
+     var stale=seen && (Date.now()/1000-seen)>600;
+     if(stale)inner.appendChild(el("div","security-subtitle","下面是最后一次同步的状态，可能已变化。"));
+     inner.appendChild(row("smartphone","桌面显示",humanLauncher(v.launcher)));
+-    inner.appendChild(row("eye-off","管理器显示",v.uninstalled?"未安装界面":"正常管理界面"));
++    inner.appendChild(row("eye-off","管理器显示",v.kernelStealth===true?"内核隐身 · 未安装界面":v.kernelStealth===false?"正常管理界面":"内核状态待确认"));
+     inner.appendChild(row("lock","六位恢复密码",v.pinSet?"已设置":"尚未设置"));
+     inner.appendChild(row("sliders-horizontal","计算器恢复",humanCalcMethod(v.calculatorMethod)));
+     inner.appendChild(row("scroll-text","日历恢复",humanCalendarMethod(v.calendarMethod)));
+     var controls=el("div","security-actions");
+-    if(v.uninstalled) {
+-      var recover=el("button","btn","关闭未安装显示");
+-      recover.onclick=function() {
+-        confirmSheet("请求恢复管理器显示", "网页会通知桌面端在下次打开时恢复正常界面；不会卸载、刷写或重置密码。", "确认", function() {
+-          post("/api/appearance/disable",{}).then(function(j){
+-            if(!j.ok)throw new Error(j.error||"无法提交");
+-            toast("请求已发送，请打开一次桌面入口使其生效");
+-          }).catch(function(e){toast("恢复请求失败："+e.message);});
+-        });
+-      };
+-      controls.appendChild(recover);
+-    }
+     var again=el("button","btn","重新读取");
+     again.onclick=function(){clear(inner);addAppearanceSummary(inner);};
+     controls.appendChild(again);
+@@ -324,10 +330,10 @@ function renderStatus(s) {
+   var installed = s.root === true;
+   var hidden = s.stealth === true;
+   var unknown = s.stealth == null;
+-  var title = installed ? "Root 已就绪" : (hidden ? "内核状态受隐藏模式影响" : unknown ? "内核状态暂时不可用" : "尚未识别到 Root");
+-  var summary = installed
++  var title = hidden ? "内核隐身已开启" : installed ? "Root 已就绪" : unknown ? "内核状态暂时不可用" : "尚未识别到 Root";
++  var summary = hidden ? "管理器显示原生未安装界面；可以在网页版直接关闭隐身" : installed
+     ? "内核连接正常 · " + String(s.manager || "moksu")
+-    : hidden ? "可在网页关闭隐藏模式" : unknown ? "未收到可靠的内核状态，稍后重试或关闭隐藏" : "当前未识别到可用的内核接口，请检查安装和兼容情况";
++    : unknown ? "未收到可靠的内核状态，稍后重试" : "当前未识别到可用的内核接口，请检查安装和兼容情况";
+   var hero=el("div","card hero " + (installed ? "on" : "off"));
+   var ring=el("div","ring"); ring.appendChild(ic(installed ? "shield-check" : hidden ? "eye-off" : "shield-alert"));
+   hero.appendChild(ring);
+@@ -360,7 +366,12 @@ function renderStatus(s) {
+   device.appendChild(row("layers","KMI",s.kmi));
+   device.appendChild(row("hard-drive","运行模式",s.lkm ? "LKM" : (s.gki ? "GKI" : "未确认")));
+   device.appendChild(row("package","APK 包名","com.moksu.manager（当前安装包固定）"));
+-  device.appendChild(row("info","网页版版本",APP_REVISION));
++  device.appendChild(row("info","前端资源",APP_REVISION));
++  var daemonRevision=el("div","backend-version-line","正在核对后台版本…");
++  device.appendChild(daemonRevision);
++  get("/api/build").then(function(v){
++    daemonRevision.textContent=v.ok?("运行中的网页版后台："+v.web+" · " +v.manager):"旧版后台，网页还未更新";
++  }).catch(function(){daemonRevision.textContent="旧版后台仍在运行，请在 Android 管理器打开一次扩展功能并刷新";});
+   var installCode=el("div","device-code-line");
+   var codeValue=el("strong","device-id-value","等待 Android 管理器同步设备码");
+   installCode.appendChild(el("span",null,"本机安装设备码"));
+@@ -380,7 +391,7 @@ function renderStatus(s) {
+   privacy.appendChild(row("terminal","Root shell",s.rootShell ? "可用" : "不可用",true,s.rootShell ? "ok" : "warn"));
+   privacy.appendChild(row("shield","安全模式",s.safeMode ? "开启" : "关闭",true,s.safeMode ? "warn" : "ok"));
+   privacy.appendChild(stealthRow(s));
+-  privacy.appendChild(el("div","hint","桌面图标和未安装页面是两项独立设置。网页可以关闭内核隐藏；需要恢复未安装页面时，请在下面申请恢复后打开一次桌面入口。"));
++  privacy.appendChild(el("div","hint","内核隐身开启后，管理器显示原生未安装界面；桌面图标（管理员 / 计算器 / 日历）另行选择。网页版可立即关闭内核隐身。"));
+   addAppearanceSummary(privacy);
+   box.appendChild(privacy);
+ 
+@@ -1643,3 +1654,7 @@ function initSprite() {
+ 
+   initSprite().then(function () { show("status"); });
+ })();
++
++// R7.1 runtime version verification (the static HTML label is not evidence of server version).
++if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", showRunningBuild);
++else showRunningBuild();
+diff --git a/userspace/ksud/assets/webadmin/index.html b/userspace/ksud/assets/webadmin/index.html
+index edc31c6..55e7f53 100644
+--- a/userspace/ksud/assets/webadmin/index.html
++++ b/userspace/ksud/assets/webadmin/index.html
+@@ -7,11 +7,11 @@
+ <meta name="color-scheme" content="light dark">
+ <meta name="theme-color" content="#f7f7fc">
+ <meta http-equiv="X-Content-Type-Options" content="nosniff">
+-<title>moksu R7 · 心中都是莫</title>
++<title>moksu R7.1 · 心中都是莫</title>
+ <link rel="icon" href="data:,">
+ <link rel="stylesheet" href="__P__/a/themes.css">
+-<link rel="stylesheet" href="__P__/a/app.css?v=r7-20261014">
+-<link rel="stylesheet" href="__P__/a/material-r4.css?v=r7-20261014">
++<link rel="stylesheet" href="__P__/a/app.css?v=r71-20261014">
++<link rel="stylesheet" href="__P__/a/material-r4.css?v=r71-20261014">
+ </head>
+ <body>
+ <div class="app-frame">
+@@ -31,8 +31,8 @@
+   </aside>
+   <div class="workplace">
+     <header class="topbar">
+-      <div class="top-name"><div class="crumb"><span>moksu</span> <span class="crumb-sep">/</span> <span id="crumb-current">设备概览</span></div><div class="top-subtitle">管理器网页版 · R7</div></div>
+-      <div class="top-actions"><span class="revision-label" title="当前网页版构建">R7 · 10/14</span><span class="owner-credit">闲鱼 心中都是莫 · 定制</span><span class="offline-pill"><span class="health-dot" aria-hidden="true"></span> 本机</span><button class="icon-btn" id="refresh" type="button" title="刷新" aria-label="刷新当前页面"><svg class="ic"><use href="#i-refresh-cw"/></svg></button><button class="icon-btn" id="theme" type="button" title="主题" aria-label="选择主题"><svg class="ic"><use href="#i-palette"/></svg></button></div>
++      <div class="top-name"><div class="crumb"><span>moksu</span> <span class="crumb-sep">/</span> <span id="crumb-current">设备概览</span></div><div class="top-subtitle">管理器网页版 · R7.1</div></div>
++      <div class="top-actions"><span class="revision-label" id="runtime-revision" title="运行中的后台版本">正在核对版本…</span><span class="owner-credit">闲鱼 心中都是莫 · 定制</span><span class="offline-pill"><span class="health-dot" aria-hidden="true"></span> 本机</span><button class="icon-btn" id="refresh" type="button" title="刷新" aria-label="刷新当前页面"><svg class="ic"><use href="#i-refresh-cw"/></svg></button><button class="icon-btn" id="theme" type="button" title="主题" aria-label="选择主题"><svg class="ic"><use href="#i-palette"/></svg></button></div>
+     </header>
+     <main id="main">
+       <div class="page-heading"><div><h1 id="page-title">设备概览</h1><p id="page-description">设备状态与管理概览</p></div></div>
+@@ -65,6 +65,6 @@
+ </nav>
+ <div id="mask"><div class="sheet" id="sheet"></div></div>
+ <div id="toast" role="status" aria-live="polite"></div>
+-<script src="__P__/a/app.js?v=r7-20261014"></script>
++<script src="__P__/a/app.js?v=r71-20261014"></script>
+ </body>
+ </html>
+diff --git a/userspace/ksud/assets/webadmin/material-r4.css b/userspace/ksud/assets/webadmin/material-r4.css
+index 1093b9e..a0d81a6 100644
+--- a/userspace/ksud/assets/webadmin/material-r4.css
++++ b/userspace/ksud/assets/webadmin/material-r4.css
+@@ -153,3 +153,16 @@ main section.on{display:block!important}
+ .moksu-checkbox:disabled{cursor:not-allowed;opacity:.5}
+ .appearance-state{margin-top:12px}.appearance-state .security-actions{flex-wrap:wrap;margin-top:13px}
+ @media(max-width:550px){.revision-label{font-size:10px;padding:4px 5px}.moksu-toggle-label{font-size:13px}}
++
++/* R7.1: never hide owner or verified revision on phones. */
++@media(max-width:700px){
++  .topbar{height:73px;padding:0 11px;gap:5px}
++  .top-name{flex:1;min-width:0}
++  .topbar .crumb{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++  .top-actions{gap:5px;display:flex;align-items:center;min-width:0}
++  .top-actions .offline-pill{display:none}
++  .top-actions .icon-btn{width:30px;height:30px;min-width:30px}
++  .top-actions .revision-label{font-size:10px;white-space:nowrap}
++  .top-actions .owner-credit{display:block;max-width:98px;font-size:10px!important;line-height:1.25;white-space:normal;text-align:right;overflow:visible;text-overflow:clip;color:var(--fg-dim)}
++}
++@media(max-width:360px){.top-actions .icon-btn#theme{display:none}.top-actions .owner-credit{max-width:85px;font-size:9px!important}}
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+index 159dbce..ca38555 100644
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -90,13 +90,17 @@ fn appearance_status() -> &'static std::sync::Mutex<Option<ManagerAppearance>> {
+     CELL.get_or_init(|| std::sync::Mutex::new(None))
+ }
+ fn appearance_json() -> String {
++    #[cfg(target_os = "android")]
++    let live = crate::ksucalls::stealth_get_authed().ok();
++    #[cfg(not(target_os = "android"))]
++    let live: Option<bool> = None;
+     match appearance_status().lock() {
+         Ok(guard) => match guard.as_ref() {
+             Some(s) => serde_json::json!({"ok":true,"known":true,"launcher":s.launcher,
+-                "uninstalled":s.uninstalled,"pinSet":s.pin_set,
++                "uninstalled":live.unwrap_or(s.uninstalled),"kernelStealth":live,"pinSet":s.pin_set,
+                 "calculatorMethod":s.calculator_method,"calendarMethod":s.calendar_method,
+                 "seenAt":s.seen_at,"disableRequested":s.disable_requested}).to_string(),
+-            None => serde_json::json!({"ok":true,"known":false}).to_string(),
++            None => serde_json::json!({"ok":true,"known":false,"kernelStealth":live,"uninstalled":live}).to_string(),
+         },
+         Err(_) => serde_json::json!({"ok":false,"error":"状态读取失败"}).to_string(),
+     }
+@@ -886,6 +890,12 @@ fn handle(server: &Server, stream: TcpStream) -> std::io::Result<()> {
+     }
+ 
+     match rel {
++        "/api/build" => {
++            respond(&mut writer, 200, JSON,
++                serde_json::json!({"ok":true,"web":"R7.1","manager":"3.3.2-R7.1",
++                    "core":"3.3.1","who":SERVICE_NAME,"binSha":self_exe_sha()})
++                    .to_string().as_bytes())
++        }
+         "/api/status" => respond(&mut writer, 200, JSON, server.backend.status().to_string().as_bytes()),
+         // 专用探活接口：给"这个端口上是不是我们自己的服务"当判据（见 SERVICE_NAME 的注释）
+         "/api/ping" => respond(
+@@ -964,16 +974,9 @@ fn handle(server: &Server, stream: TcpStream) -> std::io::Result<()> {
+             respond(&mut writer,200,JSON,b"{\"ok\":true}")
+         }
+         "/api/appearance/disable" => {
+-            // For the local-only web UI: asks Android to clear its independent
+-            // presentation flag at the next Activity start. Not a kernel write.
+             require_post!();
+-            let mut guard=appearance_status().lock().unwrap_or_else(|e| e.into_inner());
+-            let Some(s)=guard.as_mut() else {
+-                return respond(&mut writer, 200, JSON,
+-                    r#"{"ok":false,"error":"请先启动一次桌面管理器同步状态"}"#.as_bytes());
+-            };
+-            s.disable_requested=true;
+-            respond(&mut writer,200,JSON,b"{\"ok\":true}")
++            respond(&mut writer, 200, JSON,
++                r#"{"ok":false,"error":"已改为统一内核隐身开关，请使用 /api/stealth"}"#.as_bytes())
+         }
+         "/api/browser/auto" => {
+             if method == "POST" {
+@@ -1265,7 +1268,15 @@ fn handle(server: &Server, stream: TcpStream) -> std::io::Result<()> {
+             // a six-digit recovery code and a selectable launcher alias exist.
+             let out = if enable {
+                 Err("请在 Android 管理器内设置恢复密码后启用隐藏".to_string())
+-            } else { server.backend.set_stealth(false) };
++            } else {
++                server.backend.set_stealth(false).and_then(|msg| {
++                    #[cfg(target_os = "android")]
++                    if !matches!(crate::ksucalls::stealth_get_authed(), Ok(false)) {
++                        return Err("已发送关闭请求，但内核状态尚未确认".to_string());
++                    }
++                    Ok(msg)
++                })
++            };
+             respond(&mut writer, 200, JSON, result_json(out).as_bytes())
+         }
+         "/api/stealth-code" => {
+diff --git a/userspace/ksud/src/webadmin_ksud.rs b/userspace/ksud/src/webadmin_ksud.rs
+index b018419..f26dba9 100644
+--- a/userspace/ksud/src/webadmin_ksud.rs
++++ b/userspace/ksud/src/webadmin_ksud.rs
+@@ -88,24 +88,17 @@ impl Backend for KsudBackend {
+     }
+ 
+     fn set_stealth(&self, enable: bool) -> Result<String, String> {
+-        // A real 4-digit recovery code must have been persisted before hiding.
+-        // A default shown by the UI is NOT a working four-digit dial code.
+-        if enable {
+-            let code=std::fs::read_to_string("/data/adb/sevenk/stealth_code")
+-                .map_err(|_| "请先设置四位数字恢复码，并在 Android 设置中授权拨号恢复角色".to_string())?;
+-            if code.trim().len() != 4 || !code.trim().bytes().all(|b| b.is_ascii_digit()) {
+-                return Err("请先设置四位数字恢复码，再开启隐藏".to_string());
+-            }
+-        }
+-        match ksucalls::stealth_set_authed(enable) {
+-            Ok(()) => Ok(if enable { "隐身已开启" } else { "隐身已关闭" }.to_string()),
+-            Err(e) => Err(format!("{e:#}")),
++        // Enable is guarded by the Android recovery PIN and launcher; web can only disable.
++        // Never read the obsolete four-digit dial-code file.
++        if enable { return Err("请在 Android 管理器中设置六位恢复密码后开启".to_string()); }
++        ksucalls::stealth_set_authed(false).map_err(|e| format!("{e:#}"))?;
++        if !matches!(ksucalls::stealth_get_authed(), Ok(false)) {
++            return Err("关闭请求已发送，但内核回读尚未确认".to_string());
+         }
++        Ok("内核隐身已关闭，管理器将恢复正常界面".to_string())
+     }
+ 
+ 
+-
+-
+     fn set_stealth_code(&self, code: &str) -> Result<String, String> {
+         // 与 App 里 StealthCodeStore.write 写同一个文件：
+         // App 的拨号接收器判的是「磁盘 ∪ prefs」，所以写磁盘这一份就生效。
