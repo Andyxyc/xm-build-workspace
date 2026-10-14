@@ -60,7 +60,7 @@ jobs:
           mkdir -p out
           python3 - <<'PY'
           from pathlib import Path
-          from zipfile import ZipFile, ZIP_STORED
+          from zipfile import ZipFile, ZIP_DEFLATED
           binaries={
             'lib/arm64-v8a/libksud.so':Path('input/native/aarch64-linux-android/ksud').read_bytes(),
             'lib/x86_64/libksud.so':Path('input/native/x86_64-linux-android/ksud').read_bytes(),
@@ -75,13 +75,13 @@ jobs:
                 content=binaries.get(info.filename)
                 if content is not None:
                   seen.add(info.filename)
-                  info.compress_type=ZIP_STORED
+                  info.compress_type=ZIP_DEFLATED
                 else:
                   content=inp.read(info.filename)
                 out.writestr(info,content)
               for name, binary in binaries.items():
                 if name not in seen:
-                  out.writestr(name, binary, compress_type=ZIP_STORED)
+                  out.writestr(name, binary, compress_type=ZIP_DEFLATED, compresslevel=6)
             # Fresh Gradle unsigned APKs have no ksud entries; both are added.
           PY
           for mode in calculator calendar; do
