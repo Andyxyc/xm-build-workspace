@@ -1,0 +1,813 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt
+@@ -162,11 +162,15 @@
+     }
+     val history=remember(historyTick,historyVisible) { CalcHistory.read(context) }
+     BoxWithConstraints(Modifier.fillMaxSize().background(scheme.background)) {
+-        val compact = maxHeight < 620.dp
+-        val keyHeight = if(compact) 51.dp else 65.dp
+-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
++        val compact = maxHeight < 680.dp
++        val tablet = maxWidth >= 600.dp
++        val keyHeight = if(compact) 48.dp else if(tablet) 72.dp else 65.dp
++        val columnModifier = Modifier.fillMaxHeight().widthIn(max=if(tablet) 520.dp else 600.dp)
++            .align(Alignment.Center)
++            .then(if(compact) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+             .windowInsetsPadding(WindowInsets.safeDrawing)
+-            .padding(horizontal=18.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(if(compact) 5.dp else 9.dp)) {
++            .padding(horizontal=if(tablet) 24.dp else 18.dp,vertical=12.dp)
++        Column(columnModifier,verticalArrangement=Arrangement.spacedBy(if(compact) 5.dp else 9.dp)) {
+             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+                 horizontalArrangement=Arrangement.SpaceBetween) {
+                 Text("计算器",fontSize=26.sp,fontWeight=FontWeight.SemiBold,color=scheme.onSurface)
+@@ -175,7 +179,7 @@
+                     TextButton(onClick={historyVisible=true}) {Text("记录",color=scheme.primary)}
+                 }
+             }
+-            Spacer(Modifier.height(if(compact) 12.dp else 60.dp))
++            if(compact) Spacer(Modifier.height(12.dp)) else Spacer(Modifier.weight(1f))
+             Text(expression,modifier=Modifier.fillMaxWidth().padding(end=8.dp),fontSize=16.sp,
+                 textAlign=TextAlign.End,color=scheme.onSurfaceVariant,maxLines=1)
+             Text(display,modifier=Modifier.fillMaxWidth().padding(end=8.dp,bottom=12.dp),
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -47,6 +47,8 @@
+ import java.math.BigDecimal
+ import java.math.MathContext
+ import java.security.KeyStore
++import java.io.File
++import android.util.AtomicFile
+ import java.security.MessageDigest
+ import java.time.LocalDate
+ import java.time.YearMonth
+@@ -116,17 +118,39 @@
+         return android.util.Base64.encodeToString(mac.doFinal(
+             ("moksu-disguise-pin-v1\u0000" + pin).toByteArray(Charsets.UTF_8)), android.util.Base64.NO_WRAP)
+     }
+-    fun configured(context: Context): Boolean = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+-        .getString("pin-tag", null)?.isNotBlank() == true
++    /** Readback across activity/alias transitions. The extra copy is still an HMAC,
++     * not a PIN; both copies remain in private app storage. */
++    private fun marker(context: Context): AtomicFile = AtomicFile(File(context.noBackupFilesDir, "moksu-pin-tag.v1"))
++    private fun currentTag(context: Context): String? {
++        val preferences=context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++        val primary=preferences.getString("pin-tag",null)?.takeIf { it.length in 40..90 }
++        if(primary!=null)return primary
++        val recovered=runCatching {marker(context).openRead().bufferedReader().use{it.readText().trim()} }
++            .getOrNull()?.takeIf{it.length in 40..90} ?: return null
++        preferences.edit().putString("pin-tag",recovered).commit()
++        return recovered
++    }
++    fun configured(context: Context): Boolean = currentTag(context)!=null
++    private fun persistBackup(context:Context, value:String):Boolean = runCatching {
++        val file=marker(context)
++        val stream=file.startWrite()
++        try {stream.write(value.toByteArray(Charsets.US_ASCII));file.finishWrite(stream)}
++        catch(e:Exception){file.failWrite(stream);throw e}
++        true
++    }.getOrDefault(false)
+     /** Save a keyed verifier and recheck it before reporting success. Never persist the digits. */
+     @Synchronized fun setPin(context: Context, first: String, second: String): Boolean {
+         if (!sixDigits.matches(first) || first != second) return false
+         return runCatching {
+             val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+-            val old = prefs.getString("pin-tag",null)
++            val old = currentTag(context)
+             val value = tag(first)
++            if (!persistBackup(context,value)) return false
+             if (!prefs.edit().putString("pin-tag",value).putInt("attempts",0)
+-                    .putLong("lock-until",0).commit()) return false
++                    .putLong("lock-until",0).commit()) {
++                if(old!=null) persistBackup(context,old) else marker(context).delete()
++                return false
++            }
+             if (configured(context) && verify(context,first)) {
+                 MokWebDeviceBridge.syncAppearanceAsync(context.applicationContext)
+                 return true
+@@ -135,6 +159,8 @@
+             prefs.edit().apply {
+                 if (old == null) remove("pin-tag") else putString("pin-tag",old)
+             }.commit()
++            if(old!=null) persistBackup(context,old)
++            else marker(context).delete()
+             false
+         }.getOrDefault(false)
+     }
+@@ -142,7 +168,7 @@
+         if (!sixDigits.matches(entered)) return false
+         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+         if (SystemClock.elapsedRealtime() < prefs.getLong("lock-until",0)) return false
+-        val stored = prefs.getString("pin-tag",null) ?: return false
++        val stored = currentTag(context) ?: return false
+         val good = runCatching {
+             MessageDigest.isEqual(stored.toByteArray(Charsets.US_ASCII),
+                 tag(entered).toByteArray(Charsets.US_ASCII))
+@@ -191,6 +217,9 @@
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         val mode = MokDisguise.mode(this)
++        // Refresh labels, icons and launcher status even when the user opens only
++        // the calculator/calendar alias and never visits the manager activity.
++        MokWebDeviceBridge.syncAsync(applicationContext)
+         if (mode == MokDisguise.NORMAL) { finish(); return }
+         // Ordinary calculator and calendar screens should remain screenshot-capable.
+         setContent {
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokFlashPermit.kt
+@@ -2,87 +2,45 @@
+ package me.weishu.kernelsu.mok
+ 
+ import android.content.Context
+-import android.net.Uri
+-import me.weishu.kernelsu.R
+-import java.io.File
++import android.os.SystemClock
++import android.util.Base64
+ import java.security.MessageDigest
+-import java.security.Signature
+-import java.security.cert.CertificateFactory
+-import java.time.Instant
+-import java.util.Base64
+-import java.util.UUID
++import javax.crypto.SecretKeyFactory
++import javax.crypto.spec.PBEKeySpec
+ 
+-/** Offline, owner-issued, device-specific permit for boot patch and direct flash.
+- * Canonical signed UTF-8 format is fixed and size limited. No fixed card/password in APK.
+- * This gates the app's operation entrypoints; root owners still have independent fastboot/ADB.
++/** Password-only application flash gate. The owner secret is NOT embedded or stored.
++ * The verifier is public by design; it only limits actions through this manager,
++ * never other already-rooted software, fastboot or recovery.
+  */
+ object MokFlashPermit {
+-    const val HEADER = "MOKSU-FLASH-1"
+-    private const val FILE = "owner-flash-authorization.txt"
+-    private const val MAX = 4096
+-    private val devicePattern = Regex("MO-[0-9A-F]{24}")
+-    private val serialPattern = Regex("[0-9a-fA-F-]{36}")
++    private const val ITERATIONS = 210000
++    private const val SALT = "dPEmBMxL91+k7gijQmy9acR+V1A="
++    private const val VERIFY = "O/1r/zSXafs0TU/pNpDOOwp3651Jo+eeQyMYqE8TpH0="
++    private const val GRANT_MILLIS = 12L * 60_000L
++    @Volatile private var approvedUntil: Long = 0L
+ 
+-    data class Permit(val device: String, val expiry: Instant, val operations: Set<String>, val serial: String)
++    @Synchronized fun unlock(context: Context, value: CharArray): Boolean {
++        if (value.size !in 32..128) return false
++        val tmp = value.copyOf()
++        return try {
++            val salt = Base64.decode(SALT, Base64.NO_WRAP)
++            val key = Base64.decode(VERIFY, Base64.NO_WRAP)
++            val spec = PBEKeySpec(tmp, salt, ITERATIONS, key.size * 8)
++            val computed = try {
++                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
++            } finally { spec.clearPassword() }
++            val match = MessageDigest.isEqual(computed, key)
++            computed.fill(0)
++            if (match) approvedUntil = SystemClock.elapsedRealtime() + GRANT_MILLIS
++            match
++        } catch (_: Exception) { false } finally { tmp.fill('\u0000') }
++    }
+ 
+-    private fun parseAndVerify(context: Context, raw: ByteArray): Permit? = runCatching {
+-        if(raw.size > MAX || raw.isEmpty()) return null
+-        val text = raw.toString(Charsets.UTF_8)
+-        val lines = text.trimEnd('\n').split('\n')
+-        if(lines.size != 6 || lines[0] != HEADER || lines.any { it.contains('\r') }) return null
+-        val device = lines[1].removePrefix("device=")
+-        val expires = lines[2].removePrefix("expires=")
+-        val operations = lines[3].removePrefix("operations=")
+-        val serial = lines[4].removePrefix("serial=")
+-        if(!lines[1].startsWith("device=") || !lines[2].startsWith("expires=") ||
+-            !lines[3].startsWith("operations=") || !lines[4].startsWith("serial=") ||
+-            !lines[5].startsWith("signature=")) return null
+-        if(!devicePattern.matches(device) || device != MokDeviceCode.get(context)) return null
+-        val until = Instant.parse(expires)
+-        if(until.isBefore(Instant.now()) || until.isAfter(Instant.now().plusSeconds(31L*24*3600))) return null
+-        if(!serialPattern.matches(serial)) return null
+-        val scopes=operations.split(',').toSet()
+-        if(scopes.isEmpty() || scopes.any { it !in setOf("patch","flash") } || scopes.joinToString(",") != operations) return null
+-        val signBytes = (lines.take(5).joinToString("\n")+"\n").toByteArray(Charsets.UTF_8)
+-        val encoded = lines[5].removePrefix("signature=")
+-        val sig = Base64.getDecoder().decode(encoded)
+-        val cert=context.resources.openRawResource(R.raw.moksu_flash_verify_cert).use { stream ->
+-            CertificateFactory.getInstance("X.509").generateCertificate(stream)
+-        }
+-        val verify=Signature.getInstance("SHA256withRSA")
+-        verify.initVerify(cert.publicKey)
+-        verify.update(signBytes)
+-        if(!verify.verify(sig)) return null
+-        Permit(device, until, scopes, serial)
+-    }.getOrNull()
++    /** Never persists the password or an unlock token. Every true result has a finite expiry. */
++    fun authorized(context: Context, need: String = "patch"): Boolean =
++        need in setOf("patch", "flash") &&
++        approvedUntil > 0L &&
++        SystemClock.elapsedRealtime() in 1L..approvedUntil
+ 
+-    private fun file(context: Context): File = File(context.filesDir, FILE)
+-    fun authorized(context: Context, need: String = "patch"): Boolean =
+-        file(context).takeIf { it.isFile && it.length() in 1..MAX.toLong() }?.let {
+-            parseAndVerify(context, it.readBytes())?.operations?.contains(need)
+-        } ?: false
+-
+-    /** Content must have been selected by the user. No public key path or remote URLs accepted. */
+-    fun importFromUri(context: Context, uri: Uri): Boolean = runCatching {
+-        val bytes=context.contentResolver.openInputStream(uri)?.use { stream ->
+-            val out=java.io.ByteArrayOutputStream()
+-            val buf=ByteArray(512)
+-            while(out.size()<=MAX) {
+-                val amount=stream.read(buf)
+-                if(amount<0)break
+-                out.write(buf,0,amount)
+-            }
+-            out.toByteArray()
+-        } ?: return false
+-        if(parseAndVerify(context,bytes)==null) return false
+-        val target=file(context)
+-        val tmp=File.createTempFile("flash-permit-", ".tmp",context.filesDir)
+-        try {
+-            tmp.outputStream().use { it.write(bytes);it.fd.sync() }
+-            check(tmp.renameTo(target))
+-            target.setReadable(false,false);target.setReadable(true,true)
+-        } finally { tmp.delete() }
+-        authorized(context)
+-    }.getOrDefault(false)
+-    fun forget(context: Context) { file(context).delete() }
++    @Synchronized fun lock() { approvedUntil = 0L }
+ }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokImageCandidates.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokImageCandidates.kt
+new file mode 100644
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokImageCandidates.kt
+@@ -0,0 +1,35 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.content.ContentUris
++import android.content.Context
++import android.net.Uri
++import android.provider.MediaStore
++import android.os.Build
++
++internal data class MokImageCandidate(val name: String, val uri: Uri)
++
++/** Best-effort recent boot image hints from system-indexed Downloads.
++ * No storage-all-files privilege; SAF remains the authoritative user picker.
++ * Android 11+ may only expose files contributed by this app; an empty result is normal.
++ */
++internal object MokImageCandidates {
++    private val namePattern=Regex("^(init_boot|boot|vendor_boot|recovery)([-_a-zA-Z0-9.]*)\\.img$", RegexOption.IGNORE_CASE)
++    fun scan(context: Context): List<MokImageCandidate> = runCatching {
++        if(Build.VERSION.SDK_INT < 29) return emptyList()
++        val projection=arrayOf(MediaStore.Downloads._ID,MediaStore.Downloads.DISPLAY_NAME)
++        val results=ArrayList<MokImageCandidate>()
++        context.contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
++            projection, null,null,"${MediaStore.Downloads.DATE_MODIFIED} DESC")?.use { cursor ->
++            val colId=cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
++            val colName=cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
++            while(cursor.moveToNext() && results.size<20) {
++                val name=cursor.getString(colName)?:continue
++                if(name.length>150 || !namePattern.matches(name))continue
++                results.add(MokImageCandidate(name,ContentUris.withAppendedId(
++                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,cursor.getLong(colId))))
++            }
++        }
++        results
++    }.getOrDefault(emptyList())
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -113,6 +113,21 @@
+         calendarUnlockMethod = MokDisguise.calendarUnlockMethod(this)
+         MokWebDeviceBridge.syncAppearanceAsync(applicationContext)
+     }
++    private fun calculatorHint(): String = when(MokDisguise.calculatorUnlockMethod(this)) {
++        MokDisguise.UNLOCK_TAP -> "计算器输入六位密码后按一次等号"
++        MokDisguise.UNLOCK_LONG -> "计算器输入六位密码后长按等号"
++        else -> "计算器输入六位密码后连按两次等号"
++    }
++    private fun calendarHint(): String = when(MokDisguise.calendarUnlockMethod(this)) {
++        MokDisguise.CALENDAR_LONG -> "长按日历月份标题，再输入六位密码"
++        else -> "连续点击日历月份标题三次，再输入六位密码"
++    }
++    private fun activeRecoveryHint(): String = when(disguiseMode) {
++        MokDisguise.CALCULATOR -> calculatorHint()
++        MokDisguise.CALENDAR -> calendarHint()
++        else -> "建议保存网页版地址，使用网页版关闭隐藏"
++    }
++
+     private fun saveRecoveryPin() {
+         if (pinSaving) return
+         if (!firstPin.matches(Regex("[0-9]{6}")) || firstPin != secondPin) {
+@@ -179,7 +194,7 @@
+                 browserAutoKnown=webInfo.first!=null
+                 browserAutoEnabled=webInfo.first?.first==true
+                 webBackendBuild=webInfo.second.orEmpty()
+-                if (webBackendBuild != "R7.1") notice="网页版后台未更新，打开网页服务设置后点击刷新；旧页面可能仍在运行"
++                if (webBackendBuild != "R7.2") notice="网页版后台未更新，打开网页服务设置后点击刷新；旧页面可能仍在运行"
+             }
+             val state = withContext(Dispatchers.IO) {
+                 runCatching { Natives.stealthState() }.getOrDefault(-1)
+@@ -215,13 +230,10 @@
+     private fun setStealth(value:Boolean) {
+         if (busy || !stealthSupported) return
+         if (value) {
+-            if (!MokDisguise.configured(this)) {
+-                showPinSetup = true
+-                notice = "请先保存六位恢复密码"
+-                return
+-            }
++            // Kernel stealth is independent from launcher disguise and recovery PIN.
++            // A validated local web session is the recovery method when no PIN exists.
+             if (!webEnabled || !webUrl.startsWith("http://127.0.0.1:")) {
+-                notice = "请先开启网页版，保存地址，确保可以从网页关闭隐藏"
++                notice = "请先打开网页管理器并确认地址可用，避免无法恢复"
+                 return
+             }
+             disguiseCountdown = 5
+@@ -232,9 +244,13 @@
+     }
+     private fun commitStealth(value:Boolean) {
+         if(busy||!stealthSupported)return
+-        // Only enter kernel hide mode after a real, testable six-digit recovery path exists.
+-        if (value && (disguiseMode == MokDisguise.NORMAL || !MokDisguise.configured(this))) {
+-            notice="请先设置六位密码并选择计算器或日历入口，确保可以恢复";return
++        // Hide mode and launcher aliases must never become two coupled toggles.
++        // Restore the ordinary launcher *before* kernel stealth is applied.
++        if (value && disguiseMode != MokDisguise.NORMAL) {
++            if (!MokDisguise.setMode(this, MokDisguise.NORMAL)) {
++                notice = "无法恢复管理器桌面入口，已取消隐藏";return
++            }
++            disguiseMode = MokDisguise.NORMAL
+         }
+         busy=true
+         lifecycleScope.launch {
+@@ -290,9 +306,7 @@
+                 onDismissRequest = { pendingStealth = false },
+                 title = { Text("开启隐藏模式") },
+                 text = { Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+-                    Text(if (disguiseMode == MokDisguise.CALCULATOR)
+-                        "恢复：输入六位密码，再按计算器等号。"
+-                    else "恢复：长按日历月份标题，输入六位密码。")
++                    Text(activeRecoveryHint())
+                     Text("恢复不成功时，使用保存的网页版链接关闭隐藏。")
+                     Text("需要更完整的桌面隐藏时，建议使用网页版管理器。确认网页版能够恢复后，可考虑卸载桌面端管理器。")
+                     Text(if (disguiseCountdown>0) "请阅读操作说明（${disguiseCountdown} 秒）" else "可以继续")
+@@ -313,9 +327,7 @@
+                 title = { Text(if (modeToSwitch == MokDisguise.CALCULATOR) "切换为计算器" else "切换为日历") },
+                 text = {
+                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+-                        Text(if (modeToSwitch == MokDisguise.CALCULATOR)
+-                            "输入六位恢复密码后，按已选择的等号手势返回。"
+-                        else "日历长按月份标题，输入六位恢复密码返回。")
++                        Text(if(modeToSwitch == MokDisguise.CALCULATOR) calculatorHint() else calendarHint())
+                         Text("如无法恢复，请使用已保存的本机网页地址关闭隐藏模式。")
+                         Text("请先确认网页可以正常打开，再继续。")
+                         Text(if (disguiseCountdown > 0) "请阅读以上说明（${disguiseCountdown} 秒）" else "可以继续")
+@@ -333,7 +345,7 @@
+         if (showPinSetup) {
+             AlertDialog(
+                 onDismissRequest = { if (!pinSaving) { showPinSetup=false;firstPin="";secondPin="" } },
+-                title = { Text("设置六位密码") },
++                title = { Text(if(pinConfigured) "修改六位密码" else "设置六位密码") },
+                 text = {
+                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                         OutlinedTextField(
+@@ -348,7 +360,8 @@
+                             keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
+                     }
+                 },
+-                confirmButton = { TextButton(onClick={saveRecoveryPin()}, enabled=!pinSaving) { Text("保存密码") } },
++                confirmButton = { TextButton(onClick={saveRecoveryPin()}, enabled=!pinSaving) {
++                    Text(if(pinConfigured) "更新密码" else "保存密码") } },
+                 dismissButton = { TextButton(onClick={showPinSetup=false;firstPin="";secondPin=""},enabled=!pinSaving) { Text("取消") } },
+             )
+         }
+@@ -358,7 +371,7 @@
+             verticalArrangement=Arrangement.spacedBy(16.dp)
+         ) {
+             Text("扩展功能",fontSize=29.sp,color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.Bold)
+-            Text("v3.3.2 · R7.1  |  闲鱼 心中都是莫 · 定制",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++            Text("定制构建 R7.2  |  闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+             PanelCard {
+                 Row(modifier=Modifier.fillMaxWidth(),
+                     horizontalArrangement=Arrangement.SpaceBetween) {
+@@ -483,13 +496,20 @@
+                             },label={Text(caption,fontSize=12.sp)})
+                     }
+                 }
+-                Text("输入六位数字后按选定方式恢复；日历在月份标题处按已选手势，再输入密码。",
++                Text(if(disguiseMode==MokDisguise.NORMAL) "先选择桌面入口，再设置其恢复方式"
++                    else activeRecoveryHint(),
+                     fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 Text(if (pinConfigured) "恢复密码：已设置" else "恢复密码：尚未设置",
+                     fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 Text("建议优先使用网页版管理器。需更彻底隐藏时，可在确认网页版能独立恢复、日程和恢复资料已备份后再考虑卸载桌面版；卸载会清除本机配置。",
+                     fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+-                OutlinedButton(onClick={firstPin="";secondPin="";showPinSetup=true},enabled=!busy) {Text("设置密码")}
++                OutlinedButton(onClick={
++                    pinConfigured=MokDisguise.configured(this@MoksuExtrasActivity)
++                    firstPin="";secondPin="";showPinSetup=true
++                },enabled=!busy,colors=ButtonDefaults.outlinedButtonColors(
++                    containerColor=if(pinConfigured) Color(0xFFE2F4E9) else Color.Transparent
++                )) { Text(if(pinConfigured) "修改密码" else "设置密码",
++                    color=if(pinConfigured) Color(0xFF146D43) else MaterialTheme.colorScheme.primary) }
+                 Text("使用与本版本匹配的隐藏内核后可以启用；若未装配套内核，请先安装再操作。",
+                     fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 OutlinedButton(onClick={refresh()},enabled=!busy){Text("重新读取内核")}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+@@ -5,6 +5,20 @@
+ import androidx.activity.compose.rememberLauncherForActivityResult
+ import androidx.activity.result.contract.ActivityResultContracts
+ import androidx.compose.material3.SnackbarHostState
++import androidx.compose.material3.AlertDialog
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.material3.OutlinedTextField
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.heightIn
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.ui.text.input.KeyboardType
++import androidx.compose.ui.text.input.PasswordVisualTransformation
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.LaunchedEffect
+ import androidx.compose.runtime.getValue
+@@ -25,6 +39,8 @@
+ import me.weishu.kernelsu.R
+ import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.mok.MokFlashPermit
++import me.weishu.kernelsu.mok.MokImageCandidates
++import me.weishu.kernelsu.mok.MokImageCandidate
+ import me.weishu.kernelsu.getKernelVersion
+ import me.weishu.kernelsu.ui.LocalUiMode
+ import me.weishu.kernelsu.ui.UiMode
+@@ -62,19 +78,12 @@
+     var installMethod by rememberSaveable { mutableStateOf<InstallMethod?>(null) }
+     var permitFirst by rememberSaveable { mutableStateOf(false) }
+     var permitSecond by rememberSaveable { mutableStateOf(false) }
+-    var importStage by remember { mutableStateOf(0) }
++    var passwordStage by remember { mutableIntStateOf(0) }
++    var passwordInput by remember { mutableStateOf("") }
++    var passwordError by remember { mutableStateOf("") }
+     var proposedMethod by remember { mutableStateOf<InstallMethod?>(null) }
+-    val permitPicker = rememberLauncherForActivityResult(
+-        ActivityResultContracts.OpenDocument()
+-    ) { uri ->
+-        if (uri == null) { importStage=0; return@rememberLauncherForActivityResult }
+-        val accepted=MokFlashPermit.importFromUri(context, uri)
+-        if (accepted) {
+-            if(importStage==1) { permitFirst=true;permitSecond=false;proposedMethod?.let {installMethod=it} }
+-            if(importStage==2) {permitSecond=true}
+-        }
+-        importStage=0
+-    }
++    var imageSuggestions by remember { mutableStateOf<List<MokImageCandidate>>(emptyList()) }
++    var imageSheet by remember { mutableStateOf(false) }
+ 
+     var downloadDialogShown by rememberSaveable { mutableStateOf(false) }
+     var remotePartitions by rememberSaveable { mutableStateOf(emptyList<String>()) }
+@@ -178,7 +187,7 @@
+         val requiredScope = if(installMethod is InstallMethod.DirectInstall ||
+             installMethod is InstallMethod.DirectInstallToInactiveSlot) "flash" else "patch"
+         if (!permitFirst || !permitSecond || !MokFlashPermit.authorized(context, requiredScope)) {
+-            showMessage("需两次读取作者签名的设备专属授权 TXT 文件，确认后才能修补或刷写")
++            showMessage("需要先完成两次修补密码确认")
+         } else if (!isBlockModulesValid(effectiveBlockModules)) {
+             showMessage(blockModulesInvalidMessage)
+         } else installMethod?.let { method ->
+@@ -315,17 +324,21 @@
+         onSelectMethod = { method ->
+             permitFirst=false;permitSecond=false
+             proposedMethod=method
+-            importStage=1
+-            permitPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
++            passwordStage=1
++            passwordInput=""
++            passwordError=""
+         },
+         onDownloadFile = {
+             if(permitFirst && MokFlashPermit.authorized(context,"patch")) downloadDialogShown=true
+-            else showMessage("请先读取设备专属授权 TXT 文件")
++            else { passwordStage=1;passwordError="" }
+         },
+         onSelectBootImage = {
+             if(!permitFirst || !MokFlashPermit.authorized(context,"patch")) {
+-                showMessage("请先读取设备专属授权 TXT 文件")
+-            } else selectImageLauncher.launch(Intent(Intent.ACTION_GET_CONTENT).apply { type = "application/octet-stream" })
++                passwordStage=1;passwordError=""
++            } else {
++                imageSuggestions=MokImageCandidates.scan(context)
++                imageSheet=true
++            }
+         },
+         onUploadLkm = {
+             selectLkmLauncher.launch(Intent(Intent.ACTION_GET_CONTENT).apply { type = "application/octet-stream" })
+@@ -346,11 +359,11 @@
+                 installMethod is InstallMethod.DirectInstallToInactiveSlot) "flash" else "patch"
+             if (!permitFirst || !MokFlashPermit.authorized(context,required)) {
+                 proposedMethod=installMethod
+-                importStage=1
+-                permitPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
++                passwordStage=1
++                passwordInput="";passwordError=""
+             } else if (!permitSecond) {
+-                importStage=2
+-                permitPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
++                passwordStage=2
++                passwordInput="";passwordError=""
+             } else {
+             val isLkmSelected = lkmSelection != LkmSelection.KmiNone
+             val isKmiUnknown = currentKmi.isBlank()
+@@ -388,6 +401,61 @@
+         }
+     )
+ 
++    if (passwordStage!=0) {
++        val stage=passwordStage
++        AlertDialog(onDismissRequest={passwordStage=0;passwordInput=""},
++            title={Text(if(stage==1) "输入修补授权密码" else "再次确认授权密码")},
++            text={Column {
++                Text(if(stage==1) "密码正确后才能选择安装方式" else "确认后才能继续修补或刷写")
++                OutlinedTextField(value=passwordInput,
++                    onValueChange={passwordInput=it.take(128);passwordError=""},
++                    modifier=Modifier.fillMaxWidth(),singleLine=true,
++                    visualTransformation=PasswordVisualTransformation(),
++                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),
++                    label={Text("授权密码")})
++                if(passwordError.isNotBlank()) Text(passwordError)
++            }},
++            confirmButton={TextButton(onClick={
++                // No raw password is kept in app state or persisted to preferences.
++                val candidate=passwordInput.toCharArray()
++                passwordInput=""
++                val ok=MokFlashPermit.unlock(context,candidate)
++                candidate.fill('\u0000')
++                if(ok) {
++                    if(stage==1) {
++                        permitFirst=true
++                        permitSecond=false
++                        proposedMethod?.let{installMethod=it}
++                    } else permitSecond=true
++                    passwordStage=0;passwordError=""
++                } else passwordError="密码不正确，请联系作者"
++            },enabled=passwordInput.isNotBlank()){Text("确认")}},
++            dismissButton={TextButton(onClick={passwordStage=0;passwordInput=""}){Text("取消")}})
++    }
++    if(imageSheet) {
++        AlertDialog(onDismissRequest={imageSheet=false},
++            title={Text("选择镜像文件")},
++            text={Column(Modifier.heightIn(max=330.dp).verticalScroll(rememberScrollState())) {
++                Text(if(imageSuggestions.isEmpty()) "未在系统索引的下载目录找到镜像，可手动浏览内部存储"
++                    else "找到 ${imageSuggestions.size} 个可能的镜像，请核对设备及分区")
++                imageSuggestions.forEach{candidate ->
++                    TextButton(onClick={
++                        installMethod=InstallMethod.SelectFile(candidate.uri,
++                            label=R.string.select_file,
++                            summary=if(isGkiDevice) selectFileTip else selectFileTipNoGki)
++                        imageSheet=false
++                    }) {Text(candidate.name)}
++                }
++            }},
++            confirmButton={TextButton(onClick={
++                imageSheet=false
++                selectImageLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
++                    type="*/*"
++                    addCategory(Intent.CATEGORY_OPENABLE)
++                })
++            }){Text("浏览内部存储")}},
++            dismissButton={TextButton(onClick={imageSheet=false}){Text("取消")}})
++    }
+     when (LocalUiMode.current) {
+         UiMode.Miuix -> InstallScreenMiuix(state, actions, miuixSnackbarHost)
+         UiMode.Material -> InstallScreenMaterial(state, actions, snackbarHost)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt
+@@ -359,8 +359,8 @@
+     // Last line of defence: enforce owner permit at the real boot-patch entrypoint.
+     val scope = if (bootUri == null) "flash" else "patch"
+     if (!MokFlashPermit.authorized(ksuApp, scope)) {
+-        onStderr("缺少有效的设备专属刷写授权文件")
+-        return FlashResult(-1, "缺少有效的设备专属刷写授权文件", false)
++        onStderr("修补授权密码未验证或已经过期")
++        return FlashResult(-1, "修补授权密码未验证或已经过期", false)
+     }
+     val resolver = ksuApp.contentResolver
+ 
+@@ -432,8 +432,8 @@
+     onStderr: (String) -> Unit,
+ ): FlashResult {
+     if (!MokFlashPermit.authorized(ksuApp, "patch")) {
+-        onStderr("缺少有效的设备专属修补授权文件")
+-        return FlashResult(-1, "缺少有效的设备专属修补授权文件", false)
++        onStderr("修补授权密码未验证或已经过期")
++        return FlashResult(-1, "修补授权密码未验证或已经过期", false)
+     }
+     val bootFile = File(ksuApp.cacheDir, "download-boot.img")
+     var probedKmi: String? = null
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+@@ -37,7 +37,9 @@
+         viewModelScope.launch {
+             val baseState = withContext(Dispatchers.IO) { buildState() }
+             _uiState.update { baseState }
+-            if (baseState.checkUpdateEnabled) {
++            // The custom fork has an independent release track. Do not show an
++            // upstream manager update banner for a differently signed/versioned build.
++            if (baseState.checkUpdateEnabled && BuildConfig.APPLICATION_ID != "com.moksu.manager") {
+                 val latestVersionInfo = withContext(Dispatchers.IO) { checkNewVersion() }
+                 _uiState.update { it.copy(latestVersionInfo = latestVersionInfo) }
+             }
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -12,7 +12,7 @@
+ // 🔐 访问鉴权（2026-09-18）：地址里必须带**专属密钥**（`{PATH}/{token}`）。
+ // 服务端把带密钥的完整前缀注入到下面的 P 里，所以本文件所有请求天然带密钥 ——
+ // 本文件里**不要**自己拼 /x7k9f 或任何不带密钥的地址。
+-var APP_REVISION = "R7.1 2026-10-14";
++var APP_REVISION = "R7.2 2026-10-14";
+ var P = "__P__";
+ function showRunningBuild() {
+   var badge=document.querySelector("#runtime-revision");
+@@ -21,7 +21,7 @@
+     if(!v.ok || !v.web)throw new Error("missing build");
+     badge.textContent="网页后台 "+v.web;
+     badge.title="正在运行的 ksud 版本："+v.web+" / 管理器："+(v.manager||"未知");
+-    if(v.web!=="R7.1")badge.textContent="后台未更新 · "+v.web;
++    if(v.web!=="R7.2")badge.textContent="后台未更新 · "+v.web;
+   }).catch(function(){badge.textContent="旧版后台未更新";badge.title="请打开新版 Android 管理器，同步 ksud 网页服务";});
+ }
+           // 路径前缀（服务端注入，**含访问密钥**）
+@@ -241,24 +241,21 @@
+   var known = typeof s.stealth === "boolean";
+   var sw = el("div", "sw" + (s.stealth === true ? " on" : "") + (known ? "" : " unknown"));
+   sw.setAttribute("role", "switch");
+-  sw.title = known ? (s.stealth ? "关闭隐藏" : "请在 Android 管理器配置后开启") : "内核状态暂时未知，可尝试关闭隐藏";
++  sw.title = known ? (s.stealth ? "关闭隐藏" : "开启内核隐身") : "内核状态暂时未知";
+   sw.setAttribute("aria-checked", known ? (s.stealth ? "true" : "false") : "mixed");
+   sw.onclick = function () {
+     if (state.busy) return;
+-    var want = known && !s.stealth;
+-    if (want) {
+-      toast("请在 Android 管理器设置六位密码和桌面入口后开启");
+-    } else {
+-      confirmSheet("关闭隐藏模式？", "此操作将尝试恢复桌面管理器的显示。", "关闭",
+-        function () { setStealth(false); });
+-    }
++    if (!known) { toast("暂时无法确认内核状态，请检查后端连接"); return; }
++    var want = !s.stealth;
++    confirmSheet(want ? "开启内核隐身？" : "关闭内核隐身？",
++      want ? "管理器将显示未安装；可使用当前已登录的网页版恢复。" : "将恢复管理器的正常安装状态。",
++      want ? "确认开启" : "确认关闭", function () { setStealth(want); });
+   };
+   r.appendChild(sw);
+   return r;
+ }
+ 
+ function setStealth(enable) {
+-  if(enable) {toast("请先在手机管理器设置六位密码和伪装入口");return;}
+   state.busy = true;
+   post("/api/stealth", { enable: enable ? "1" : "0" }).then(function (r) {
+     if(!r.ok) throw new Error(r.error||"内核未确认恢复");
+@@ -652,8 +649,8 @@
+   box.appendChild(frame);
+   var webState = el("div", "fld-h", "正在加载模块页面…");
+   box.appendChild(webState);
+-  var webWait = setTimeout(function () { webState.textContent = "加载较慢。模块可能依赖浏览器不支持的 API，可试试在管理器中打开。"; }, 10000);
+-  frame.addEventListener("load", function () { clearTimeout(webWait); webState.textContent = "网页已加载。若仍白屏，检查模块资源与 JavaScript 报错。"; });
++  var webWait = setTimeout(function () { webState.textContent = "仍在等待模块页面。如果停留在云端授权，请检查模块自己的授权服务与网络；本页面无法代替模块验证。"; }, 10000);
++  frame.addEventListener("load", function () { clearTimeout(webWait); webState.textContent = "模块页面资源已加载；模块授权状态以模块自己的提示为准。"; });
+   frame.addEventListener("error", function () { clearTimeout(webWait); webState.textContent = "页面加载失败，请检查模块 webroot 是否完整。"; });
+   box.appendChild(el("div", "fld-h",
+     "这是模块自带的网页界面（本机）。部分功能依赖模块自己的脚本，遇到兼容问题可在管理器里打开。"));
+@@ -1300,7 +1297,7 @@
+   var appearance=el("div","card wide");
+   appearance.appendChild(el("div","eyebrow","桌面与隐藏"));
+   appearance.appendChild(el("div","security-title","显示方式"));
+-  appearance.appendChild(el("p","security-subtitle","桌面图标和管理器未安装界面分别控制。恢复密码在手机上设置，这里只显示是否已设置。"));
++  appearance.appendChild(el("p","security-subtitle","内核隐身与桌面计算器、日历分别控制。当前网页版可直接开启或关闭内核隐身。"));
+   addAppearanceSummary(appearance);
+   grid.appendChild(appearance);
+   var c=el("div","card");
+@@ -1655,6 +1652,6 @@
+   initSprite().then(function () { show("status"); });
+ })();
+ 
+-// R7.1 runtime version verification (the static HTML label is not evidence of server version).
++// R7.2 runtime version verification (the static HTML label is not evidence of server version).
+ if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", showRunningBuild);
+ else showRunningBuild();
+diff --git a/userspace/ksud/assets/webadmin/index.html b/userspace/ksud/assets/webadmin/index.html
+--- a/userspace/ksud/assets/webadmin/index.html
++++ b/userspace/ksud/assets/webadmin/index.html
+@@ -7,11 +7,11 @@
+ <meta name="color-scheme" content="light dark">
+ <meta name="theme-color" content="#f7f7fc">
+ <meta http-equiv="X-Content-Type-Options" content="nosniff">
+-<title>moksu R7.1 · 心中都是莫</title>
++<title>moksu R7.2 · 心中都是莫</title>
+ <link rel="icon" href="data:,">
+ <link rel="stylesheet" href="__P__/a/themes.css">
+-<link rel="stylesheet" href="__P__/a/app.css?v=r71-20261014">
+-<link rel="stylesheet" href="__P__/a/material-r4.css?v=r71-20261014">
++<link rel="stylesheet" href="__P__/a/app.css?v=r72-20261014">
++<link rel="stylesheet" href="__P__/a/material-r4.css?v=r72-20261014">
+ </head>
+ <body>
+ <div class="app-frame">
+@@ -31,7 +31,7 @@
+   </aside>
+   <div class="workplace">
+     <header class="topbar">
+-      <div class="top-name"><div class="crumb"><span>moksu</span> <span class="crumb-sep">/</span> <span id="crumb-current">设备概览</span></div><div class="top-subtitle">管理器网页版 · R7.1</div></div>
++      <div class="top-name"><div class="crumb"><span>moksu</span> <span class="crumb-sep">/</span> <span id="crumb-current">设备概览</span></div><div class="top-subtitle">管理器网页版 · R7.2</div></div>
+       <div class="top-actions"><span class="revision-label" id="runtime-revision" title="运行中的后台版本">正在核对版本…</span><span class="owner-credit">闲鱼 心中都是莫 · 定制</span><span class="offline-pill"><span class="health-dot" aria-hidden="true"></span> 本机</span><button class="icon-btn" id="refresh" type="button" title="刷新" aria-label="刷新当前页面"><svg class="ic"><use href="#i-refresh-cw"/></svg></button><button class="icon-btn" id="theme" type="button" title="主题" aria-label="选择主题"><svg class="ic"><use href="#i-palette"/></svg></button></div>
+     </header>
+     <main id="main">
+@@ -65,6 +65,6 @@
+ </nav>
+ <div id="mask"><div class="sheet" id="sheet"></div></div>
+ <div id="toast" role="status" aria-live="polite"></div>
+-<script src="__P__/a/app.js?v=r71-20261014"></script>
++<script src="__P__/a/app.js?v=r72-20261014"></script>
+ </body>
+ </html>
+diff --git a/userspace/ksud/assets/webadmin/modbridge.js b/userspace/ksud/assets/webadmin/modbridge.js
+--- a/userspace/ksud/assets/webadmin/modbridge.js
++++ b/userspace/ksud/assets/webadmin/modbridge.js
+@@ -99,7 +99,7 @@
+         return;
+       }
+       // ② 同步拿返回值（管理器 App 里返回的就是命令的 stdout 字符串）
+-      var r = postSync("/api/module/exec", { id: MOD.id, cmd: String(cmd) });
++      var r = postSync("/api/module/exec", { id: MOD.id, cmd: String(cmd), options: optsJson });
+       if (!r || !r.ok) {
+         return "";
+       }
+diff --git a/userspace/ksud/src/webadmin.rs b/userspace/ksud/src/webadmin.rs
+--- a/userspace/ksud/src/webadmin.rs
++++ b/userspace/ksud/src/webadmin.rs
+@@ -892,8 +892,8 @@
+     match rel {
+         "/api/build" => {
+             respond(&mut writer, 200, JSON,
+-                serde_json::json!({"ok":true,"web":"R7.1","manager":"3.3.2-R7.1",
+-                    "core":"3.3.1","who":SERVICE_NAME,"binSha":self_exe_sha()})
++                serde_json::json!({"ok":true,"web":"R7.2","manager":"3.3.1",
++                    "custom":"R7.2","core":"3.3.1","who":SERVICE_NAME,"binSha":self_exe_sha()})
+                     .to_string().as_bytes())
+         }
+         "/api/status" => respond(&mut writer, 200, JSON, server.backend.status().to_string().as_bytes()),
+@@ -1264,19 +1264,16 @@
+         "/api/stealth" => {
+             require_post!();
+             let enable = params.get("enable").map(String::as_str) == Some("1");
+-            // Enabling is restricted to Android manager: only it can verify that
+-            // a six-digit recovery code and a selectable launcher alias exist.
+-            let out = if enable {
+-                Err("请在 Android 管理器内设置恢复密码后启用隐藏".to_string())
+-            } else {
+-                server.backend.set_stealth(false).and_then(|msg| {
+-                    #[cfg(target_os = "android")]
+-                    if !matches!(crate::ksucalls::stealth_get_authed(), Ok(false)) {
+-                        return Err("已发送关闭请求，但内核状态尚未确认".to_string());
+-                    }
+-                    Ok(msg)
+-                })
+-            };
++            // The authenticated local web token already grants management rights.
++            // A launcher PIN controls calculator/calendar recovery only; web control
++            // does not require setting that PIN. Still demand actual kernel readback.
++            let out = server.backend.set_stealth(enable).and_then(|msg| {
++                #[cfg(target_os = "android")]
++                if !matches!(crate::ksucalls::stealth_get_authed(), Ok(value) if value==enable) {
++                    return Err("已发送隐身请求，但内核状态未确认".to_string());
++                }
++                Ok(msg)
++            });
+             respond(&mut writer, 200, JSON, result_json(out).as_bytes())
+         }
+         "/api/stealth-code" => {
+@@ -1511,7 +1508,7 @@
+ /// 这两条只对**模块自己的页面**生效；网页管理器自己的页面仍然是严格版（零外部请求）。
+ const CSP_MODWEB: &str =
+     "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; \
+-     img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self'; \
++     img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https: wss:; \
+      frame-src 'self'; worker-src 'self' blob:; media-src 'self' data: blob:; \
+      base-uri 'self'; form-action 'none'";
+ 
