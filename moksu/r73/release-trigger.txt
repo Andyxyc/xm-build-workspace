@@ -1,0 +1,6 @@
+R7.3 calculator + calendar variants
+main_ci_run=38517999857
+calendar_ci_run=38518308089
+package=com.lumera.dayframe
+original_signer_cert_sha256=df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8
+Build complete; require all release signature checks to succeed.
