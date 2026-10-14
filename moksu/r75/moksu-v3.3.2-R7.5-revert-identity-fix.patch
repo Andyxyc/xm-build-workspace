@@ -1,0 +1,111 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+index b2c31d4..791521b 100644
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -134,7 +134,7 @@ $(info -- KSU_NEW_DCACHE_FLUSH: $(KSU_NEW_DCACHE_FLUSH))
+ 
+ KSU_IS_PR_BUILD ?= 0
+ ifeq ($(KSU_IS_PR_BUILD),0)
+-KSU_PACKAGE_NAME ?= com.lumera.dayframe
++KSU_PACKAGE_NAME ?= com.moksu.manager
+ else
+ KSU_PACKAGE_NAME ?= me.weishu.kernelsu.pr
+ endif
+diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
+index c18b71c..5f183d7 100644
+--- a/manager/app/build.gradle.kts
++++ b/manager/app/build.gradle.kts
+@@ -23,8 +23,8 @@ val managerVersionCode = rootProject.extra["managerVersionCode"] as Int
+ val managerVersionName = rootProject.extra["managerVersionName"] as String
+ 
+ val isPrBuild = project.findProperty("IS_PR_BUILD")?.toString()?.toBoolean() ?: false
+-val defaultManagerPackageName = if (isPrBuild) "com.lumera.dayframe.preview" else "com.lumera.dayframe"
+-val defaultManagerName = if (isPrBuild) "日常工具测试版" else "日常工具"
++val defaultManagerPackageName = if (isPrBuild) "com.moksu.manager.pr" else "com.moksu.manager"
++val defaultManagerName = if (isPrBuild) "moksu PR" else "moksu"
+ val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
+ val managerName = project.findProperty("KSU_NAME")?.toString() ?: defaultManagerName
+ 
+@@ -36,7 +36,7 @@ require(moksuAppInfoMode == "unified") {
+     "R7.4 provides one runtime-selectable APK; use MOKSU_APP_INFO_MODE=unified"
+ }
+ val moksuAppInfoName = managerName
+-val moksuAppInfoIcon = "@drawable/mok_daily_icon"
++val moksuAppInfoIcon = "@mipmap/ic_launcher"
+ 
+ apksign {
+     storeFileProperty = "KEYSTORE_FILE"
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+index 9d4c994..7152d40 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+@@ -39,7 +39,7 @@ class HomeViewModel(
+             _uiState.update { baseState }
+             // The custom fork has an independent release track. Do not show an
+             // upstream manager update banner for a differently signed/versioned build.
+-            if (baseState.checkUpdateEnabled && BuildConfig.APPLICATION_ID != "com.lumera.dayframe") {
++            if (baseState.checkUpdateEnabled && BuildConfig.APPLICATION_ID != "com.moksu.manager") {
+                 val latestVersionInfo = withContext(Dispatchers.IO) { checkNewVersion() }
+                 _uiState.update { it.copy(latestVersionInfo = latestVersionInfo) }
+             }
+@@ -74,7 +74,7 @@ class HomeViewModel(
+             checkUpdateEnabled = settingsRepo.checkUpdate,
+             latestVersionInfo = LatestVersionInfo(),
+             currentManagerVersionCode = managerVersion.versionCode,
+-            customManagerBuild = BuildConfig.APPLICATION_ID == "com.lumera.dayframe",
++            customManagerBuild = BuildConfig.APPLICATION_ID == "com.moksu.manager",
+             systemInfo = SystemInfo(
+                 kernelVersion = Os.uname().release,
+                 managerVersion = "${managerVersion.versionName} (${managerVersion.versionCode}-${managerUAPIVersion})",
+diff --git a/moksu-build/build_userspace.sh b/moksu-build/build_userspace.sh
+index 91776a5..8068bb9 100755
+--- a/moksu-build/build_userspace.sh
++++ b/moksu-build/build_userspace.sh
+@@ -7,7 +7,7 @@ cp lkms/x86_64/*.ko source/userspace/ksud/bin/x86_64/
+ test "$(find source/userspace/ksud/bin/aarch64 -name '*_sevenk.ko' | wc -l)" -eq 8
+ test "$(find source/userspace/ksud/bin/x86_64 -name '*_sevenk.ko' | wc -l)" -eq 8
+ cd source
+-export KSU_PACKAGE_NAME=com.lumera.dayframe
++export KSU_PACKAGE_NAME=com.moksu.manager
+ for triple in aarch64-linux-android x86_64-linux-android; do
+  arch="${triple%%-*}"
+  source .github/scripts/setup-rust-build.sh "$triple" 26
+diff --git a/moksu-build/ksu331/build_userspace.sh b/moksu-build/ksu331/build_userspace.sh
+index de1a7a0..6a81beb 100644
+--- a/moksu-build/ksu331/build_userspace.sh
++++ b/moksu-build/ksu331/build_userspace.sh
+@@ -9,7 +9,7 @@ cp lkms/x86_64/*_kernelsu.ko source/userspace/ksud/bin/x86_64/
+ test "$(find source/userspace/ksud/bin/aarch64 -name '*_kernelsu.ko' | wc -l)" -eq 8
+ test "$(find source/userspace/ksud/bin/x86_64 -name '*_kernelsu.ko' | wc -l)" -eq 8
+ cd source
+-export KSU_PACKAGE_NAME=com.lumera.dayframe
++export KSU_PACKAGE_NAME=com.moksu.manager
+ export CARGO_NET_GIT_FETCH_WITH_CLI=true
+ rustup target add aarch64-linux-android x86_64-linux-android
+ for triple in aarch64-linux-android x86_64-linux-android; do
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+index f810abe..ab615f8 100644
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -362,7 +362,7 @@ function renderStatus(s) {
+   device.appendChild(row("cpu","内核版本",s.kernel));
+   device.appendChild(row("layers","KMI",s.kmi));
+   device.appendChild(row("hard-drive","运行模式",s.lkm ? "LKM" : (s.gki ? "GKI" : "未确认")));
+-  device.appendChild(row("package","APK 包名","com.lumera.dayframe（当前安装包固定）"));
++  device.appendChild(row("package","APK 包名","com.moksu.manager（当前安装包固定）"));
+   device.appendChild(row("info","前端资源",APP_REVISION));
+   var daemonRevision=el("div","backend-version-line","正在核对后台版本…");
+   device.appendChild(daemonRevision);
+diff --git a/userspace/ksud/build.rs b/userspace/ksud/build.rs
+index 1361b71..7b35f3c 100644
+--- a/userspace/ksud/build.rs
++++ b/userspace/ksud/build.rs
+@@ -234,7 +234,7 @@ fn main() {
+         }
+     };
+     if env::var("KSU_PACKAGE_NAME").is_err() {
+-        println!("cargo:rustc-env=KSU_PACKAGE_NAME=com.lumera.dayframe");
++        println!("cargo:rustc-env=KSU_PACKAGE_NAME=com.moksu.manager");
+     }
+     println!("cargo:rustc-env=VERSION_CODE={code}");
+     println!("cargo:rustc-env=VERSION_NAME={name}");
