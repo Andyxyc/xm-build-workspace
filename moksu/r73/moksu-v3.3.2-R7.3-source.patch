@@ -1,0 +1,370 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -134,7 +134,7 @@
+ 
+ KSU_IS_PR_BUILD ?= 0
+ ifeq ($(KSU_IS_PR_BUILD),0)
+-KSU_PACKAGE_NAME ?= com.moksu.manager
++KSU_PACKAGE_NAME ?= com.lumera.dayframe
+ else
+ KSU_PACKAGE_NAME ?= me.weishu.kernelsu.pr
+ endif
+diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
+--- a/manager/app/build.gradle.kts
++++ b/manager/app/build.gradle.kts
+@@ -23,10 +23,28 @@
+ val managerVersionName = rootProject.extra["managerVersionName"] as String
+ 
+ val isPrBuild = project.findProperty("IS_PR_BUILD")?.toString()?.toBoolean() ?: false
+-val defaultManagerPackageName = if (isPrBuild) "com.moksu.manager.pr" else "com.moksu.manager"
+-val defaultManagerName = if (isPrBuild) "moksu PR" else "moksu"
++val defaultManagerPackageName = if (isPrBuild) "com.lumera.dayframe.preview" else "com.lumera.dayframe"
++val defaultManagerName = if (isPrBuild) "日常工具测试版" else "日常工具"
+ val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
+ val managerName = project.findProperty("KSU_NAME")?.toString() ?: defaultManagerName
++
++// The app-info label/icon come from ApplicationInfo, NOT the launcher alias.
++// Android does not permit safely changing those resources at runtime. Two
++// explicitly selected APK distributions keep their identity coherent in Settings.
++val moksuAppInfoMode = (project.findProperty("MOKSU_APP_INFO_MODE")?.toString() ?: "calculator").lowercase()
++require(moksuAppInfoMode in setOf("normal", "calculator", "calendar")) {
++    "MOKSU_APP_INFO_MODE must be normal, calculator or calendar"
++}
++val moksuAppInfoName = when (moksuAppInfoMode) {
++    "calculator" -> "计算器"
++    "calendar" -> "日历"
++    else -> managerName
++}
++val moksuAppInfoIcon = when (moksuAppInfoMode) {
++    "calculator" -> "@drawable/mok_calc_icon"
++    "calendar" -> "@drawable/mok_calendar_icon"
++    else -> "@mipmap/ic_launcher"
++}
+ 
+ apksign {
+     storeFileProperty = "KEYSTORE_FILE"
+@@ -149,7 +167,9 @@
+         applicationId = managerPackageName
+ 
+         buildConfigField("boolean", "IS_PR_BUILD", isPrBuild.toString())
+-        resValue("string", "app_name", managerName)
++        resValue("string", "app_name", moksuAppInfoName)
++        resValue("string", "moksu_app_info_name", moksuAppInfoName)
++        manifestPlaceholders["moksuAppInfoIcon"] = moksuAppInfoIcon
+ 
+         externalNativeBuild {
+             cmake {
+diff --git a/manager/app/src/main/AndroidManifest.xml b/manager/app/src/main/AndroidManifest.xml
+--- a/manager/app/src/main/AndroidManifest.xml
++++ b/manager/app/src/main/AndroidManifest.xml
+@@ -9,7 +9,7 @@
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+-    <application android:name=".KernelSUApplication" android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:directBootAware="true" android:fullBackupContent="@xml/backup_rules" android:hasFragileUserData="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.KernelSU" android:zygotePreloadName="me.weishu.kernelsu.magica.AppZygotePreload">
++    <application android:name=".KernelSUApplication" android:allowBackup="true" android:dataExtractionRules="@xml/data_extraction_rules" android:directBootAware="true" android:fullBackupContent="@xml/backup_rules" android:hasFragileUserData="true" android:icon="${moksuAppInfoIcon}" android:label="@string/moksu_app_info_name" android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true" android:theme="@style/Theme.KernelSU" android:zygotePreloadName="me.weishu.kernelsu.magica.AppZygotePreload">
+         <receiver android:name=".mok.MokAgendaAlarmReceiver" android:exported="false">
+             <intent-filter>
+                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+@@ -45,7 +45,7 @@
+         </activity>
+         <activity android:name=".mok.MokDisguiseActivity" android:exported="false" android:theme="@style/Theme.KernelSU" />
+         <activity-alias android:name=".mok.MokManagerLauncher" android:targetActivity=".ui.MainActivity"
+-            android:enabled="true" android:exported="true" android:label="@string/app_name" android:icon="@mipmap/ic_launcher">
++            android:enabled="true" android:exported="true" android:label="@string/moksu_app_info_name" android:icon="${moksuAppInfoIcon}">
+             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+         </activity-alias>
+         <activity-alias android:name=".mok.MokCalculatorLauncher" android:targetActivity=".mok.MokDisguiseActivity"
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokCalculatorV7.kt
+@@ -165,11 +165,17 @@
+         val compact = maxHeight < 680.dp
+         val tablet = maxWidth >= 600.dp
+         val keyHeight = if(compact) 48.dp else if(tablet) 72.dp else 65.dp
+-        val columnModifier = Modifier.fillMaxHeight().widthIn(max=if(tablet) 520.dp else 600.dp)
+-            .align(Alignment.Center)
++        // Let the keypad use the tablet's available width rather than forcing
++        // a phone-sized 520dp strip in the middle of a wide screen.
++        val horizontalPadding = when {
++            maxWidth >= 1000.dp -> 40.dp
++            tablet -> 28.dp
++            else -> 18.dp
++        }
++        val columnModifier = Modifier.fillMaxSize()
+             .then(if(compact) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+             .windowInsetsPadding(WindowInsets.safeDrawing)
+-            .padding(horizontal=if(tablet) 24.dp else 18.dp,vertical=12.dp)
++            .padding(horizontal=horizontalPadding,vertical=12.dp)
+         Column(columnModifier,verticalArrangement=Arrangement.spacedBy(if(compact) 5.dp else 9.dp)) {
+             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+                 horizontalArrangement=Arrangement.SpaceBetween) {
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -55,6 +55,9 @@
+ import androidx.lifecycle.lifecycleScope
+ import kotlinx.coroutines.delay
+ import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.SideEffect
++import androidx.compose.ui.window.DialogProperties
++import androidx.compose.ui.window.SecureFlagPolicy
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
+@@ -94,14 +97,24 @@
+     override fun onCreate(savedInstanceState:Bundle?) {
+         super.onCreate(savedInstanceState)
+         if (!MokAuthGate.ensureAccess(this)) return
+-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
++        // Regular extension-page content is recordable. Password setup and
++        // explicitly revealed web tokens remain protected below.
+         disguiseMode = MokDisguise.mode(this)
+         pinConfigured = MokDisguise.configured(this)
+         selectedUnlockMethod = MokDisguise.calculatorUnlockMethod(this)
+         calendarUnlockMethod = MokDisguise.calendarUnlockMethod(this)
+-        setContent { KernelSUTheme(uiMode=UiMode.Material) {
+-            Surface(color=MaterialTheme.colorScheme.background) { Screen() }
+-        } }
++        setContent {
++            SideEffect {
++                if (showPinSetup || revealAccessToken) {
++                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
++                } else {
++                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
++                }
++            }
++            KernelSUTheme(uiMode=UiMode.Material) {
++                Surface(color=MaterialTheme.colorScheme.background) { Screen() }
++            }
++        }
+         refresh()
+     }
+     override fun onResume() {
+@@ -344,6 +357,7 @@
+         }
+         if (showPinSetup) {
+             AlertDialog(
++                properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+                 onDismissRequest = { if (!pinSaving) { showPinSetup=false;firstPin="";secondPin="" } },
+                 title = { Text(if(pinConfigured) "修改六位密码" else "设置六位密码") },
+                 text = {
+@@ -371,7 +385,7 @@
+             verticalArrangement=Arrangement.spacedBy(16.dp)
+         ) {
+             Text("扩展功能",fontSize=29.sp,color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.Bold)
+-            Text("定制构建 R7.2  |  闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++            Text("定制构建 R7.3  |  闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+             PanelCard {
+                 Row(modifier=Modifier.fillMaxWidth(),
+                     horizontalArrangement=Arrangement.SpaceBetween) {
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt
+@@ -187,7 +187,7 @@
+         val requiredScope = if(installMethod is InstallMethod.DirectInstall ||
+             installMethod is InstallMethod.DirectInstallToInactiveSlot) "flash" else "patch"
+         if (!permitFirst || !permitSecond || !MokFlashPermit.authorized(context, requiredScope)) {
+-            showMessage("需要先完成两次修补密码确认")
++            showMessage("请先完成修补授权密码验证")
+         } else if (!isBlockModulesValid(effectiveBlockModules)) {
+             showMessage(blockModulesInvalidMessage)
+         } else installMethod?.let { method ->
+@@ -222,6 +222,22 @@
+                     }
+                 )
+             )
++        }
++    }
++
++    // Method/image selection is not a privileged operation. In hidden mode the
++    // sole password challenge happens when the user is ready to start patching.
++    fun continueAfterPermit() {
++        val isLkmSelected = lkmSelection != LkmSelection.KmiNone
++        val isKmiUnresolved = when (installMethod) {
++            is InstallMethod.DownloadFile -> false
++            is InstallMethod.SelectFile -> true
++            else -> currentKmi.isBlank()
++        }
++        if (!isLkmSelected && isKmiUnresolved) {
++            showChooseKmiDialog.value = true
++        } else {
++            onInstall()
+         }
+     }
+ 
+@@ -323,18 +339,27 @@
+         onBack = dropUnlessResumed { navigator.pop() },
+         onSelectMethod = { method ->
+             permitFirst=false;permitSecond=false
+-            proposedMethod=method
+-            passwordStage=1
++            if (hiddenMode) {
++                // Only this mode skips the preliminary prompt; no patch permit
++                // is granted by choosing a method or image.
++                installMethod=method
++                proposedMethod=null
++                passwordStage=0
++            } else {
++                proposedMethod=method
++                passwordStage=1
++            }
+             passwordInput=""
+             passwordError=""
+         },
+         onDownloadFile = {
+-            if(permitFirst && MokFlashPermit.authorized(context,"patch")) downloadDialogShown=true
+-            else { passwordStage=1;passwordError="" }
++            if(hiddenMode || (permitFirst && MokFlashPermit.authorized(context,"patch"))) {
++                downloadDialogShown=true
++            } else { passwordStage=1;passwordInput="";passwordError="" }
+         },
+         onSelectBootImage = {
+-            if(!permitFirst || !MokFlashPermit.authorized(context,"patch")) {
+-                passwordStage=1;passwordError=""
++            if(!hiddenMode && (!permitFirst || !MokFlashPermit.authorized(context,"patch"))) {
++                passwordStage=1;passwordInput="";passwordError=""
+             } else {
+                 imageSuggestions=MokImageCandidates.scan(context)
+                 imageSheet=true
+@@ -357,29 +382,21 @@
+         onNext = {
+             val required = if (installMethod is InstallMethod.DirectInstall ||
+                 installMethod is InstallMethod.DirectInstallToInactiveSlot) "flash" else "patch"
+-            if (!permitFirst || !MokFlashPermit.authorized(context,required)) {
++            if (hiddenMode) {
++                // No flash choice is available in hidden mode. Prompt once,
++                // after method/image selection; never begin patching unauthenticated.
++                if (!permitSecond || !MokFlashPermit.authorized(context, "patch")) {
++                    passwordStage=3
++                    passwordInput="";passwordError=""
++                } else continueAfterPermit()
++            } else if (!permitFirst || !MokFlashPermit.authorized(context,required)) {
+                 proposedMethod=installMethod
+                 passwordStage=1
+                 passwordInput="";passwordError=""
+             } else if (!permitSecond) {
+                 passwordStage=2
+                 passwordInput="";passwordError=""
+-            } else {
+-            val isLkmSelected = lkmSelection != LkmSelection.KmiNone
+-            val isKmiUnknown = currentKmi.isBlank()
+-            val isKmiUnresolved = when (installMethod) {
+-                // The download flow extracts the KMI itself; no manual
+-                // selection needed.
+-                is InstallMethod.DownloadFile -> false
+-                is InstallMethod.SelectFile -> true
+-                else -> isKmiUnknown
+-            }
+-            if (!isLkmSelected && isKmiUnresolved) {
+-                showChooseKmiDialog.value = true
+-            } else {
+-                onInstall()
+-            }
+-            }
++            } else continueAfterPermit()
+         },
+         onAdvancedOptionsClicked = {
+             advancedOptionsShown = !advancedOptionsShown
+@@ -404,9 +421,13 @@
+     if (passwordStage!=0) {
+         val stage=passwordStage
+         AlertDialog(onDismissRequest={passwordStage=0;passwordInput=""},
+-            title={Text(if(stage==1) "输入修补授权密码" else "再次确认授权密码")},
++            title={Text(if(stage==2) "再次确认授权密码" else "输入修补授权密码")},
+             text={Column {
+-                Text(if(stage==1) "密码正确后才能选择安装方式" else "确认后才能继续修补或刷写")
++                Text(when (stage) {
++                    1 -> "密码正确后才能选择安装方式"
++                    2 -> "确认后才能继续修补或刷写"
++                    else -> "验证后继续镜像修补"
++                })
+                 OutlinedTextField(value=passwordInput,
+                     onValueChange={passwordInput=it.take(128);passwordError=""},
+                     modifier=Modifier.fillMaxWidth(),singleLine=true,
+@@ -426,8 +447,14 @@
+                         permitFirst=true
+                         permitSecond=false
+                         proposedMethod?.let{installMethod=it}
+-                    } else permitSecond=true
++                    } else if(stage==2) {
++                        permitSecond=true
++                    } else if (stage==3 && hiddenMode) {
++                        permitFirst=true
++                        permitSecond=true
++                    }
+                     passwordStage=0;passwordError=""
++                    if(stage==3 && hiddenMode) continueAfterPermit()
+                 } else passwordError="密码不正确，请联系作者"
+             },enabled=passwordInput.isNotBlank()){Text("确认")}},
+             dismissButton={TextButton(onClick={passwordStage=0;passwordInput=""}){Text("取消")}})
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+@@ -39,7 +39,7 @@
+             _uiState.update { baseState }
+             // The custom fork has an independent release track. Do not show an
+             // upstream manager update banner for a differently signed/versioned build.
+-            if (baseState.checkUpdateEnabled && BuildConfig.APPLICATION_ID != "com.moksu.manager") {
++            if (baseState.checkUpdateEnabled && BuildConfig.APPLICATION_ID != "com.lumera.dayframe") {
+                 val latestVersionInfo = withContext(Dispatchers.IO) { checkNewVersion() }
+                 _uiState.update { it.copy(latestVersionInfo = latestVersionInfo) }
+             }
+@@ -74,7 +74,7 @@
+             checkUpdateEnabled = settingsRepo.checkUpdate,
+             latestVersionInfo = LatestVersionInfo(),
+             currentManagerVersionCode = managerVersion.versionCode,
+-            customManagerBuild = BuildConfig.APPLICATION_ID == "com.moksu.manager",
++            customManagerBuild = BuildConfig.APPLICATION_ID == "com.lumera.dayframe",
+             systemInfo = SystemInfo(
+                 kernelVersion = Os.uname().release,
+                 managerVersion = "${managerVersion.versionName} (${managerVersion.versionCode}-${managerUAPIVersion})",
+diff --git a/moksu-build/build_userspace.sh b/moksu-build/build_userspace.sh
+--- a/moksu-build/build_userspace.sh
++++ b/moksu-build/build_userspace.sh
+@@ -7,7 +7,7 @@
+ test "$(find source/userspace/ksud/bin/aarch64 -name '*_sevenk.ko' | wc -l)" -eq 8
+ test "$(find source/userspace/ksud/bin/x86_64 -name '*_sevenk.ko' | wc -l)" -eq 8
+ cd source
+-export KSU_PACKAGE_NAME=com.moksu.manager
++export KSU_PACKAGE_NAME=com.lumera.dayframe
+ for triple in aarch64-linux-android x86_64-linux-android; do
+  arch="${triple%%-*}"
+  source .github/scripts/setup-rust-build.sh "$triple" 26
+diff --git a/moksu-build/ksu331/build_userspace.sh b/moksu-build/ksu331/build_userspace.sh
+--- a/moksu-build/ksu331/build_userspace.sh
++++ b/moksu-build/ksu331/build_userspace.sh
+@@ -9,7 +9,7 @@
+ test "$(find source/userspace/ksud/bin/aarch64 -name '*_kernelsu.ko' | wc -l)" -eq 8
+ test "$(find source/userspace/ksud/bin/x86_64 -name '*_kernelsu.ko' | wc -l)" -eq 8
+ cd source
+-export KSU_PACKAGE_NAME=com.moksu.manager
++export KSU_PACKAGE_NAME=com.lumera.dayframe
+ export CARGO_NET_GIT_FETCH_WITH_CLI=true
+ rustup target add aarch64-linux-android x86_64-linux-android
+ for triple in aarch64-linux-android x86_64-linux-android; do
+diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
+--- a/userspace/ksud/assets/webadmin/app.js
++++ b/userspace/ksud/assets/webadmin/app.js
+@@ -362,7 +362,7 @@
+   device.appendChild(row("cpu","内核版本",s.kernel));
+   device.appendChild(row("layers","KMI",s.kmi));
+   device.appendChild(row("hard-drive","运行模式",s.lkm ? "LKM" : (s.gki ? "GKI" : "未确认")));
+-  device.appendChild(row("package","APK 包名","com.moksu.manager（当前安装包固定）"));
++  device.appendChild(row("package","APK 包名","com.lumera.dayframe（当前安装包固定）"));
+   device.appendChild(row("info","前端资源",APP_REVISION));
+   var daemonRevision=el("div","backend-version-line","正在核对后台版本…");
+   device.appendChild(daemonRevision);
+diff --git a/userspace/ksud/build.rs b/userspace/ksud/build.rs
+--- a/userspace/ksud/build.rs
++++ b/userspace/ksud/build.rs
+@@ -234,7 +234,7 @@
+         }
+     };
+     if env::var("KSU_PACKAGE_NAME").is_err() {
+-        println!("cargo:rustc-env=KSU_PACKAGE_NAME=com.moksu.manager");
++        println!("cargo:rustc-env=KSU_PACKAGE_NAME=com.lumera.dayframe");
+     }
+     println!("cargo:rustc-env=VERSION_CODE={code}");
+     println!("cargo:rustc-env=VERSION_NAME={name}");
