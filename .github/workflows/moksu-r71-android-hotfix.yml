@@ -1,0 +1,99 @@
+name: moksu R7.1 Android imports hotfix
+on:
+  push:
+    branches: [moksu-331-r71-android-hotfix-20261014]
+    paths:
+      - '.github/workflows/moksu-r71-android-hotfix.yml'
+      - 'moksu/r71/android-compile-imports.patch'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r71-androidhotfix-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Apply Android compiler hotfix to R7.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r71-source
+          path: input
+          run-id: 38508317516
+          github-token: ${{ github.token }}
+      - name: Validate and apply two missing Kotlin imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -s input/moksu-r71-source.tar.gz
+          tar -xzf input/moksu-r71-source.tar.gz -C source
+          cd source
+          git apply --check ../config/moksu/r71/android-compile-imports.patch
+          git apply ../config/moksu/r71/android-compile-imports.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('manager/app/src/main/java/me/weishu/kernelsu')
+          assert 'import androidx.compose.material3.Checkbox' in (root/'mok/MoksuExtrasActivity.kt').read_text()
+          assert 'import androidx.lifecycle.lifecycleScope' in (root/'ui/MainActivity.kt').read_text()
+          html=Path('userspace/ksud/assets/webadmin/index.html').read_text()
+          assert 'id="runtime-revision"' in html
+          assert 'R7.1' in Path('userspace/ksud/assets/webadmin/app.js').read_text()
+          PY
+          node --check userspace/ksud/assets/webadmin/app.js
+          cd ..
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r71-hotfix-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r71-hotfix-source
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+  android:
+    name: Compile R7.1 Android release
+    runs-on: ubuntu-24.04
+    needs: source
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r71-hotfix-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r71-hotfix-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Build unsigned APK
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.2-R7.1 -PKSU_VERSION_CODE=32681 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R71-final.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-r71-manager-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/moksu-r71-manager-unsigned.apk"
+          sha256sum "$GITHUB_WORKSPACE/out/moksu-r71-manager-unsigned.apk" > "$GITHUB_WORKSPACE/out/sha256.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r71-hotfix-android
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
