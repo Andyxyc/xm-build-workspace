@@ -1,0 +1,224 @@
+diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
+index 92c2cdf..c18b71c 100644
+--- a/manager/app/build.gradle.kts
++++ b/manager/app/build.gradle.kts
+@@ -28,23 +28,15 @@ val defaultManagerName = if (isPrBuild) "日常工具测试版" else "日常工
+ val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
+ val managerName = project.findProperty("KSU_NAME")?.toString() ?: defaultManagerName
+ 
+-// The app-info label/icon come from ApplicationInfo, NOT the launcher alias.
+-// Android does not permit safely changing those resources at runtime. Two
+-// explicitly selected APK distributions keep their identity coherent in Settings.
+-val moksuAppInfoMode = (project.findProperty("MOKSU_APP_INFO_MODE")?.toString() ?: "calculator").lowercase()
+-require(moksuAppInfoMode in setOf("normal", "calculator", "calendar")) {
+-    "MOKSU_APP_INFO_MODE must be normal, calculator or calendar"
+-}
+-val moksuAppInfoName = when (moksuAppInfoMode) {
+-    "calculator" -> "计算器"
+-    "calendar" -> "日历"
+-    else -> managerName
+-}
+-val moksuAppInfoIcon = when (moksuAppInfoMode) {
+-    "calculator" -> "@drawable/mok_calc_icon"
+-    "calendar" -> "@drawable/mok_calendar_icon"
+-    else -> "@mipmap/ic_launcher"
++// One APK contains both launcher appearances. Only the LAUNCHER activity alias
++// can change its label/icon when the user selects calculator or calendar.
++// Android ApplicationInfo (the Settings -> App details entry) stays fixed.
++val moksuAppInfoMode = (project.findProperty("MOKSU_APP_INFO_MODE")?.toString() ?: "unified").lowercase()
++require(moksuAppInfoMode == "unified") {
++    "R7.4 provides one runtime-selectable APK; use MOKSU_APP_INFO_MODE=unified"
+ }
++val moksuAppInfoName = managerName
++val moksuAppInfoIcon = "@drawable/mok_daily_icon"
+ 
+ apksign {
+     storeFileProperty = "KEYSTORE_FILE"
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+index 76cd749..e1b7454 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisguise.kt
+@@ -184,28 +184,45 @@ object MokDisguise {
+         return good
+     }
+ 
+-    /** Enable incoming launcher first, then disable old aliases; leave current package and signing unchanged. */
++    /** Exactly one launcher for one installed package; other tool code remains bundled. */
+     @Synchronized fun setMode(context: Context, next: String): Boolean {
+         if (!names.containsKey(next) || (next != NORMAL && !configured(context))) return false
+         val pm = context.packageManager
++        val preferences = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+         val previous = mode(context)
+-        val target = ComponentName(context, names.getValue(next))
+-        return runCatching {
+-            pm.setComponentEnabledSetting(target, PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+-                PackageManager.DONT_KILL_APP)
+-            for ((type, alias) in names) if (type != next) {
+-                pm.setComponentEnabledSetting(ComponentName(context,alias),
+-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
++        fun switchComponents(target: String) {
++            val changes = names.map { (type, alias) ->
++                PackageManager.ComponentEnabledSetting(
++                    ComponentName(context, alias),
++                    if (type == target) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
++                    else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
++                    PackageManager.DONT_KILL_APP)
++            }
++            if (android.os.Build.VERSION.SDK_INT >= 33) {
++                // Android 13+: enable/disable aliases as a single atomic operation.
++                pm.setComponentEnabledSettings(changes)
++            } else {
++                // On older devices ensure an active launcher exists throughout switching.
++                changes.first { it.componentName == ComponentName(context, names.getValue(target)) }
++                    .also { pm.setComponentEnabledSetting(it.componentName, it.enabledState, it.enabledFlags) }
++                changes.filter { it.componentName != ComponentName(context, names.getValue(target)) }
++                    .forEach { pm.setComponentEnabledSetting(it.componentName, it.enabledState, it.enabledFlags) }
+             }
+-            check(context.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putString("mode",next).commit())
++            check(names.all { (type, alias) ->
++                pm.getComponentEnabledSetting(ComponentName(context, alias)) ==
++                    (if (type == target) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
++                    else PackageManager.COMPONENT_ENABLED_STATE_DISABLED)
++            }) { "Launcher alias readback failed" }
++        }
++        return runCatching {
++            switchComponents(next)
++            check(preferences.edit().putString("mode", next).commit())
+             MokWebDeviceBridge.syncAppearanceAsync(context.applicationContext)
+             true
+         }.getOrElse {
+-            // Never strand the user with no launcher icon: attempt to reinstate former alias.
+-            runCatching {
+-                pm.setComponentEnabledSetting(ComponentName(context,names.getValue(previous)),
+-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,PackageManager.DONT_KILL_APP)
+-            }
++            // Restore the previous entry and persisted choice on partial failure.
++            runCatching { switchComponents(previous) }
++            preferences.edit().putString("mode", previous).commit()
+             false
+         }
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+index c4e5ae7..f8b56e1 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt
+@@ -90,6 +90,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+     private var pinSaving by mutableStateOf(false)
+     private var pinConfigured by mutableStateOf(false)
+     private var pendingDisguise by mutableStateOf<String?>(null)
++    private var choiceAfterPin by mutableStateOf<String?>(null)
+     private var selectedUnlockMethod by mutableStateOf(MokDisguise.UNLOCK_DOUBLE)
+     private var calendarUnlockMethod by mutableStateOf(MokDisguise.CALENDAR_TRIPLE)
+     private var pendingStealth by mutableStateOf(false)
+@@ -152,12 +153,25 @@ class MoksuExtrasActivity:ComponentActivity() {
+         val ok=MokDisguise.setPin(this, one, two)
+         firstPin=""; secondPin=""; pinSaving=false
+         pinConfigured = MokDisguise.configured(this)
+-        if (ok && pinConfigured) { showPinSetup=false;notice="恢复密码已保存并回读确认" }
+-        else notice="保存失败，请重试；原密码未修改"
++        if (ok && pinConfigured) {
++            showPinSetup=false
++            notice="恢复密码已保存并回读确认"
++            val choice = choiceAfterPin
++            choiceAfterPin = null
++            if (choice != null) setDisguise(choice)
++        } else notice="保存失败，请重试；原密码未修改"
+     }
+ 
+     private fun setDisguise(mode: String) {
+         if (busy) return
++        if (mode == disguiseMode) {
++            notice = "当前已选择" + when(mode) {
++                MokDisguise.CALCULATOR -> "计算器"
++                MokDisguise.CALENDAR -> "日历"
++                else -> "管理器"
++            }
++            return
++        }
+         if (mode == MokDisguise.NORMAL) {
+             // An explicit return to the normal launcher does not need a countdown.
+             applyDisguise(mode)
+@@ -165,6 +179,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+         }
+         pinConfigured = MokDisguise.configured(this)
+         if (!pinConfigured) {
++            choiceAfterPin = mode
+             showPinSetup = true
+             notice = "请先设置并确认六位恢复密码"
+             return
+@@ -182,7 +197,11 @@ class MoksuExtrasActivity:ComponentActivity() {
+         val ok = MokDisguise.setMode(this, mode)
+         if (ok) {
+             disguiseMode = MokDisguise.mode(this)
+-            notice = "桌面入口已切换"
++            notice = when (disguiseMode) {
++                MokDisguise.CALCULATOR -> "已切换为计算器，日历功能仍可在这里选择"
++                MokDisguise.CALENDAR -> "已切换为日历，计算器功能仍可在这里选择"
++                else -> "已恢复普通桌面入口"
++            }
+         } else notice = "切换失败，请检查恢复密码并重试"
+     }
+     private fun refresh() {
+@@ -358,7 +377,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+         if (showPinSetup) {
+             AlertDialog(
+                 properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+-                onDismissRequest = { if (!pinSaving) { showPinSetup=false;firstPin="";secondPin="" } },
++                onDismissRequest = { if (!pinSaving) { showPinSetup=false;choiceAfterPin=null;firstPin="";secondPin="" } },
+                 title = { Text(if(pinConfigured) "修改六位密码" else "设置六位密码") },
+                 text = {
+                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+@@ -376,7 +395,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+                 },
+                 confirmButton = { TextButton(onClick={saveRecoveryPin()}, enabled=!pinSaving) {
+                     Text(if(pinConfigured) "更新密码" else "保存密码") } },
+-                dismissButton = { TextButton(onClick={showPinSetup=false;firstPin="";secondPin=""},enabled=!pinSaving) { Text("取消") } },
++                dismissButton = { TextButton(onClick={showPinSetup=false;choiceAfterPin=null;firstPin="";secondPin=""},enabled=!pinSaving) { Text("取消") } },
+             )
+         }
+         Column(
+@@ -385,7 +404,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+             verticalArrangement=Arrangement.spacedBy(16.dp)
+         ) {
+             Text("扩展功能",fontSize=29.sp,color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.Bold)
+-            Text("定制构建 R7.3  |  闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
++            Text("定制构建 R7.4  |  闲鱼 心中都是莫",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+             PanelCard {
+                 Row(modifier=Modifier.fillMaxWidth(),
+                     horizontalArrangement=Arrangement.SpaceBetween) {
+@@ -473,7 +492,9 @@ class MoksuExtrasActivity:ComponentActivity() {
+                         enabled=!busy&&stealthSupported)
+                 }
+                 HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+-                Text("桌面图标",fontSize=14.sp,fontWeight=FontWeight.Medium)
++                Text("桌面入口",fontSize=14.sp,fontWeight=FontWeight.Medium)
++                Text("同一安装包包含计算器与日历，选择后只显示对应的桌面入口；可以返回此页面更换。",
++                    fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                     FilterChip(selected=disguiseMode==MokDisguise.NORMAL,
+                         onClick={setDisguise(MokDisguise.NORMAL)},label={Text("管理器")})
+@@ -519,6 +540,7 @@ class MoksuExtrasActivity:ComponentActivity() {
+                     fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                 OutlinedButton(onClick={
+                     pinConfigured=MokDisguise.configured(this@MoksuExtrasActivity)
++                    choiceAfterPin=null
+                     firstPin="";secondPin="";showPinSetup=true
+                 },enabled=!busy,colors=ButtonDefaults.outlinedButtonColors(
+                     containerColor=if(pinConfigured) Color(0xFFE2F4E9) else Color.Transparent
+diff --git a/manager/app/src/main/res/drawable/mok_daily_icon.xml b/manager/app/src/main/res/drawable/mok_daily_icon.xml
+new file mode 100644
+index 0000000..8f5edb7
+--- /dev/null
++++ b/manager/app/src/main/res/drawable/mok_daily_icon.xml
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="108dp" android:height="108dp"
++    android:viewportWidth="108" android:viewportHeight="108">
++    <path android:fillColor="#263445" android:pathData="M24,12 L84,12 Q96,12 96,24 L96,84 Q96,96 84,96 L24,96 Q12,96 12,84 L12,24 Q12,12 24,12Z" />
++    <path android:fillColor="#E4ECF4" android:pathData="M22,26 L49,26 L49,47 L22,47Z" />
++    <path android:fillColor="#C2D8EA" android:pathData="M59,26 L86,26 L86,47 L59,47Z" />
++    <path android:fillColor="#F9FBFD" android:pathData="M22,58 L49,58 L49,82 L22,82Z M59,58 L86,58 L86,82 L59,82Z" />
++    <path android:fillColor="#477DA8" android:pathData="M27,31 L44,31 L44,35 L27,35Z M64,31 L81,31 L81,35 L64,35Z" />
++    <path android:fillColor="#658EA9" android:pathData="M28,64 L43,64 L43,68 L28,68Z M28,73 L43,73 L43,77 L28,77Z M65,64 L80,64 L80,68 L65,68Z M65,73 L80,73 L80,77 L65,77Z" />
++</vector>
