@@ -10,7 +10,7 @@
  import me.weishu.kernelsu.ui.UiMode
 --- a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
 +++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
-@@ -56,6 +56,7 @@
+@@ -56,10 +56,12 @@
  import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
  import androidx.lifecycle.compose.collectAsStateWithLifecycle
  import androidx.lifecycle.viewmodel.compose.viewModel
@@ -18,3 +18,8 @@
  import androidx.navigationevent.NavigationEventInfo
  import androidx.navigationevent.compose.NavigationBackHandler
  import androidx.navigationevent.compose.rememberNavigationEventState
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.launch
+ import kotlinx.coroutines.channels.Channel
+ import kotlinx.coroutines.flow.distinctUntilChanged
+ import kotlinx.coroutines.flow.first
