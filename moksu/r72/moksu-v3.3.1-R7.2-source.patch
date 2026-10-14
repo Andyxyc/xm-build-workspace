@@ -617,6 +617,35 @@ diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt b/ma
      }
      val bootFile = File(ksuApp.cacheDir, "download-boot.img")
      var probedKmi: String? = null
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeUiState.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeUiState.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeUiState.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeUiState.kt
+@@ -24,6 +24,7 @@
+     val latestVersionInfo: LatestVersionInfo,
+     val currentManagerVersionCode: Long,
+     val systemInfo: SystemInfo,
++    val customManagerBuild: Boolean = false,
+ ) {
+     val isSELinuxPermissive: Boolean
+         get() = systemInfo.selinuxStatus == "Permissive"
+@@ -32,7 +33,7 @@
+         get() = ksuVersion != null && lkmMode == false
+ 
+     val showLkmUpdate: Boolean
+-        get() = isManager &&
++        get() = !customManagerBuild && isManager &&
+                 lkmMode == true &&
+                 isLkmBundled &&
+                 ksuVersion?.toLong() != currentManagerVersionCode &&
+@@ -56,7 +57,7 @@
+         get() = isManager && !isManagerPrBuild && isKernelPrBuild
+ 
+     val hasUpdate: Boolean
+-        get() = latestVersionInfo.versionCode > currentManagerVersionCode
++        get() = !customManagerBuild && latestVersionInfo.versionCode > currentManagerVersionCode
+ }
+ 
+ @Immutable
 diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
 --- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
 +++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
@@ -631,6 +660,14 @@ diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewM
                  val latestVersionInfo = withContext(Dispatchers.IO) { checkNewVersion() }
                  _uiState.update { it.copy(latestVersionInfo = latestVersionInfo) }
              }
+@@ -72,6 +74,7 @@
+             checkUpdateEnabled = settingsRepo.checkUpdate,
+             latestVersionInfo = LatestVersionInfo(),
+             currentManagerVersionCode = managerVersion.versionCode,
++            customManagerBuild = BuildConfig.APPLICATION_ID == "com.moksu.manager",
+             systemInfo = SystemInfo(
+                 kernelVersion = Os.uname().release,
+                 managerVersion = "${managerVersion.versionName} (${managerVersion.versionCode}-${managerUAPIVersion})",
 diff --git a/userspace/ksud/assets/webadmin/app.js b/userspace/ksud/assets/webadmin/app.js
 --- a/userspace/ksud/assets/webadmin/app.js
 +++ b/userspace/ksud/assets/webadmin/app.js
