@@ -1,0 +1,161 @@
+name: moksu v3.3.2 R7.1 web daemon and manager unified
+on:
+  push:
+    branches: [moksu-331-r71-web-sync-20261014]
+    paths:
+      - '.github/workflows/moksu-r71-compile.yml'
+      - 'moksu/r71/**'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r71-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Apply unified R7.1 patch onto verified R7 hotfix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r7-recovery-source
+          path: input
+          run-id: 38479785591
+          github-token: ${{ github.token }}
+      - name: Verify and apply R7.1 source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -s input/moksu-r7-recovery-source.tar.gz
+          tar -xzf input/moksu-r7-recovery-source.tar.gz -C source
+          cd source
+          git apply --check ../config/moksu/r71/moksu-v3.3.2-R7.1-web-sync.patch
+          git apply ../config/moksu/r71/moksu-v3.3.2-R7.1-web-sync.patch
+          node --check userspace/ksud/assets/webadmin/app.js
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          base=Path('manager/app/src/main')
+          ET.parse(base/'AndroidManifest.xml')
+          js=Path('userspace/ksud/assets/webadmin/app.js').read_text()
+          html=Path('userspace/ksud/assets/webadmin/index.html').read_text()
+          kt=(base/'java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt').read_text()
+          rs=Path('userspace/ksud/src/webadmin.rs').read_text()
+          assert 'var APP_REVISION = "R7.1 2026-10-14"' in js
+          assert 'runtime-revision' in html and 'R7.1' in html
+          assert '"/api/build"' in rs and '"manager":"3.3.2-R7.1"' in rs
+          assert 'MokDisplayState.showUninstalled' in (base/'java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt').read_text()
+          assert 'setBrowserAuto' in kt and '内核隐身（打开后显示未安装）' in kt
+          assert 'KSU_VERSION_CODE' in Path('manager/build.gradle.kts').read_text()
+          PY
+          cd ..
+          cp -a config/moksu source/moksu-build
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r71-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r71-source
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  android:
+    name: Build Android R7 unsigned manager
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r71-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r71-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile R7.1 Kotlin, Java and manager resources
+        shell: bash
+        working-directory: source/manager
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.2-R7.1 -PKSU_VERSION_CODE=32681 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R71.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-r71-manager-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/moksu-r71-manager-unsigned.apk"
+          sha256sum "$GITHUB_WORKSPACE/out/moksu-r71-manager-unsigned.apk" > "$GITHUB_WORKSPACE/out/unsigned-R71.sha256"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r71-android
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  rust:
+    name: Build R7.1 ksud Rust daemon
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r71-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r71-source.tar.gz -C source
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-redesign-kmi-*
+          path: lkms
+          merge-multiple: true
+          run-id: 38418012975
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Rust + Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Compile and package two R7.1 ksud architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash config/moksu/ksu331/build_userspace.sh 2>&1 | tee out/rust-R71.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r71-native
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
