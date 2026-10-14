@@ -1,0 +1,58 @@
+name: moksu R7.3 calendar app-info variant
+on:
+  push:
+    branches: [moksu-331-r73-20261014]
+    paths: ['.github/workflows/moksu-r73-calendar.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  calendar:
+    name: Compile calendar app-info APK (unsigned)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r73-source
+          path: input
+          run-id: 38517999857
+          github-token: ${{ github.token }}
+      - name: Restore verified R7.3 full source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s input/moksu-r73-source.tar.gz
+          tar -xzf input/moksu-r73-source.tar.gz -C source
+          test -s source/manager/gradlew
+          grep -q 'com.lumera.dayframe' source/manager/app/build.gradle.kts
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Install pinned build tools
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile APK with calendar ApplicationInfo
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=日常工具 -PKSU_PACKAGE_NAME=com.lumera.dayframe -PKSU_VERSION_NAME=3.3.2-R7.3 -PKSU_VERSION_CODE=32682 -PMOKSU_APP_INFO_MODE=calendar 2>&1 | tee "$GITHUB_WORKSPACE/out/calendar-gradle.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/moksu-r73-calendar-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/moksu-r73-calendar-unsigned.apk"
+          sha256sum "$GITHUB_WORKSPACE/out/moksu-r73-calendar-unsigned.apk" > "$GITHUB_WORKSPACE/out/calendar-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r73-calendar-android
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
