@@ -1,0 +1,124 @@
+name: moksu R7.3 sign and package verified APKs
+on:
+  push:
+    branches: [moksu-331-r73-20261014]
+    paths: ['moksu/r73/release-trigger.txt']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  release:
+    name: Merge matching ksud and sign with trusted certificate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      KEYSTORE_B64: ${{ secrets.KEYSTORE }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r73-android
+          path: input/calculator
+          run-id: 38517999857
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r73-calendar-android
+          path: input/calendar
+          run-id: 38518308089
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r73-native
+          path: input/native
+          run-id: 38517999857
+          github-token: ${{ github.token }}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'build-tools;37.0.0'
+      - name: Validate signing prerequisites without exposing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s input/calculator/moksu-r73-manager-unsigned.apk
+          test -s input/calendar/moksu-r73-calendar-unsigned.apk
+          test -s input/native/aarch64-linux-android/ksud
+          test -s input/native/x86_64-linux-android/ksud
+          if [[ -z "$KEYSTORE_B64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo 'NO_SIGNER: no original-key signing secret configured in this repository.' >&2
+            exit 3
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/moksu-signing.jks"
+          test -s "$RUNNER_TEMP/moksu-signing.jks"
+      - name: Repack, align, sign, verify both APK profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_STORED
+          binaries={
+            'lib/arm64-v8a/libksud.so':Path('input/native/aarch64-linux-android/ksud').read_bytes(),
+            'lib/x86_64/libksud.so':Path('input/native/x86_64-linux-android/ksud').read_bytes(),
+          }
+          for mode, src in {
+            'calculator': 'input/calculator/moksu-r73-manager-unsigned.apk',
+            'calendar': 'input/calendar/moksu-r73-calendar-unsigned.apk',
+          }.items():
+            seen=set()
+            with ZipFile(src,'r') as inp, ZipFile(f'out/{mode}-merged.apk','w') as out:
+              for info in inp.infolist():
+                content=binaries.get(info.filename)
+                if content is not None:
+                  seen.add(info.filename)
+                  info.compress_type=ZIP_STORED
+                else:
+                  content=inp.read(info.filename)
+                out.writestr(info,content)
+            assert seen==set(binaries), f'Native libraries missing: {mode}, {set(binaries)-seen}'
+          PY
+          for mode in calculator calendar; do
+            zipalign -P 16 -f 4 "out/$mode-merged.apk" "out/$mode-aligned.apk"
+            apksigner sign \
+              --ks "$RUNNER_TEMP/moksu-signing.jks" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass env:KEYSTORE_PASSWORD \
+              --key-pass env:KEY_PASSWORD \
+              --v1-signing-enabled false \
+              --v2-signing-enabled true \
+              --v3-signing-enabled false \
+              --out "out/moksu-v3.3.2-R7.3-$mode-signed.apk" "out/$mode-aligned.apk"
+            apk="out/moksu-v3.3.2-R7.3-$mode-signed.apk"
+            apksigner verify -v --print-certs "$apk" > "out/$mode-signature.txt"
+            cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "out/$mode-signature.txt" | tr 'A-F' 'a-f' | head -1)"
+            test "$cert" = 'df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8'
+            aapt dump badging "$apk" | grep -F "package: name='com.lumera.dayframe'" >/dev/null
+            if [[ "$mode" == calculator ]]; then expected='计算器'; else expected='日历'; fi
+            aapt dump badging "$apk" | grep -F "application-label:'$expected'" >/dev/null
+            zipalign -c -P 16 4 "$apk"
+            sha256sum "$apk" >> out/APK-SHA256SUMS.txt
+            echo "Verified $mode signed APK and original certificate $cert"
+          done
+      - name: Delete signing input from temporary runner storage
+        if: always()
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/moksu-signing.jks"; then
+            shred -u "$RUNNER_TEMP/moksu-signing.jks" || rm -f "$RUNNER_TEMP/moksu-signing.jks"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: moksu-r73-original-signed-apks
+          path: |
+            out/moksu-v3.3.2-R7.3-calculator-signed.apk
+            out/moksu-v3.3.2-R7.3-calendar-signed.apk
+            out/APK-SHA256SUMS.txt
+            out/calculator-signature.txt
+            out/calendar-signature.txt
+          retention-days: 14
+          if-no-files-found: error
