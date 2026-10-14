@@ -79,7 +79,10 @@ jobs:
                 else:
                   content=inp.read(info.filename)
                 out.writestr(info,content)
-            assert seen==set(binaries), f'Native libraries missing: {mode}, {set(binaries)-seen}'
+              for name, binary in binaries.items():
+                if name not in seen:
+                  out.writestr(name, binary, compress_type=ZIP_STORED)
+            # Fresh Gradle unsigned APKs have no ksud entries; both are added.
           PY
           for mode in calculator calendar; do
             zipalign -P 16 -f 4 "out/$mode-merged.apk" "out/$mode-aligned.apk"
