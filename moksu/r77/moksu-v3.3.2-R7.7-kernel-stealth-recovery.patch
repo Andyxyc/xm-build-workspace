@@ -1,0 +1,196 @@
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokDisplayState.kt
+@@ -37,8 +37,18 @@
+         val requested=if(enabled) 1 else 0
+         val before=actual()
+         if (before != 0 && before != 1) return false
+-        if (before != requested && !runCatching { Natives.stealthSet(enabled) }.getOrDefault(false)) return false
+-        if (actual() != requested) return false
++        // Preserve an explicit user choice before the kernel is modified. This
++        // distinguishes future deliberate stealth from a stale legacy flag.
++        val prepared = enabled && before != requested
++        if (prepared && !MokStealthRecovery.prepareExplicitEnable(context)) return false
++        val changed = before == requested ||
++            runCatching { Natives.stealthSet(enabled) }.getOrDefault(false)
++        val verified = changed && actual() == requested
++        if (!verified) {
++            if (prepared) MokStealthRecovery.onExplicitResult(context, enabled, false)
++            return false
++        }
++        MokStealthRecovery.onExplicitResult(context, enabled, true)
+         lastVerifiedInProcess = requested
+         val saved=context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+             .edit().putBoolean(KEY,enabled).commit()
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokStealthRecovery.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokStealthRecovery.kt
+new file mode 100644
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokStealthRecovery.kt
+@@ -0,0 +1,89 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++import android.content.Context
++import android.os.UserManager
++import android.util.Log
++import me.weishu.kernelsu.Natives
++
++/**
++ * R7.7 one-time migration for stale /data/adb/sevenk/stealth=1.
++ * A flashed boot image does not clear userdata, so the old flag survives.
++ * This must alter the REAL kernel state via the signed manager ioctl;
++ * changing the screen alone would leave the device hidden.
++ *
++ * Local consent is deliberately stored in an Android backup-excluded preference.
++ * Old R7.6's presentation mirror is NOT a consent marker: it was written by reads.
++ * We only reconcile legacy state once, then preserve explicit future choices.
++ */
++internal object MokStealthRecovery {
++    private const val TAG = "moksu-stealth-recovery"
++    private const val PREF = "moksu.stealth.recovery.v1"
++    private const val DONE = "r77_legacy_migration_completed"
++    private const val OPT_IN = "explicit_enable_on_this_device"
++    @Volatile private var inProgress = false
++
++    private fun prefs(context: Context) =
++        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
++
++    @Synchronized fun reconcileOnce(context: Context) {
++        if (inProgress) return
++        val unlocked = runCatching {
++            context.getSystemService(UserManager::class.java)?.isUserUnlocked ?: false
++        }.getOrDefault(false)
++        if (!unlocked) return
++        val local = prefs(context)
++        if (local.getBoolean(DONE, false)) return
++        inProgress = true
++        try {
++            val kernel = runCatching { Natives.stealthState() }.getOrDefault(-1)
++            val action = MokStealthRecoveryPolicy.decide(
++                kernelState = kernel,
++                migrationCompleted = local.getBoolean(DONE, false),
++                deliberateEnableOnThisDevice = local.getBoolean(OPT_IN, false),
++                launcherMode = MokDisguise.mode(context),
++            )
++            when (action) {
++                MokStealthRecoveryPolicy.Action.RETRY_LATER,
++                MokStealthRecoveryPolicy.Action.NO_CHANGE -> Unit
++                MokStealthRecoveryPolicy.Action.REMEMBER -> {
++                    if (!local.edit().putBoolean(DONE, true).commit())
++                        Log.w(TAG, "Unable to save migration state")
++                }
++                MokStealthRecoveryPolicy.Action.CLEAR_LEGACY_ONCE -> {
++                    // manager_or_root permits the trusted manager UID even if
++                    // GET_INFO deliberately hides the MANAGER bit. No su grant.
++                    val restored = runCatching {
++                        Natives.stealthSet(false) && Natives.stealthState() == 0
++                    }.getOrDefault(false)
++                    if (!restored) {
++                        // Never lie about kernel state or suppress the existing UI.
++                        Log.w(TAG, "Legacy kernel hidden state could not be cleared")
++                        return
++                    }
++                    if (!local.edit().putBoolean(DONE, true).commit())
++                        Log.w(TAG, "Kernel restored but migration receipt not saved")
++                }
++            }
++        } finally { inProgress = false }
++    }
++
++    /** Write intent *before* enabling stealth so a process crash cannot hide it. */
++    @Synchronized fun prepareExplicitEnable(context: Context): Boolean =
++        prefs(context).edit().putBoolean(OPT_IN, true).putBoolean(DONE, true).commit()
++
++    /** Called only after a confirmed ioctl readback. */
++    @Synchronized fun onExplicitResult(context: Context, enabled: Boolean, success: Boolean) {
++        // Failed disable must NOT erase proof of an intentionally hidden device.
++        if (!success && !enabled) return
++        val editor = prefs(context).edit()
++        if (success) {
++            editor.putBoolean(DONE, true)
++            if (enabled) editor.putBoolean(OPT_IN, true) else editor.remove(OPT_IN)
++        } else {
++            // The original state was off; a failed enable must not leave consent.
++            editor.remove(OPT_IN)
++        }
++        if (!editor.commit()) Log.w(TAG, "Could not persist explicit stealth choice")
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/mok/MokStealthRecoveryPolicy.kt b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokStealthRecoveryPolicy.kt
+new file mode 100644
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/mok/MokStealthRecoveryPolicy.kt
+@@ -0,0 +1,24 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++package me.weishu.kernelsu.mok
++
++/** Only first-run migration may clear a legacy kernel flag.
++ * An unknown response is NOT proof of an installed or hidden kernel.
++ * A subsequent deliberate opt-in must survive reboot and app relaunch.
++ */
++internal object MokStealthRecoveryPolicy {
++    enum class Action { RETRY_LATER, REMEMBER, CLEAR_LEGACY_ONCE, NO_CHANGE }
++
++    fun decide(
++        kernelState: Int,
++        migrationCompleted: Boolean,
++        deliberateEnableOnThisDevice: Boolean,
++        launcherMode: String,
++    ): Action = when {
++        migrationCompleted -> Action.NO_CHANGE
++        kernelState !in 0..1 -> Action.RETRY_LATER
++        kernelState == 0 -> Action.REMEMBER
++        deliberateEnableOnThisDevice -> Action.REMEMBER
++        launcherMode != "normal" -> Action.REMEMBER
++        else -> Action.CLEAR_LEGACY_ONCE
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/MainActivity.kt
+@@ -128,6 +128,7 @@
+         me.weishu.kernelsu.mok.MokDisplayState.showUninstalled(this)
+     override fun onResume() {
+         super.onResume()
++        me.weishu.kernelsu.mok.MokStealthRecovery.reconcileOnce(this)
+         if (!me.weishu.kernelsu.mok.MokAuthGate.ensureAccess(this)) return
+         presentationRefresh++
+         me.weishu.kernelsu.mok.MokWebDeviceBridge.syncAppearanceAsync(applicationContext)
+@@ -146,6 +147,8 @@
+         val splashScreen = installSplashScreen()
+         splashStartedAt = SystemClock.uptimeMillis()
+         super.onCreate(savedInstanceState)
++        // Correct the kernel's stale persistent flag before either UI is chosen.
++        me.weishu.kernelsu.mok.MokStealthRecovery.reconcileOnce(this)
+         runCatching { me.weishu.kernelsu.mok.MokAppearance.applyOnce(this) }
+         if (!me.weishu.kernelsu.mok.MokAuthGate.ensureAccess(this)) return
+         splashScreen.setKeepOnScreenCondition {
+diff --git a/manager/app/src/main/res/xml/backup_rules.xml b/manager/app/src/main/res/xml/backup_rules.xml
+--- a/manager/app/src/main/res/xml/backup_rules.xml
++++ b/manager/app/src/main/res/xml/backup_rules.xml
+@@ -6,5 +6,6 @@
+ -->
+     <exclude domain="sharedpref" path="mok_activation_v1.xml" />
+     <exclude domain="sharedpref" path="moksu.presentation.v1.xml" />
++        <exclude domain="sharedpref" path="moksu.stealth.recovery.v1.xml" />
+     <exclude domain="sharedpref" path="moksu.disguise.v1.xml" />
+ </full-backup-content>
+diff --git a/manager/app/src/main/res/xml/data_extraction_rules.xml b/manager/app/src/main/res/xml/data_extraction_rules.xml
+--- a/manager/app/src/main/res/xml/data_extraction_rules.xml
++++ b/manager/app/src/main/res/xml/data_extraction_rules.xml
+@@ -7,6 +7,7 @@
+         -->
+         <exclude domain="sharedpref" path="mok_activation_v1.xml" />
+         <exclude domain="sharedpref" path="moksu.presentation.v1.xml" />
++        <exclude domain="sharedpref" path="moksu.stealth.recovery.v1.xml" />
+         <exclude domain="sharedpref" path="moksu.disguise.v1.xml" />
+     </cloud-backup>
+     <!--
+@@ -18,6 +19,7 @@
+     <device-transfer>
+         <exclude domain="sharedpref" path="mok_activation_v1.xml" />
+         <exclude domain="sharedpref" path="moksu.presentation.v1.xml" />
++        <exclude domain="sharedpref" path="moksu.stealth.recovery.v1.xml" />
+         <exclude domain="sharedpref" path="moksu.disguise.v1.xml" />
+     </device-transfer>
+ </data-extraction-rules>
