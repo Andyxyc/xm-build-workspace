@@ -1,0 +1,223 @@
+name: moksu R7.7 kernel stealth persistent-state recovery
+on:
+  push:
+    branches: [moksu-331-r77-20261015]
+    paths:
+      - 'moksu/r77/moksu-v3.3.2-R7.7-kernel-stealth-recovery.patch'
+      - '.github/workflows/moksu-r77-kernel-recovery.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r77-restore-manager-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Verify R7.6 source and real kernel-state recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r76-source
+          path: input
+          run-id: 38730362039
+          github-token: ${{ github.token }}
+      - name: Apply real kernel recovery before preserving UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -s input/moksu-r76-source.tar.gz
+          tar -xzf input/moksu-r76-source.tar.gz -C source
+          cd source
+          git apply --check ../config/moksu/r77/moksu-v3.3.2-R7.7-kernel-stealth-recovery.patch
+          git apply ../config/moksu/r77/moksu-v3.3.2-R7.7-kernel-stealth-recovery.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root = Path('manager/app/src/main')
+          ns = '{http://schemas.android.com/apk/res/android}'
+          app = ET.parse(root/'AndroidManifest.xml').getroot().find('application')
+          aliases = {a.get(ns+'name').split('.')[-1]: a for a in app.findall('activity-alias')}
+          required = ('MokManagerLauncher','MokCalculatorLauncher','MokCalendarLauncher')
+          assert set(required).issubset(aliases)
+          assert aliases['MokManagerLauncher'].get(ns+'enabled') == 'true'
+          assert aliases['MokCalculatorLauncher'].get(ns+'enabled') == 'false'
+          assert aliases['MokCalendarLauncher'].get(ns+'enabled') == 'false'
+          assert aliases['MokCalculatorLauncher'].get(ns+'targetActivity') == aliases['MokCalendarLauncher'].get(ns+'targetActivity')
+          assert aliases['MokCalculatorLauncher'].get(ns+'icon') != aliases['MokCalendarLauncher'].get(ns+'icon')
+          # Expected app icon is the unchanged KernelSU launcher icon.
+          assert aliases['MokManagerLauncher'].get(ns+'icon') == '${moksuAppInfoIcon}'
+          import hashlib
+          orig_icon=(root/'res/mipmap-anydpi/ic_launcher.xml').read_bytes()
+          assert hashlib.sha256(orig_icon).hexdigest() == '6497489452a1402500775e8594d26f7fdd342c503aa326ee69874feb027d1093'
+          g = Path('manager/app/build.gradle.kts').read_text()
+          assert 'moksuAppInfoMode == "unified"' in g
+          assert 'moksuAppInfoIcon = "@mipmap/ic_launcher"' in g
+          assert 'else "com.moksu.manager"' in g
+          assert 'else "moksu"' in g
+          assert 'com.lumera.dayframe' not in g
+          k = (root/'java/me/weishu/kernelsu/mok/MokDisguise.kt').read_text()
+          assert 'pm.setComponentEnabledSettings(changes)' in k
+          assert 'pm.getComponentEnabledSetting(' in k
+          ui = (root/'java/me/weishu/kernelsu/mok/MoksuExtrasActivity.kt').read_text()
+          assert 'choiceAfterPin' in ui
+          assert 'private var stealthEnabled by mutableStateOf(false)' in ui
+          assert 'private var disguiseMode by mutableStateOf(MokDisguise.NORMAL)' in ui
+          assert 'val previous = mode(context)' in k
+          assert 'getString("mode", NORMAL)' in k
+          assert 'KSU_PACKAGE_NAME ?= com.moksu.manager' in Path('kernel/Kbuild').read_text()
+          assert 'cargo:rustc-env=KSU_PACKAGE_NAME=com.moksu.manager' in Path('userspace/ksud/build.rs').read_text()
+          assert 'com.moksu.manager' in Path('userspace/ksud/assets/webadmin/app.js').read_text()
+          assert 'com.moksu.manager' in Path('moksu-build/ksu331/build_userspace.sh').read_text()
+          assert 'com.moksu.manager' in Path('manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt').read_text()
+          assert 'MokDisguise.CALCULATOR' in ui and 'MokDisguise.CALENDAR' in ui
+          verified=(root/'java/me/weishu/kernelsu/mok/MokDisplayState.kt').read_text()
+          assert 'lastVerifiedInProcess == 1' in verified
+          assert 'else -> prefs.getBoolean(KEY,false)' not in verified
+          assert 'lastVerifiedInProcess = requested' in verified
+          assert 'MokStealthRecovery.onExplicitResult(context, enabled, true)' in verified
+          repair=(root/'java/me/weishu/kernelsu/mok/MokStealthRecovery.kt').read_text()
+          policy=(root/'java/me/weishu/kernelsu/mok/MokStealthRecoveryPolicy.kt').read_text()
+          assert 'Natives.stealthSet(false) && Natives.stealthState() == 0' in repair
+          assert 'explicit_enable_on_this_device' in repair
+          assert 'legacy_migration_completed' in repair
+          assert 'kernelState == 0 -> Action.REMEMBER' in policy
+          assert 'deliberateEnableOnThisDevice -> Action.REMEMBER' in policy
+          assert 'launcherMode != "normal" -> Action.REMEMBER' in policy
+          assert 'migrationCompleted -> Action.NO_CHANGE' in policy
+          gate=(root/'java/me/weishu/kernelsu/mok/MokAuthGate.kt').read_text()
+          assert 'if (MokDisplayState.showUninstalled(activity))' in gate
+          main=(root/'java/me/weishu/kernelsu/ui/MainActivity.kt').read_text()
+          assert 'forceUninstalled = true' in main
+          assert 'MokDisplayState.showUninstalled(this)' in main
+          assert main.index('MokStealthRecovery.reconcileOnce(this)') < main.index('MokAuthGate.ensureAccess(this)')
+          import hashlib
+          protected_files={
+            'manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMiuix.kt':'ae1efd5eab3bccc97b864423d18bfbc8c2c4b2c7ae885953fdb3f4131f55b6d6',
+            'manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt':'bbd553608849f5b25c8244b4b27c1ed085bbe32cb2f703c1ae71907a7602951b',
+            'manager/app/src/main/java/me/weishu/kernelsu/ui/screen/install/InstallScreen.kt':'5e548fcadc2346525cc25383ffe8383b736d88a50130435f88e8e52556d7bc14',
+            'kernel/manager/stealth.c':'dd2d6127025181bd6a9b4878a448529b7db47800ebdd5f2d483a9db29d6a242e',
+          }
+          for relative,expected in protected_files.items():
+              assert hashlib.sha256(Path(relative).read_bytes()).hexdigest() == expected, relative
+          for rules in ('backup_rules.xml','data_extraction_rules.xml'):
+              config=(root/'res/xml'/rules).read_text()
+              ET.fromstring(config)
+              assert 'moksu.presentation.v1.xml' in config
+              assert 'moksu.disguise.v1.xml' in config
+              assert 'moksu.stealth.recovery.v1.xml' in config
+          PY
+          node --check userspace/ksud/assets/webadmin/app.js
+          cd ..
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx -czf out/moksu-r77-source.tar.gz -C source .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r77-source
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  android:
+    name: Compile R7.7 same-package KernelSU manager
+    runs-on: ubuntu-24.04
+    needs: source
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r77-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r77-source.tar.gz -C source
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r72-native
+          path: native
+          run-id: 38513741602
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Build R7.7 original KSU manager APK
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.2-R7.7 -PKSU_VERSION_CODE=32686 -PMOKSU_APP_INFO_MODE=unified 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R77.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk"
+      - name: Use original R7.2-compatible ksud and zipalign; never flash an LKM
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+          inp=Path('out/manager-raw-unsigned.apk')
+          tmp=Path('out/moksu-r77-with-native-unaligned.apk')
+          updates={
+            'lib/arm64-v8a/libksud.so':Path('native/aarch64-linux-android/ksud'),
+            'lib/x86_64/libksud.so':Path('native/x86_64-linux-android/ksud')
+          }
+          import hashlib
+          expected = {
+            'lib/arm64-v8a/libksud.so': '5facd04280bf53d3cf96bdf6204eff1cc0c64e6432ed168c018813daf5f5dd33',
+            'lib/x86_64/libksud.so': '88b4086d1c25c64b6aab9000f00eb84924d888fd2848b153349f2c2c09fb186c'
+          }
+          for name, v in updates.items():
+            assert v.is_file() and v.stat().st_size > 1000000, v
+            assert hashlib.sha256(v.read_bytes()).hexdigest() == expected[name], (name, 'original ksud mismatch')
+          with ZipFile(inp) as src, ZipFile(tmp,'w') as dst:
+            for info in src.infolist():
+              if info.filename in updates: continue
+              if info.filename.startswith('META-INF/') and info.filename.lower().endswith(('.rsa','.dsa','.ec','.sf')): continue
+              dst.writestr(info,src.read(info.filename))
+            for name,filepath in updates.items():
+              zi=ZipInfo(name)
+              zi.compress_type=ZIP_DEFLATED
+              zi.external_attr=0o644 << 16
+              dst.writestr(zi,filepath.read_bytes())
+          with ZipFile(tmp) as check:
+            assert check.testzip() is None
+            assert len(check.namelist())==len(set(check.namelist()))
+            for name, filepath in updates.items():
+              assert check.getinfo(name).file_size==filepath.stat().st_size
+            assert check.getinfo('resources.arsc').compress_type==0
+          PY
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/zipalign" -p -f 4 out/moksu-r77-with-native-unaligned.apk out/moksu-v3.3.2-R7.7-UNSIGNED.apk
+          "$BT/zipalign" -c -v 4 out/moksu-v3.3.2-R7.7-UNSIGNED.apk
+          "$BT/aapt" dump badging out/moksu-v3.3.2-R7.7-UNSIGNED.apk > out/apk-badging.txt
+          grep -q "package: name='com.moksu.manager' versionCode='32686' versionName='3.3.2-R7.7'" out/apk-badging.txt
+          grep -q "application-label:'moksu'" out/apk-badging.txt
+          head -n 18 out/apk-badging.txt
+          sha256sum out/moksu-v3.3.2-R7.7-UNSIGNED.apk > out/unsigned-sha256.txt
+          test -s "$BT/lib/apksigner.jar"
+          cp "$BT/lib/apksigner.jar" out/apksigner.jar
+          cp "$BT/zipalign" out/zipalign
+          chmod 755 out/zipalign
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r77-original-identity-unsigned
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
