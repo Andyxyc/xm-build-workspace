@@ -70,6 +70,18 @@ jobs:
       - name: Port SUSFS 1.5.5 and old-kernel interfaces
         working-directory: builder
         run: |
+          # The stock 4.14 readdir.c diverges from generic SUSFS and cannot be fuzz-patched.
+          # Apply five function-scoped hooks, preserving all other SUSFS source patches.
+          python3 -m py_compile ../chopin/port_hooks.py ../chopin/port_readdir.py
+          python3 - <<'PY'
+          from pathlib import Path
+          f = Path('scripts/patches.sh')
+          s = f.read_text()
+          target = '( cd "$KERNEL_DIR" && apply_patch "$kernel_patch" 1 )'
+          assert s.count(target)==1, 'SUSFS builder changed'
+          prefix = 'python3 "${GITHUB_WORKSPACE}/chopin/port_readdir.py" "$kernel_patch" "$KERNEL_DIR"\n\t'
+          f.write_text(s.replace(target, prefix + target, 1))
+          PY
           if ! bash scripts/patches.sh all; then
             echo "::error::SUSFS vendor patch rejected; listing all exact failed hunks"
             patchfile="$WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch"
