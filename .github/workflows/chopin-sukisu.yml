@@ -70,7 +70,12 @@ jobs:
       - name: Port SUSFS 1.5.5 and old-kernel interfaces
         working-directory: builder
         run: |
-          bash scripts/patches.sh all
+          if ! bash scripts/patches.sh all; then
+            echo "::error::SUSFS vendor patch rejected; listing all exact failed hunks"
+            patchfile="$WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch"
+            (cd "$WORKSPACE/android-kernel" && patch -p1 --batch --dry-run --fuzz=3 < "$patchfile") 2>&1 | tee "$GITHUB_WORKSPACE/susfs-hunk-diagnostics.txt" || true
+            exit 44
+          fi
           actual="$(git -C "$WORKSPACE/susfs4ksu" rev-parse HEAD)"
           echo "SUSFS 4.14 SHA: $actual"
           test "$actual" = "d18028f2a8f3ba16a907bff0edc16376cf38e2bf"
@@ -126,6 +131,7 @@ jobs:
         with:
           name: chopin-failure-diagnostics
           path: |
+            susfs-hunk-diagnostics.txt
             kernel_workspace/android-kernel/out/.config
             kernel_workspace/android-kernel/out/.tmp_versions
             kernel_workspace/android-kernel/out/include/generated/utsrelease.h
