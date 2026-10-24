@@ -99,6 +99,8 @@ jobs:
           root=Path(os.environ["WORKSPACE"])/"android-kernel"
           p=subprocess.run(["git","-C",str(root),"diff","--check"],capture_output=True,text=True)
           for row in p.stdout.splitlines():
+              if row.startswith("+"):  # git diff --check prints the offending content after its location
+                  continue
               m=re.match(r"^(.+?):(\d+): trailing whitespace\.$",row)
               if not m:
                   raise SystemExit("Unhandled diff check: "+row)
