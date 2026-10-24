@@ -22,7 +22,7 @@ jobs:
       CONFIG_ENV: config/chopin.env
       KBUILD_BUILD_USER: xiaomo
       KBUILD_BUILD_HOST: chopin-builder
-      BASELINE_REFERENCE_RUN: "40135402316"
+      BASELINE_REFERENCE_RUN: ""
       CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
       CCACHE_MAXSIZE: 512M
     steps:
@@ -71,6 +71,7 @@ jobs:
           echo "Vendor kernel SHA: $actual"
           test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
           python3 ../chopin/port_cpu_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_anon_vma_stock.py "$WORKSPACE/android-kernel"
           python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
           cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
 
@@ -86,6 +87,15 @@ jobs:
           cp "$WORKSPACE/android-kernel/out/.config" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.config"
           cp "$WORKSPACE/android-kernel/out/Module.symvers" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.Module.symvers"
           sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" > "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-image.sha256"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path(os.environ['WORKSPACE'])/'android-kernel/out/Module.symvers'
+          values={s[1]:int(s[0],16) for line in p.read_text().splitlines() if len(s:=line.split())>=2}
+          expected={'cpu_hwcaps':0xf2352f28,'cpu_hwcap_keys':0x37c71621,'find_vma':0x40a015a7,'remap_pfn_range':0x5cf0b028}
+          assert all(values.get(n)==v for n,v in expected.items()),{n:hex(values.get(n,0)) for n in expected}
+          print('New stock CPU/MM baseline CRCs match the actual original exports')
+          PY
 
       - name: Integrate latest verified SukiSU builtin
         working-directory: builder
@@ -165,6 +175,15 @@ jobs:
       - name: Check vendor camera and root features
         run: |
           python3 chopin/verify_config.py "$WORKSPACE/android-kernel/out/.config"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path(os.environ['WORKSPACE'])/'android-kernel/out/Module.symvers'
+          values={s[1]:int(s[0],16) for line in p.read_text().splitlines() if len(s:=line.split())>=2}
+          expected={'cpu_hwcaps':0xf2352f28,'cpu_hwcap_keys':0x37c71621,'find_vma':0x40a015a7,'remap_pfn_range':0x5cf0b028,'trace_idx':0x18d43e99,'trace_array':0xe476cdfb}
+          assert all(values.get(n)==v for n,v in expected.items()),{n:hex(values.get(n,0)) for n in expected}
+          print('All six previously incompatible/missing original exports now match')
+          PY
           test -f "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
           printf "SukiSU builtin + SUSFS + KPM config exists; this does not verify camera on device.\n"
 
