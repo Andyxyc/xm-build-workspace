@@ -30,13 +30,16 @@ chopin_preflash_verify() {
 }
 
 chopin_record_attempt() {
-  local marker;
+  local marker payload;
   [ "$backup_dir" = /data/adb/chopin-kernel-backups ] || abort "Unexpected backup directory";
   case "$SLOT" in _a|_b) ;; *) abort "Unknown slot before write";; esac;
   [ ${#CHOPIN_NEW_IMAGE_SHA} = 64 ] || abort "Unverified repacked image";
-  marker="$backup_dir/attempt${SLOT}-${CHOPIN_NEW_IMAGE_SHA}.txt";
-  # Refuse an automatic second write of the same repacked image to this slot.
-  (set -C; printf 'target=%s\nimage_sha256=%s\nbackup_sha256=%s\n' "$BLOCK" "$CHOPIN_NEW_IMAGE_SHA" "$CHOPIN_BACKUP_SHA" > "$marker") || abort "Write attempt already recorded; diagnose before another attempt";
+  payload=$(cat "$AKHOME/expected/kernel.sha256");
+  [ ${#payload} = 64 ] || abort "Invalid candidate identity";
+  case "$payload" in *[!0-9a-f]*) abort "Invalid candidate digest";; esac;
+  marker="$backup_dir/attempt${SLOT}-${payload}.txt";
+  # Refuse a second automatic write of the same kernel even if repacking differs.
+  (set -C; printf 'target=%s\nkernel_sha256=%s\nimage_sha256=%s\nbackup_sha256=%s\n' "$BLOCK" "$payload" "$CHOPIN_NEW_IMAGE_SHA" "$CHOPIN_BACKUP_SHA" > "$marker") || abort "Write attempt already recorded; diagnose before another attempt";
   sync;
 }
 
