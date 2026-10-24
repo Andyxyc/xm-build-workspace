@@ -86,3 +86,121 @@ src=src.replace(old,new,1)
 assert "access_ok(arg" not in src and "access_ok(cmd." not in src
 kpm.write_text(src)
 print("KPM 4.14 pointer API ported with READ/WRITE validation; KPM remains enabled.")
+
+# Linux 4.14 SUSFS v1.5.5 has a different userspace ABI from the 2026
+# SukiSU builtin v2-style reboot dispatcher. Preserve old core functions,
+# expose only verified legacy-safe operations, and reject modern-only ones.
+change("KernelSU/kernel/policy/feature.c",
+       '    [KSU_FEATURE_SELINUX_HIDE] = "selinux_hide",',
+       '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)\n'
+       '    [KSU_FEATURE_SELINUX_HIDE] = "selinux_hide",\n#endif',
+       "SELinux-hide feature gated consistently with its enum")
+
+change("KernelSU/kernel/supercall/dispatch.c",
+       '#ifdef CONFIG_KSU_SUSFS\n            susfs_start_sdcard_monitor_fn();\n#endif',
+       '#if defined(CONFIG_KSU_SUSFS) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)\n'
+       '            susfs_start_sdcard_monitor_fn();\n#endif',
+       "v2-only SD-card monitor excluded on v1.5.5")
+
+dispatch=kernel/"KernelSU/kernel/supercall/dispatch.c"
+code=dispatch.read_text()
+start='''#ifdef CONFIG_KSU_SUSFS
+int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg)
+'''
+finish='\n#endif\n\nstatic int do_nuke_ext4_sysfs'
+assert code.count(start)==1, "cannot find SukiSU reboot handler to port"
+assert code.count(finish)==1, "unexpected SukiSU reboot handler trailing section"
+before=code.index(start)
+after=code.index(finish,before)
+existing=code[before+len('#ifdef CONFIG_KSU_SUSFS\n'):after]
+assert existing.count('SUSFS_MAGIC')==1 and 'ksu_supercall_reboot_handler' in existing
+
+legacy=String if False else r'''
+static bool chopin_susfs_legacy_path_ok(const char *name, size_t maxlen)
+{
+    return name[0] == '/' && memchr(name, '\0', maxlen) != NULL;
+}
+
+int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+                          void __user **arg)
+{
+    if (magic1 != KSU_INSTALL_MAGIC1)
+        return -EINVAL;
+
+    if (magic2 == KSU_INSTALL_MAGIC2)
+        return ksu_supercall_reboot_handler(arg);
+
+    if ((u32)magic2 != 0xFAFAFAFAu || current_uid().val != 0)
+        return -EINVAL;
+    if (!arg || !*arg)
+        return -EFAULT;
+
+    switch (cmd) {
+    case CMD_SUSFS_SHOW_VERSION: {
+        struct { char version[16]; int err; } v = {
+            .version = SUSFS_VERSION, .err = 0
+        };
+        return copy_to_user(*arg, &v, sizeof(v)) ? -EFAULT : 0;
+    }
+    case CMD_SUSFS_SHOW_VARIANT: {
+        struct { char variant[16]; int err; } v = {
+            .variant = SUSFS_VARIANT, .err = 0
+        };
+        return copy_to_user(*arg, &v, sizeof(v)) ? -EFAULT : 0;
+    }
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+    case CMD_SUSFS_ADD_SUS_PATH: {
+        struct st_susfs_sus_path info;
+        if (copy_from_user(&info, *arg, sizeof(info)))
+            return -EFAULT;
+        if (!info.target_ino ||
+            !chopin_susfs_legacy_path_ok(info.target_pathname,
+                                          sizeof(info.target_pathname)))
+            return -EINVAL;
+        return susfs_add_sus_path((struct st_susfs_sus_path __user *)*arg);
+    }
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+    case CMD_SUSFS_ADD_SUS_MOUNT: {
+        struct st_susfs_sus_mount info;
+        if (copy_from_user(&info, *arg, sizeof(info)))
+            return -EFAULT;
+        if (!chopin_susfs_legacy_path_ok(info.target_pathname,
+                                          sizeof(info.target_pathname)))
+            return -EINVAL;
+        return susfs_add_sus_mount((struct st_susfs_sus_mount __user *)*arg);
+    }
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+    case CMD_SUSFS_SET_UNAME:
+        return susfs_set_uname((struct st_susfs_uname __user *)*arg);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+    case CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG:
+        return susfs_set_cmdline_or_bootconfig((char __user *)*arg);
+#endif
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+    case CMD_SUSFS_ADD_OPEN_REDIRECT: {
+        struct st_susfs_open_redirect info;
+        if (copy_from_user(&info, *arg, sizeof(info)))
+            return -EFAULT;
+        if (!info.target_ino ||
+            !chopin_susfs_legacy_path_ok(info.target_pathname,
+                                          sizeof(info.target_pathname)) ||
+            !chopin_susfs_legacy_path_ok(info.redirected_pathname,
+                                          sizeof(info.redirected_pathname)))
+            return -EINVAL;
+        return susfs_add_open_redirect(
+                     (struct st_susfs_open_redirect __user *)*arg);
+    }
+#endif
+    default:
+        /* SUSFS v2-only commands are not implemented by v1.5.5. */
+        return -EOPNOTSUPP;
+    }
+}
+'''
+new='#ifdef CONFIG_KSU_SUSFS\n#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)\n'+legacy+'\n#else\n'+existing+'\n#endif'
+code=code[:before]+new+code[after:]
+dispatch.write_text(code)
+print("SUSFS v1.5.5 legacy-safe reboot controls integrated; modern v2 commands rejected.")
