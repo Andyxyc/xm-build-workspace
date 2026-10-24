@@ -195,7 +195,7 @@ jobs:
           cp "$WORKSPACE/android-kernel/out/Module.symvers" release-evidence/ported.Module.symvers
           cp "$WORKSPACE/android-kernel/out/System.map" release-evidence/System.map
           mkdir -p release-evidence/abi-types
-          for f in arch/arm64/kernel/cpufeature.symtypes mm/mmap.symtypes mm/memory.symtypes; do
+          for f in arch/arm64/kernel/cpufeature.symtypes mm/mmap.symtypes mm/memory.symtypes net/core/chopin_vendor_refcnt_trace.symtypes; do
             test ! -f "$WORKSPACE/android-kernel/out/$f" || cp "$WORKSPACE/android-kernel/out/$f" release-evidence/abi-types/
           done
           git -C "$WORKSPACE/android-kernel" diff --binary > release-evidence/vendor-changes.patch

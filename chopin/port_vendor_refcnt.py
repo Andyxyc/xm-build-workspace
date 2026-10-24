@@ -7,6 +7,9 @@ source=Path(__file__).parent/'vendor_refcnt_trace.c'
 dest=root/'net/core/chopin_vendor_refcnt_trace.c'
 assert not dest.exists(), 'Do not overwrite an existing implementation'
 dest.write_bytes(source.read_bytes())
+header=root/'net/core/chopin_vendor_refcnt_trace.h'
+assert not header.exists(), 'Do not overwrite an existing public layout'
+header.write_bytes((Path(__file__).parent/'vendor_refcnt_trace.h').read_bytes())
 file=root/'net/core/Makefile'
 text=file.read_text()
 assert 'chopin_vendor_refcnt_trace' not in text

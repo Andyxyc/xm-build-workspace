@@ -12,14 +12,7 @@
  * No additional recording hooks, timers, threads or per-event logging.
  */
 #include <linux/export.h>
-
-struct refcnt_trace {
-    int refcnt;
-    unsigned int info;
-    unsigned int entry_nr;
-    unsigned long time;
-    unsigned long entry[64];
-};
+#include "chopin_vendor_refcnt_trace.h"
 
 typedef char chopin_refcnt_record_must_be_536_bytes[
     sizeof(struct refcnt_trace) == 536 ? 1 : -1];
