@@ -22,7 +22,7 @@ jobs:
       CONFIG_ENV: config/chopin.env
       KBUILD_BUILD_USER: xiaomo
       KBUILD_BUILD_HOST: chopin-builder
-      BASELINE_REFERENCE_RUN: ""
+      BASELINE_REFERENCE_RUN: "40135402316"
       CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
       CCACHE_MAXSIZE: 512M
     steps:
@@ -120,6 +120,7 @@ jobs:
           echo "SUSFS 4.14 SHA: $actual"
           test "$actual" = "d18028f2a8f3ba16a907bff0edc16376cf38e2bf"
           python3 ../chopin/stock_module_layout.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_vendor_refcnt.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_hooks.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_414_compat.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_414_optional.py "$WORKSPACE/android-kernel"
