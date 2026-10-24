@@ -43,7 +43,7 @@ jobs:
           git -C ReSukiSU rev-parse HEAD | tee ROOT_COMMIT.txt
           bash ReSukiSU/kernel/setup.sh "$PWD"
           test -d drivers || exit 1
-      - name: Integrate SuSFS 2.2.0 for 5.4 with inline hooks
+      - name: Integrate SuSFS for 5.4 with inline hooks (upstream 2.3.0)
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -58,14 +58,18 @@ jobs:
           test -f include/linux/susfs.h
           bash ../jacka_repo/Patches/susfs_inline_hook_patches.sh
           find . -name '*.rej' -print | tee REJECT_PATHS.txt
-          if [ -s REJECT_PATHS.txt ]; then
-            echo 'Rejected patch hunks detected:'
-            while IFS= read -r reject; do
-              echo "---- $reject ----"
+          new_rejects=0
+          while IFS= read -r reject; do
+            tracked_path="${reject#./}"
+            if ! git ls-files --error-unmatch -- "$tracked_path" >/dev/null 2>&1 || ! git diff --quiet -- "$tracked_path"; then
+              echo "New or modified patch reject: $reject"
               sed -n '1,45p' "$reject"
-            done < REJECT_PATHS.txt
-            exit 1
-          fi
+              new_rejects=1
+            else
+              echo "Unchanged reject already tracked in upstream source: $reject"
+            fi
+          done < REJECT_PATHS.txt
+          test "$new_rejects" -eq 0
       - name: Configure venus and preserve base hardware settings
         shell: bash
         run: |
