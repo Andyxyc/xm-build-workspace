@@ -34,6 +34,8 @@ jobs:
           cp susfs/LICENSE tools-out/SUSFS-LICENSE
           cp chopin/tools/kpm_probe_module.c tools-out/
           sha256sum tools-out/* > tools-out/SHA256SUMS.txt
+      - name: Diagnose actual vendor symbol type generation
+        run: python3 chopin/tools/diagnose_refcnt_abi.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
