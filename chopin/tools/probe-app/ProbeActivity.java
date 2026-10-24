@@ -53,6 +53,7 @@ public final class ProbeActivity extends Activity {
         if(!Arrays.asList("prepare","check","cameras","capture").contains(mode)){view.setText("未知测试模式");return;}
         try {
             report=new JSONObject();report.put("mode",mode);report.put("uid",Process.myUid());report.put("timestamp_ms",System.currentTimeMillis());
+            report.put("kernel_release",Os.uname().release);report.put("elapsed_realtime_ms",android.os.SystemClock.elapsedRealtime());
             try {report.put("selinux_context",read(new File("/proc/self/attr/current"),1024));}catch(Exception e){report.put("context_error",e.toString());}
             if(mode.equals("prepare")) {
                 for(String n:Arrays.asList("path-probe.txt","stat-probe.txt")) {
