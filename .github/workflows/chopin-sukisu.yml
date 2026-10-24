@@ -32,8 +32,9 @@ jobs:
             bc bison flex make build-essential git git-lfs python3 python-is-python3 \
             curl wget unzip zip cpio device-tree-compiler libssl-dev libelf-dev \
             libncurses-dev lz4 zstd ccache rsync ca-certificates \
-            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross
           mkdir -p "$WORKSPACE"
+          mkdir -p build-logs release-evidence
 
       - name: Fetch existing non-GKI build framework (pinned)
         run: |
@@ -58,6 +59,15 @@ jobs:
           actual="$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
           echo "Vendor kernel SHA: $actual"
           test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
+
+      - name: Compile unmodified vendor baseline before root integration
+        working-directory: builder
+        run: |
+          set -o pipefail
+          /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/vendor-baseline.log"
+          cp "$WORKSPACE/android-kernel/out/.config" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.config"
+          cp "$WORKSPACE/android-kernel/out/Module.symvers" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.Module.symvers"
+          sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" > "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-image.sha256"
 
       - name: Integrate latest verified SukiSU builtin
         working-directory: builder
@@ -94,6 +104,7 @@ jobs:
           python3 ../chopin/port_hooks.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_414_compat.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_414_optional.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_susfs155.py "$WORKSPACE/android-kernel" "$WORKSPACE/susfs4ksu"
           grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
           grep -n "IN_ALL_EVENTS" "$WORKSPACE/android-kernel/fs/notify/fdinfo.c"
           # Normalize whitespace on SUSFS patch-added lines ONLY; do not alter vendor files globally.
@@ -124,8 +135,9 @@ jobs:
       - name: Build source tree using chopin defconfig
         working-directory: builder
         run: |
+          set -o pipefail
           bash scripts/build.sh defconfig
-          bash scripts/build.sh compile
+          /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/ported-kernel.log"
 
       - name: Check vendor camera and root features
         run: |
@@ -136,15 +148,40 @@ jobs:
       - name: Apply KPM to compiled arm64 Image
         working-directory: builder
         run: |
-          bash scripts/build.sh check
+          set -o pipefail
+          cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"
+          bash scripts/build.sh check 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/kpm-postprocess.log"
+          ! cmp -s "$WORKSPACE/Image.before-kpm" "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
+          sha256sum "$WORKSPACE/Image.before-kpm" > "$GITHUB_WORKSPACE/release-evidence/Image.before-kpm.sha256"
           sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
           git -C "$WORKSPACE/android-kernel" status --short | head -80
+
+      - name: Build matching native ARM64 SUSFS 1.5.5 client
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path(os.environ['WORKSPACE'])/'susfs4ksu/ksu_susfs/jni/main.c'
+          s=p.read_text().replace('#include <android/log.h>', '/* No Android log API is used by this CLI. */')
+          assert s.count('bool                    is_statically;') == 1
+          s=s.replace('bool                    is_statically;', 'int                     is_statically;',1)
+          Path('release-evidence/ksu_susfs_155.c').write_text(s)
+          PY
+          aarch64-linux-gnu-gcc -O2 -static release-evidence/ksu_susfs_155.c -o release-evidence/ksu_susfs_155
+          aarch64-linux-gnu-readelf -h release-evidence/ksu_susfs_155 > release-evidence/ksu_susfs_155.elf-header.txt
 
       - name: Save evidence of source and kernel version
         run: |
           mkdir -p release-evidence
           cp "$WORKSPACE/android-kernel/out/.config" release-evidence/chopin-built.config
           cp "$WORKSPACE/android-kernel/out/include/generated/utsrelease.h" release-evidence/utsrelease.h
+          cp "$WORKSPACE/android-kernel/out/Module.symvers" release-evidence/ported.Module.symvers
+          cp "$WORKSPACE/android-kernel/out/System.map" release-evidence/System.map
+          git -C "$WORKSPACE/android-kernel" diff --binary > release-evidence/vendor-changes.patch
+          git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > release-evidence/SukiSU-changes.patch
+          cp "$WORKSPACE/android-kernel/KernelSU/kernel/chopin_susfs155_prctl.c" release-evidence/
+          "$WORKSPACE/clang/bin/clang" --version > release-evidence/clang-version.txt
+          git -C "$WORKSPACE/clang" rev-parse HEAD > release-evidence/clang-commit.txt
           {
             echo "status=compiled_only; NOT FLASHABLE; NO HARDWARE OR CAMERA VALIDATION"
             echo "vendor=$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
@@ -160,11 +197,28 @@ jobs:
           path: |
             kernel_workspace/android-kernel/out/arch/arm64/boot/Image
             release-evidence/*
+            build-logs/*
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload failure diagnostics if build fails
-        if: failure()
+      - name: Collect diagnostic configuration and patches even after a failure
+        if: always()
+        run: |
+          mkdir -p build-logs/diagnostics
+          for f in .config include/generated/utsrelease.h Module.symvers; do
+            if test -f "$WORKSPACE/android-kernel/out/$f"; then
+              cp "$WORKSPACE/android-kernel/out/$f" "build-logs/diagnostics/$(basename "$f")"
+            fi
+          done
+          if test -d "$WORKSPACE/android-kernel/.git"; then
+            git -C "$WORKSPACE/android-kernel" diff --binary > build-logs/diagnostics/vendor.patch
+          fi
+          if test -d "$WORKSPACE/android-kernel/KernelSU/.git"; then
+            git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > build-logs/diagnostics/SukiSU.patch
+          fi
+
+      - name: Upload complete diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: chopin-failure-diagnostics
@@ -173,5 +227,8 @@ jobs:
             kernel_workspace/android-kernel/out/.config
             kernel_workspace/android-kernel/out/.tmp_versions
             kernel_workspace/android-kernel/out/include/generated/utsrelease.h
+            build-logs/**
+            release-evidence/**
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
