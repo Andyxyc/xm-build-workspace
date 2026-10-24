@@ -6,7 +6,8 @@ remains a test candidate until independent real-device acceptance succeeds.
 from pathlib import Path
 import argparse,hashlib,json,struct,gzip,shutil,subprocess,zipfile,re
 if not __debug__:raise SystemExit('Safety gates require normal Python mode; -O is forbidden')
-p=argparse.ArgumentParser();p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--licenses',type=Path,required=True);p.add_argument('--installer-commit',required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+assert re.fullmatch('[0-9a-f]{40}',a.installer_commit)
 root=Path(__file__).resolve().parent
 digest=lambda b:hashlib.sha256(b).hexdigest()
 g=json.loads(a.gate.read_text(encoding='utf-8'))
@@ -52,6 +53,13 @@ shutil.copyfile(root/'ak3-preflight.sh',stage/'tools/chopin-preflight.sh')
 build_commit=(a.candidate/'build-logs/root-build-complete.txt').read_text().strip();assert re.fullmatch('[0-9a-f]{40}',build_commit)
 (stage/'SOURCE.txt').write_text('TEST CANDIDATE - no real-device acceptance implied.\nSource and build scripts: https://github.com/Andyxyc/xm-build-workspace/tree/'+build_commit+'\nAnyKernel3: https://github.com/osm0sis/AnyKernel3/tree/020dfeccf9d7e962a48400fc94d3e451df92eead\nVendor source: https://github.com/ChopinKernels/android_kernel_chopin_android_T/tree/0647a49c9557faa92b90c4ae188587787226be9e\nSukiSU: https://github.com/SukiSU-Ultra/SukiSU-Ultra/tree/ce75122bec7423e0f1fa06e3e9a174085c5231ab\nSUSFS: https://github.com/Star-Seven/susfs4ksu/tree/d18028f2a8f3ba16a907bff0edc16376cf38e2bf\nKPM patch tool: https://github.com/ShirkNeko/SukiSU_patch/tree/7c6289c95bdc786119b03d150236853b7b4872ca\n')
 shutil.copyfile(a.ak3_source/'LICENSE',stage/'AnyKernel3-LICENSE')
+licenses={'Linux-COPYING':'af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7','SukiSU-LICENSE':'8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643','SUSFS-LICENSE':'3da27bc7c6a063f498b4278372d48e113453f93aecc709f44276e278fc0cac12','KernelPatch-LICENSE':'ce7f2f7bc1c5b68f592a04b763abaa9c180c5e44e30563153bee280763b54ae7'}
+(stage/'LICENSES').mkdir()
+for name,expected in licenses.items():
+    blob=(a.licenses/name).read_bytes();assert digest(blob)==expected,(name,'License source changed')
+    (stage/'LICENSES'/name).write_bytes(blob)
+with (stage/'SOURCE.txt').open('a') as source:
+    source.write('Installer source snapshot: https://github.com/Andyxyc/xm-build-workspace/tree/'+a.installer_commit+'/chopin/tools/installer\n')
 # The private module manifest remains local; only a minimal gate receipt ships.
 (stage/'ABI-GATE.json').write_text(json.dumps(dict(status=g['status'],image_sha256=g['image_sha256'],imports_checked=g['imports_checked'],actual_image_export_crcs_checked=g['actual_image_export_crcs_checked'],hardware_validated=False),indent=2))
 files=sorted(f for f in stage.rglob('*') if f.is_file())

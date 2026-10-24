@@ -9,6 +9,9 @@ check_candidate_abi_gate.py 读取实际 Image 的 kcrctab，逐项核对构建�
 build_gated_ak3.py 只有在该记录通过、所有绑定哈希一致、输入原厂 boot
 和固定 AnyKernel3 源码校验通过时才打包。它不运行 ADB/Fastboot，不刷分区。
 ZIP 名称必须含 TEST-CANDIDATE；打包不代表开机、相机或功耗验证通过。
+--licenses 目录须提供固定源提交的 Linux-COPYING、SukiSU-LICENSE、
+SUSFS-LICENSE、KernelPatch-LICENSE 原始文本；打包器逐一核对 SHA256。
+--installer-commit 指定本套安装工具的真实提交，与内核构建提交分别记录。
 
 AnyKernel3 固定 020dfeccf9d7e962a48400fc94d3e451df92eead。
 packager 对官方 flash_boot 只插入写入前回调，保留完整官方源码和许可证。
