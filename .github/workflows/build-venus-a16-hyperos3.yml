@@ -98,10 +98,15 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          export LOCALVERSION=-venus-A16-HyperOS3-ReSukiSU-test
+          export LOCALVERSION=-venus-RS
+          # Propagate make failures instead of packaging a stale or nonexistent Image.
+          sed -i '2i set -e' build.sh
           chmod +x ./build.sh
           bash ./build.sh all venus 2>&1 | tee build.log
           test -s ../out/arch/arm64/boot/Image
+          grep -qx 'CONFIG_KSU=y' ../out/.config
+          grep -qx 'CONFIG_KSU_SUSFS=y' ../out/.config
+          grep -qx 'CONFIG_BOARD_XIAOMI_VENUS=y' ../out/.config
           AK3="$(find ../out/anykernel -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$AK3" && test -s "$AK3"
           unzip -t "$AK3"
