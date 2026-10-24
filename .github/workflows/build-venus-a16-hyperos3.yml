@@ -39,9 +39,11 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          git clone --depth=1 --branch main https://github.com/ReSukiSU/ReSukiSU.git ReSukiSU
+          git clone --depth=1 --branch v4.2.0-rc3 https://github.com/Baka-SU/BakaSU.git ReSukiSU
           git -C ReSukiSU rev-parse HEAD | tee ROOT_COMMIT.txt
-          bash ReSukiSU/kernel/setup.sh "$PWD"
+          bash ReSukiSU/kernel/setup.sh v4.2.0-rc3
+          test "$(git -C KernelSU describe --tags --exact-match)" = "v4.2.0-rc3"
+          git -C KernelSU rev-parse HEAD | tee ROOT_SELECTED_COMMIT.txt
           test -d drivers || exit 1
       - name: Integrate SuSFS for 5.4 with inline hooks (upstream 2.3.0)
         shell: bash
@@ -128,6 +130,7 @@ jobs:
             build.log
             SOURCE_COMMIT.txt
             ROOT_COMMIT.txt
+            ROOT_SELECTED_COMMIT.txt
             SUSFS_PATCH_COMMIT.txt
             SHA256SUMS.txt
             REJECT_PATHS.txt
