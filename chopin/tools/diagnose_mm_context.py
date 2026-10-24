@@ -1,6 +1,6 @@
 """Compile genuine, isolated header-context probes; never emits a kernel Image.
 
-Appending real headers tests genksyms visibility, without altering declarations,
+Including real headers before exports tests genksyms visibility, without altering declarations,
 symbol CRCs or module-loading policy. These are diagnostics, not kernel patches.
 """
 from pathlib import Path
@@ -26,7 +26,10 @@ for unit,symbol in [('mmap','find_vma'),('memory','remap_pfn_range')]:
     try:
         for header in [None]+headers:
             label=unit+'-'+(header.replace('/','_').replace('.','_') if header else 'baseline')
-            src.write_bytes(original+(b'\n#include <'+header.encode()+b'>\n' if header else b''))
+            marker=b'#include "internal.h"'
+            assert original.count(marker)==1
+            probe=original.replace(marker,b'#include <'+header.encode()+b'>\n'+marker,1) if header else original
+            src.write_bytes(probe)
             for suffix in ['o','symtypes']:(root/'out/mm'/(unit+'.'+suffix)).unlink(missing_ok=True)
             code=run('mm/'+unit+'.o',label)
             row=dict(unit=unit,header=header,exit_code=code,original_sha256=digest)
@@ -38,6 +41,8 @@ for unit,symbol in [('mmap','find_vma'),('memory','remap_pfn_range')]:
                 (out/(label+'.symtypes')).write_bytes((root/'out/mm'/(unit+'.symtypes')).read_bytes())
             report.append(row);print(json.dumps(row),flush=True)
             (out/'context-results.json').write_text(json.dumps(report,indent=2))
+        baseline=next(x for x in report if x['unit']==unit and x['header'] is None)
+        assert any(x.get('selected_crc')!=baseline['selected_crc'] for x in report if x['unit']==unit and x['exit_code']==0), 'Header probes did not affect export-time type visibility'
     finally:
         src.write_bytes(original);assert hashlib.sha256(src.read_bytes()).hexdigest()==digest
 (out/'status.txt').write_text('Diagnostic objects only. No Image, boot image or flash package built.\n')
