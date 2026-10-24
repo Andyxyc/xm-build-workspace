@@ -63,6 +63,8 @@ jobs:
           cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
 
       - name: Compile bounded source header contexts
+        env:
+          MM_DIAG_CONTROLS_ONLY: "1"
         run: python3 chopin/tools/diagnose_mm_context.py
       - uses: actions/upload-artifact@v4
         if: always()

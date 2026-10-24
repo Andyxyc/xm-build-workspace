@@ -15,6 +15,24 @@ def run(target,label):
         p=subprocess.run(args+[target],cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT)
     return p.returncode
 assert run('chopin_user_defconfig','configure')==0
+if env.get('MM_DIAG_CONTROLS_ONLY')=='1':
+    rows=[]
+    controls=[('mm/backing-dev','bdi_register_va','5d89a086'),
+              ('kernel/sched/core','wake_up_process','609fadad'),
+              ('fs/inode','iget_locked','5eab1b42'),
+              ('fs/file_table','alloc_file','dc878e5d'),
+              ('drivers/base/core','device_add','74d18288')]
+    for unit,symbol,expected in controls:
+        label=unit.replace('/','_');code=run(unit+'.o',label)
+        assert code==0,(unit,code)
+        text=subprocess.check_output(['aarch64-linux-gnu-nm',str(root/'out'/(unit+'.o'))],text=True)
+        values={n:v for v,n in re.findall(r'^([0-9a-f]+)\s+[Aa]\s+__crc_(\w+)$',text,re.M)}
+        assert int(values[symbol],16)==int(expected,16),(unit,symbol,values[symbol],expected)
+        (out/(label+'.symtypes')).write_bytes((root/'out'/(unit+'.symtypes')).read_bytes())
+        row=dict(unit=unit,symbol=symbol,actual_crc=values[symbol],stock_crc=expected);rows.append(row);print(json.dumps(row),flush=True)
+    (out/'matching-controls.json').write_text(json.dumps(rows,indent=2))
+    (out/'status.txt').write_text('Read-only ABI diagnosis: stock-matching controls. No Image built.\n')
+    raise SystemExit(0)
 headers=['linux/netdevice.h','linux/fs_struct.h','linux/fdtable.h','linux/module.h',
          'linux/exportfs.h','linux/fscrypt.h','linux/pipe_fs_i.h','linux/binfmts.h',
          'linux/blk-mq.h','linux/device.h','linux/iommu.h','linux/key-type.h',
