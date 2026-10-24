@@ -21,7 +21,9 @@ jobs:
       CONFIG_ENV: config/chopin.env
       KBUILD_BUILD_USER: xiaomo
       KBUILD_BUILD_HOST: chopin-builder
-      BASELINE_REFERENCE_RUN: "40131456192"
+      BASELINE_REFERENCE_RUN: ""
+      CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
+      CCACHE_MAXSIZE: 512M
     steps:
       - name: Checkout isolated chopin branch
         uses: actions/checkout@v4
@@ -36,6 +38,13 @@ jobs:
             binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross
           mkdir -p "$WORKSPACE"
           mkdir -p build-logs release-evidence
+
+      - name: Restore bounded compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: kernel_workspace/.ccache
+          key: chopin-clang13-0647a49-v1-${{ github.run_id }}
+          restore-keys: chopin-clang13-0647a49-v1-
 
       - name: Fetch existing non-GKI build framework (pinned)
         run: |
@@ -60,6 +69,8 @@ jobs:
           actual="$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
           echo "Vendor kernel SHA: $actual"
           test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
+          python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
 
       - name: Compile unmodified vendor baseline before root integration
         working-directory: builder
@@ -208,6 +219,13 @@ jobs:
             build-logs/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Save bounded compiler cache including useful failed-build objects
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: kernel_workspace/.ccache
+          key: chopin-clang13-0647a49-v1-${{ github.run_id }}
 
       - name: Collect diagnostic configuration and patches even after a failure
         if: always()
