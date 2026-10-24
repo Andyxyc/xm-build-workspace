@@ -26,6 +26,10 @@ jobs:
           flags="-Ikp/kernel/include -Ikp/kernel/patch/include -Ikp/kernel/linux/include -Ikp/kernel/linux/arch/arm64/include -Ikp/kernel/linux/tools/arch/arm64/include"
           aarch64-linux-gnu-gcc -nostdinc -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -mgeneral-regs-only $flags -O2 -c chopin/tools/kpm_probe_module.c -o tools-out/kpm_probe_module.o
           aarch64-linux-gnu-ld -r tools-out/kpm_probe_module.o -o tools-out/chopin_kpm_probe.kpm
+          git clone --depth=1 --branch builtin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git sukisu
+          test "$(git -C sukisu rev-parse HEAD)" = ce75122bec7423e0f1fa06e3e9a174085c5231ab
+          aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -Werror -Isukisu/kernel/include chopin/tools/ksu_kpm_probe.c -o tools-out/ksu_kpm_probe
+          cp chopin/tools/ksu_kpm_probe.c tools-out/
           cp kp/LICENSE tools-out/KernelPatch-LICENSE
           cp susfs/LICENSE tools-out/SUSFS-LICENSE
           cp chopin/tools/kpm_probe_module.c tools-out/
