@@ -1,0 +1,117 @@
+# Xiaomi Mi 11 (venus), Android 16 HyperOS 3 experimental kernel build.
+# Source: palazik/android_kernel_xiaomi_sm8350-miui, branch hyper-17.
+# The output is a build candidate, NOT a device-verified ROM-compatible kernel.
+name: Venus A16 HyperOS3 ReSukiSU SuSFS candidate
+on:
+  push:
+    branches:
+      - venus-hyperos3-a16-resukisu-20261024
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-venus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout MIUI-based SM8350 kernel
+        uses: actions/checkout@v4
+        with:
+          repository: palazik/android_kernel_xiaomi_sm8350-miui
+          ref: hyper-17
+          fetch-depth: 1
+      - name: Record provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git rev-parse HEAD | tee SOURCE_COMMIT.txt
+          test -f arch/arm64/configs/vendor/venus_QGKI.config
+          grep -q '^CONFIG_BOARD_XIAOMI_VENUS=y' arch/arm64/configs/vendor/venus_QGKI.config
+          test -f scripts/ak3/anykernel.sh
+          test -f build.sh
+      - name: Install build requirements
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld llvm git make gcc flex bison bc libssl-dev libelf-dev ccache libncurses-dev cmake python3 python-is-python3 cpio curl patch rsync zip unzip
+      - name: Integrate ReSukiSU
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git clone --depth=1 --branch main https://github.com/ReSukiSU/ReSukiSU.git ReSukiSU
+          git -C ReSukiSU rev-parse HEAD | tee ROOT_COMMIT.txt
+          bash ReSukiSU/kernel/setup.sh "$PWD"
+          test -d drivers || exit 1
+      - name: Integrate SuSFS 2.2.0 for 5.4 with inline hooks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git clone --depth=1 https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd.git ../jacka_repo
+          git -C ../jacka_repo rev-parse HEAD | tee SUSFS_PATCH_COMMIT.txt
+          PATCH=../jacka_repo/Patches/Patch/susfs_patch_to_5.4.patch
+          test -s "$PATCH"
+          if [ ! -f include/linux/susfs.h ]; then
+            patch --dry-run --batch -p1 -F 0 < "$PATCH"
+            patch --batch -p1 -F 0 < "$PATCH"
+          fi
+          test -f include/linux/susfs.h
+          bash ../jacka_repo/Patches/susfs_inline_hook_patches.sh
+          if find . -name '*.rej' -print -quit | grep -q .; then
+            echo 'Rejected patch hunks detected'; exit 1
+          fi
+      - name: Configure venus and preserve base hardware settings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CONF=arch/arm64/configs/vendor/venus_QGKI.config
+          grep -q '^CONFIG_BOARD_XIAOMI_VENUS=y' "$CONF"
+          cat >> "$CONF" <<'FLAGS'
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          FLAGS
+          sed -i 's/do.devicecheck=0/do.devicecheck=1/' scripts/ak3/anykernel.sh
+          grep -q 'do.devicecheck=1' scripts/ak3/anykernel.sh
+          grep -q 'device.name1=DEVICE_PLACEHOLDER' scripts/ak3/anykernel.sh
+          sed -i 's/^THREAD=$(nproc --all);/THREAD=2;/' build.sh
+          grep -q '^THREAD=2;' build.sh
+      - name: Compile venus kernel and package AnyKernel3
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export LOCALVERSION=-venus-A16-HyperOS3-ReSukiSU-test
+          chmod +x ./build.sh
+          bash ./build.sh all venus 2>&1 | tee build.log
+          test -s ../out/arch/arm64/boot/Image
+          AK3="$(find ../out/anykernel -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$AK3" && test -s "$AK3"
+          unzip -t "$AK3"
+          unzip -Z1 "$AK3" | grep -qx Image
+          unzip -p "$AK3" anykernel.sh | grep -q 'device.name1=venus'
+          unzip -p "$AK3" anykernel.sh | grep -q 'do.devicecheck=1'
+          unzip -p "$AK3" anykernel.sh | grep -q '^BLOCK=boot;'
+          cp "$AK3" ./venus-HyperOS3-A16-ReSukiSU-SuSFS-AK3-CANDIDATE.zip
+          sha256sum ./venus-HyperOS3-A16-ReSukiSU-SuSFS-AK3-CANDIDATE.zip | tee SHA256SUMS.txt
+      - name: Upload build result and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Venus-A16-ReSukiSU-SuSFS-build
+          if-no-files-found: ignore
+          retention-days: 30
+          path: |
+            venus-HyperOS3-A16-ReSukiSU-SuSFS-AK3-CANDIDATE.zip
+            build.log
+            SOURCE_COMMIT.txt
+            ROOT_COMMIT.txt
+            SUSFS_PATCH_COMMIT.txt
+            SHA256SUMS.txt
