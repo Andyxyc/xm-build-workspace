@@ -34,12 +34,37 @@ if "ksu_handle_execveat(" not in segment:
     block = """
 #ifdef CONFIG_KSU
     extern int ksu_handle_execveat(int *, struct filename **, void *, void *, int *);
-    ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+    if (!IS_ERR(filename))\n        ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
 #endif
 """
     s = s[:i] + segment.replace(anchor, anchor+block,1) + s[end:]
     f.write_text(s)
 print("patched/verified: execveat")
+
+# SukiSU builtin has a runtime init.rc proxy that must be reached through vfs_read
+# on manually hooked Non-GKI 4.14. Keep a strict per-function insertion point.
+f = kernel / "fs/read_write.c"
+src = f.read_text()
+marker = "ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)"
+assert src.count(marker) == 1, "vendor 4.14 vfs_read prototype changed"
+start = src.index(marker)
+end = src.index("EXPORT_SYMBOL(vfs_read);", start)
+section = src[start:end]
+if "ksu_handle_vfs_read(" not in section:
+    anchor = "\tssize_t ret;\n"
+    assert section.count(anchor) == 1, "vendor vfs_read variable anchor changed"
+    hook = """
+#ifdef CONFIG_KSU
+    extern bool ksu_vfs_read_hook __read_mostly;
+    extern int ksu_handle_vfs_read(struct file **, char __user **, size_t *, loff_t **);
+    if (unlikely(ksu_vfs_read_hook))
+        ksu_handle_vfs_read(&file, &buf, &count, &pos);
+#endif
+"""
+    section = section.replace(anchor, anchor + hook, 1)
+    src = src[:start] + section + src[end:]
+    f.write_text(src)
+print("patched/verified: SukiSU init.rc read proxy")
 
 # SukiSU builtin with SUSFS expects struct filename **, NOT
 # const char __user **. Interpose before the internal filename_lookup().
