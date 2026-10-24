@@ -2,7 +2,7 @@ name: Chopin native validation tools
 on:
   push:
     branches: [chopin-sukisu-20261025]
-    paths: ['chopin/tools/**', '.github/workflows/chopin-tools.yml']
+    paths: ['chopin/tools/**', '!chopin/tools/probe-app/**', '!chopin/tools/diagnose_mm_context.py', '.github/workflows/chopin-tools.yml']
   workflow_dispatch:
 permissions:
   contents: read

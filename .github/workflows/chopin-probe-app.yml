@@ -1,0 +1,23 @@
+name: Chopin unprivileged runtime probe APK
+on:
+  push:
+    branches: [chopin-sukisu-20261025]
+    paths: ['chopin/tools/probe-app/**', '.github/workflows/chopin-probe-app.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify APK with existing Android SDK
+        run: python3 chopin/tools/probe-app/build.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-unprivileged-probe-apk
+          path: probe-app-out/*
+          if-no-files-found: error
+          retention-days: 14
