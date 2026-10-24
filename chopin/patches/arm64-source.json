@@ -1,0 +1,10 @@
+{
+  "source": "https://github.com/MiCode/Xiaomi_Kernel_OpenSource",
+  "commit": "f4e416aea06c81f1e661d0524c0554f0538d11cb",
+  "branch": "camellian-t-oss",
+  "license": "GPL-2.0",
+  "scope": "Common ARM64 CPU BHB/1188873 implementation only. No device trees or camera/platform drivers.",
+  "excluded": "Unrelated HWCONF/camera Kconfig and Makefile differences deliberately retained from original chopin source.",
+  "patch_sha256": "5ee770ee97e9269825eb72a3573f5b3afd59a119ae5881c868084261c14cd045",
+  "acceptance": "Source application checked. Real compilation and vendor module CRC comparison remain mandatory."
+}

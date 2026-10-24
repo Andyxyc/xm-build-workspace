@@ -22,7 +22,7 @@ jobs:
       CONFIG_ENV: config/chopin.env
       KBUILD_BUILD_USER: xiaomo
       KBUILD_BUILD_HOST: chopin-builder
-      BASELINE_REFERENCE_RUN: "40132880594"
+      BASELINE_REFERENCE_RUN: ""
       CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
       CCACHE_MAXSIZE: 512M
     steps:
@@ -70,10 +70,11 @@ jobs:
           actual="$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
           echo "Vendor kernel SHA: $actual"
           test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
+          python3 ../chopin/port_cpu_stock.py "$WORKSPACE/android-kernel"
           python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
           cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
 
-      - name: Compile unmodified vendor baseline before root integration
+      - name: Compile stock CPU/profile baseline before root integration
         working-directory: builder
         run: |
           set -o pipefail
