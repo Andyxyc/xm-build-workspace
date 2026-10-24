@@ -57,8 +57,14 @@ jobs:
           fi
           test -f include/linux/susfs.h
           bash ../jacka_repo/Patches/susfs_inline_hook_patches.sh
-          if find . -name '*.rej' -print -quit | grep -q .; then
-            echo 'Rejected patch hunks detected'; exit 1
+          find . -name '*.rej' -print | tee REJECT_PATHS.txt
+          if [ -s REJECT_PATHS.txt ]; then
+            echo 'Rejected patch hunks detected:'
+            while IFS= read -r reject; do
+              echo "---- $reject ----"
+              sed -n '1,45p' "$reject"
+            done < REJECT_PATHS.txt
+            exit 1
           fi
       - name: Configure venus and preserve base hardware settings
         shell: bash
@@ -115,3 +121,4 @@ jobs:
             ROOT_COMMIT.txt
             SUSFS_PATCH_COMMIT.txt
             SHA256SUMS.txt
+            REJECT_PATHS.txt
