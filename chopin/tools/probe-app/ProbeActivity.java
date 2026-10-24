@@ -86,7 +86,8 @@ public final class ProbeActivity extends Activity {
         for(Size s:sizes)if(s.getWidth()<=1920&&s.getHeight()<=1920&&(long)s.getWidth()*s.getHeight()>(long)size.getWidth()*size.getHeight())size=s;
         thread=new HandlerThread("ChopinProbe");thread.start();Handler handler=new Handler(thread.getLooper());
         reader=ImageReader.newInstance(size.getWidth(),size.getHeight(),ImageFormat.JPEG,2);
-        reader.setOnImageAvailableListener(r->{
+        reader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
+            @Override public void onImageAvailable(ImageReader r) {
             try(Image image=r.acquireLatestImage()) {
                 if(image==null||done.get())return;
                 ByteBuffer buf=image.getPlanes()[0].getBuffer();byte[] bytes=new byte[buf.remaining()];buf.get(bytes);
@@ -96,8 +97,11 @@ public final class ProbeActivity extends Activity {
                 if(options.outWidth<=0||options.outHeight<=0)throw new IOException("JPEG decode failed");
                 finishReport(null);
             }catch(Exception e){finishReport(e);}
+            }
         },handler);
-        handler.postDelayed(()->finishReport(new IOException("Camera capture timeout")),30000);
+        handler.postDelayed(new Runnable() {
+            @Override public void run(){finishReport(new IOException("Camera capture timeout"));}
+        },30000);
         manager.openCamera(id,new CameraDevice.StateCallback(){
             @Override public void onOpened(CameraDevice d){
                 if(done.get()){d.close();return;}camera=d;
@@ -124,8 +128,8 @@ public final class ProbeActivity extends Activity {
             report.put("limitation","An observation only; no automatic claim of full camera, SUSFS or power acceptance");
             if(error!=null)report.put("error",error.toString());
             String text=report.toString(2);write(new File(getFilesDir(),"report-"+mode+"-"+System.currentTimeMillis()+".json"),text.getBytes("UTF-8"));
-            runOnUiThread(()->view.setText(text));
-        }catch(Exception e){runOnUiThread(()->view.setText("无法保存测试记录："+e));}
+            runOnUiThread(new Runnable(){@Override public void run(){view.setText(text);}});
+        }catch(Exception e){runOnUiThread(new Runnable(){@Override public void run(){view.setText("无法保存测试记录："+e);}});}
         finally {if(camera!=null)camera.close();if(reader!=null)reader.close();if(thread!=null)thread.quitSafely();}
     }
 }
