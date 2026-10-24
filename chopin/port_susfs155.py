@@ -15,6 +15,28 @@ def edit(file,old,new):
 
 assert '#define SUSFS_VERSION "v1.5.5"' in (root/'include/linux/susfs.h').read_text()
 assert 'VERSION = 4\nPATCHLEVEL = 14\n' in (root/'Makefile').read_text()
+
+# Reuse the existing bounded no-fault string reader. The pinned builder also
+# dereferences USER_ARG_NULL unconditionally, but the SUSFS branch takes a pointer.
+f=ksu/'sulog/event.c'
+edit(f,'            strncpy_from_user_nofault(arg,',
+     '            ksu_strncpy_from_user_nofault(arg,')
+edit(f,'#define USER_ARG_NULL (*user_arg_null_ptr())',
+     '#ifdef CONFIG_KSU_SUSFS\n#define USER_ARG_NULL user_arg_null_ptr()\n'
+     '#else\n#define USER_ARG_NULL (*user_arg_null_ptr())\n#endif')
+
+f=ksu/'kernel_compat.h';s=f.read_text();anchor='#ifndef __KSU_H_KERNEL_COMPAT\n#define __KSU_H_KERNEL_COMPAT\n'
+assert s.count(anchor)==1
+s=s.replace(anchor,anchor+'''
+static inline void *chopin_kvcalloc(size_t count, size_t size, gfp_t flags)
+{
+    if (size && count > SIZE_MAX / size)
+        return NULL;
+    return kvzalloc(count * size, flags);
+}
+''',1);f.write_text(s)
+f=ksu/'supercall/dispatch.c';s=f.read_text();assert s.count('kvcalloc(')==2
+f.write_text(s.replace('kvcalloc(', 'chopin_kvcalloc('))
 patch=(susfs/'kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch').read_text()
 section=patch[:patch.index('diff --git a/kernel/Makefile')]
 legacy='\n'.join(l[1:] for l in section.splitlines() if l.startswith('+') and not l.startswith('+++')).strip()+'\n'
@@ -166,4 +188,38 @@ for func,fields in checks.items():
         guard+='\tif (info.mnt_mode != TRY_UMOUNT_DEFAULT && info.mnt_mode != TRY_UMOUNT_DETACH)\n\t\treturn -EINVAL;\n'
     part=part[:endcopy]+guard+part[endcopy:];s=s[:start]+part+s[end:]
 f.write_text(s)
+
+# This legacy setter originally copied faultable user memory under a spinlock.
+# Serialize only the published string; the copy and allocation can sleep safely.
+f=root/'fs/susfs.c';s=f.read_text()
+start=s.index('static char *fake_cmdline_or_bootconfig = NULL;')
+end=s.index('\n#endif',s.index('int susfs_spoof_cmdline_or_bootconfig(',start))
+s=s[:start]+'''static char *fake_cmdline_or_bootconfig;
+static DEFINE_MUTEX(susfs_cmdline_lock);
+int susfs_set_cmdline_or_bootconfig(char __user *user_string)
+{
+    char *replacement, *previous;
+    replacement = strndup_user(user_string, SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE);
+    if (IS_ERR(replacement))
+        return PTR_ERR(replacement);
+    mutex_lock(&susfs_cmdline_lock);
+    previous = fake_cmdline_or_bootconfig;
+    fake_cmdline_or_bootconfig = replacement;
+    mutex_unlock(&susfs_cmdline_lock);
+    kfree(previous);
+    return 0;
+}
+
+int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m)
+{
+    int ret = 1;
+    mutex_lock(&susfs_cmdline_lock);
+    if (fake_cmdline_or_bootconfig) {
+        seq_puts(m, fake_cmdline_or_bootconfig);
+        ret = 0;
+    }
+    mutex_unlock(&susfs_cmdline_lock);
+    return ret;
+}
+'''+s[end:];f.write_text(s)
 print('Applied native SUSFS 1.5.5 ABI, real task/umount policy, fd error propagation and bounded strings')

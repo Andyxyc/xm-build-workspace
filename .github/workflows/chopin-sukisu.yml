@@ -21,6 +21,7 @@ jobs:
       CONFIG_ENV: config/chopin.env
       KBUILD_BUILD_USER: xiaomo
       KBUILD_BUILD_HOST: chopin-builder
+      BASELINE_REFERENCE_RUN: "40131456192"
     steps:
       - name: Checkout isolated chopin branch
         uses: actions/checkout@v4
@@ -64,6 +65,10 @@ jobs:
         working-directory: builder
         run: |
           set -o pipefail
+          if test -n "$BASELINE_REFERENCE_RUN" && test "$BASELINE_REFERENCE_RUN" != "$GITHUB_RUN_ID"; then
+            python3 ../chopin/wait_baseline.py "$BASELINE_REFERENCE_RUN"
+            exit 0
+          fi
           /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/vendor-baseline.log"
           cp "$WORKSPACE/android-kernel/out/.config" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.config"
           cp "$WORKSPACE/android-kernel/out/Module.symvers" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.Module.symvers"
@@ -149,6 +154,9 @@ jobs:
         working-directory: builder
         run: |
           set -o pipefail
+          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git "$WORKSPACE/SukiSU_patch"
+          test "$(git -C "$WORKSPACE/SukiSU_patch" rev-parse HEAD)" = 7c6289c95bdc786119b03d150236853b7b4872ca
+          echo "489e9daa31d468659e4593b11a22b9ea2ac7edb268b2e965610f0d28d4d30cb1  $WORKSPACE/SukiSU_patch/kpm/patch_linux" | sha256sum -c -
           cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"
           bash scripts/build.sh check 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/kpm-postprocess.log"
           ! cmp -s "$WORKSPACE/Image.before-kpm" "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
