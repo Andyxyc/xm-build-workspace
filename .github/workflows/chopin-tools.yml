@@ -1,0 +1,39 @@
+name: Chopin native validation tools
+on:
+  push:
+    branches: [chopin-sukisu-20261025]
+    paths: ['chopin/tools/**', '.github/workflows/chopin-tools.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native ARM64 cross compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+      - name: Build real SUSFS client and harmless KPM probe
+        run: |
+          git clone --depth=1 --branch kernel-4.14 https://github.com/Star-Seven/susfs4ksu.git susfs
+          test "$(git -C susfs rev-parse HEAD)" = d18028f2a8f3ba16a907bff0edc16376cf38e2bf
+          python3 chopin/tools/build_susfs_client.py susfs tools-out
+          git clone --depth=1 https://github.com/bmax121/KernelPatch.git kp
+          test "$(git -C kp rev-parse HEAD)" = 052c73f93dbb84861218086e60a9962c48ff3f7f
+          flags="-Ikp/kernel/include -Ikp/kernel/patch/include -Ikp/kernel/linux/include -Ikp/kernel/linux/arch/arm64/include -Ikp/kernel/linux/tools/arch/arm64/include"
+          aarch64-linux-gnu-gcc -nostdinc -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -mgeneral-regs-only $flags -O2 -c chopin/tools/kpm_probe_module.c -o tools-out/kpm_probe_module.o
+          aarch64-linux-gnu-ld -r tools-out/kpm_probe_module.o -o tools-out/chopin_kpm_probe.kpm
+          cp kp/LICENSE tools-out/KernelPatch-LICENSE
+          cp susfs/LICENSE tools-out/SUSFS-LICENSE
+          cp chopin/tools/kpm_probe_module.c tools-out/
+          sha256sum tools-out/* > tools-out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-native-validation-tools
+          path: tools-out/*
+          if-no-files-found: error
+          retention-days: 14

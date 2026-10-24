@@ -21,7 +21,7 @@ jobs:
       CONFIG_ENV: config/chopin.env
       KBUILD_BUILD_USER: xiaomo
       KBUILD_BUILD_HOST: chopin-builder
-      BASELINE_REFERENCE_RUN: ""
+      BASELINE_REFERENCE_RUN: "40132880594"
       CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
       CCACHE_MAXSIZE: 512M
     steps:
@@ -121,6 +121,8 @@ jobs:
           python3 ../chopin/port_414_compat.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_414_optional.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_susfs155.py "$WORKSPACE/android-kernel" "$WORKSPACE/susfs4ksu"
+          python3 ../chopin/port_kpm_io.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/preserve_vendor_abi.py "$WORKSPACE/android-kernel"
           grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
           grep -n "IN_ALL_EVENTS" "$WORKSPACE/android-kernel/fs/notify/fdinfo.c"
           # Normalize whitespace on SUSFS patch-added lines ONLY; do not alter vendor files globally.
@@ -154,6 +156,7 @@ jobs:
           set -o pipefail
           bash scripts/build.sh defconfig
           /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/ported-kernel.log"
+          echo "$GITHUB_SHA" > "$GITHUB_WORKSPACE/build-logs/root-build-complete.txt"
 
       - name: Check vendor camera and root features
         run: |
@@ -177,16 +180,7 @@ jobs:
 
       - name: Build matching native ARM64 SUSFS 1.5.5 client
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          p=Path(os.environ['WORKSPACE'])/'susfs4ksu/ksu_susfs/jni/main.c'
-          s=p.read_text().replace('#include <android/log.h>', '/* No Android log API is used by this CLI. */')
-          assert s.count('bool                    is_statically;') == 1
-          s=s.replace('bool                    is_statically;', 'int                     is_statically;',1)
-          Path('release-evidence/ksu_susfs_155.c').write_text(s)
-          PY
-          aarch64-linux-gnu-gcc -O2 -static release-evidence/ksu_susfs_155.c -o release-evidence/ksu_susfs_155
+          python3 chopin/tools/build_susfs_client.py "$WORKSPACE/susfs4ksu" release-evidence
           aarch64-linux-gnu-readelf -h release-evidence/ksu_susfs_155 > release-evidence/ksu_susfs_155.elf-header.txt
 
       - name: Save evidence of source and kernel version
@@ -199,6 +193,7 @@ jobs:
           git -C "$WORKSPACE/android-kernel" diff --binary > release-evidence/vendor-changes.patch
           git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > release-evidence/SukiSU-changes.patch
           cp "$WORKSPACE/android-kernel/KernelSU/kernel/chopin_susfs155_prctl.c" release-evidence/
+          cp "$WORKSPACE/android-kernel/include/linux/chopin_susfs_state.h" release-evidence/
           "$WORKSPACE/clang/bin/clang" --version > release-evidence/clang-version.txt
           git -C "$WORKSPACE/clang" rev-parse HEAD > release-evidence/clang-commit.txt
           {
@@ -241,6 +236,10 @@ jobs:
           fi
           if test -d "$WORKSPACE/android-kernel/KernelSU/.git"; then
             git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > build-logs/diagnostics/SukiSU.patch
+          fi
+          if test -f build-logs/root-build-complete.txt && grep -qx "$GITHUB_SHA" build-logs/root-build-complete.txt; then
+            cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" build-logs/diagnostics/Image-compiled-not-flash-validated
+            cp "$WORKSPACE/android-kernel/out/System.map" build-logs/diagnostics/System.map
           fi
 
       - name: Upload complete diagnostics

@@ -4,7 +4,7 @@ import json,os,sys,time,urllib.request
 from pathlib import Path
 
 run_id=int(sys.argv[1])
-assert run_id==40131456192,'Only the audited baseline source/compiler profile is accepted'
+assert run_id==40132880594,'Only the audited stock-aligned baseline source/compiler profile is accepted'
 url=f'https://api.github.com/repos/Andyxyc/xm-build-workspace/actions/runs/{run_id}/jobs'
 deadline=time.monotonic()+3600
 last=None
@@ -25,7 +25,7 @@ while time.monotonic()<deadline:
         assert step['conclusion']=='success',step
         evidence={'run_id':run_id,'job_id':job['id'],'step':step,
                   'vendor':'0647a49c9557faa92b90c4ae188587787226be9e',
-                  'profile':'Proton Clang 13; chopin_user_defconfig',
+                  'profile':'Proton Clang 13; chopin_user_defconfig plus stock-profile.json from 8284e43',
                   'url':f'https://github.com/Andyxyc/xm-build-workspace/actions/runs/{run_id}'}
         out=Path(os.environ['GITHUB_WORKSPACE'])/'release-evidence/vendor-baseline-reference.json'
         out.write_text(json.dumps(evidence,indent=2))
