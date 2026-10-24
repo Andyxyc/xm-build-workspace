@@ -46,6 +46,27 @@ jobs:
             exit 51
           fi
           grep -q 'Safety gates require normal Python mode' tools-out/optimized-installer-rejection.txt
+      - name: Exercise readback checks against ordinary files only
+        run: |
+          set -eu
+          fixture=$(mktemp -d "$RUNNER_TEMP/chopin-readback.XXXXXX")
+          export AKHOME="$fixture"
+          export BLOCK="$fixture/ordinary-fixture.bin"
+          printf 'Chopin readback fixture\n' > "$AKHOME/boot-new.img"
+          cp "$AKHOME/boot-new.img" "$BLOCK"
+          truncate -s 134217728 "$BLOCK"
+          abort() { echo "ABORT: $*"; exit 23; }
+          ui_print() { echo "$*"; }
+          . chopin/tools/installer/ak3-preflight.sh
+          CHOPIN_NEW_IMAGE_SHA=$(chopin_sha "$AKHOME/boot-new.img")
+          chopin_postflash_verify
+          echo "PASS: matching ordinary padded file; no real partition" > tools-out/readback-fixture-results.txt
+          printf X | dd of="$BLOCK" bs=1 seek=32 count=1 conv=notrunc status=none
+          if (chopin_postflash_verify); then
+            echo "::error::Corrupt ordinary fixture was accepted"
+            exit 52
+          fi
+          echo "PASS: corrupt ordinary file rejected; no real partition" >> tools-out/readback-fixture-results.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

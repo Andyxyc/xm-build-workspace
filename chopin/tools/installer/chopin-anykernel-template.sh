@@ -23,6 +23,7 @@ NO_MAGISK_CHECK=1;
 [ "$(getprop ro.product.device)" = chopin ] || abort "Device is not chopin";
 [ "$(getprop ro.build.version.incremental)" = V14.0.8.0.TKPCNXM ] || abort "ROM baseline mismatch";
 case "$SLOT" in _a|_b) ;; *) abort "Unknown active slot";; esac;
+[ "$SLOT" = _a ] || abort "This test package requires the independently backed-up slot a";
 [ "$BLOCK" = "/dev/block/by-name/boot$SLOT" ] || abort "Unexpected boot target";
 [ "$(blockdev --getsize64 "$BLOCK")" = 134217728 ] || abort "Unexpected boot size";
 
