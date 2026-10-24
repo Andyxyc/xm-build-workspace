@@ -93,6 +93,7 @@ jobs:
           test "$actual" = "d18028f2a8f3ba16a907bff0edc16376cf38e2bf"
           python3 ../chopin/port_hooks.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_414_compat.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_414_optional.py "$WORKSPACE/android-kernel"
           grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
           grep -n "IN_ALL_EVENTS" "$WORKSPACE/android-kernel/fs/notify/fdinfo.c"
           # Normalize whitespace on SUSFS patch-added lines ONLY; do not alter vendor files globally.
