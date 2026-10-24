@@ -99,14 +99,14 @@ jobs:
           root=Path(os.environ["WORKSPACE"])/"android-kernel"
           p=subprocess.run(["git","-C",str(root),"diff","--check"],capture_output=True,text=True)
           for row in p.stdout.splitlines():
-              m=re.match(r"^(.+?):(\\d+): trailing whitespace\\.$",row)
+              m=re.match(r"^(.+?):(\d+): trailing whitespace\.$",row)
               if not m:
                   raise SystemExit("Unhandled diff check: "+row)
               name,num=m.group(1),int(m.group(2))
               file=root/name
               lines=file.read_text().splitlines(keepends=True)
               original=lines[num-1]
-              clean=original.rstrip(" \\t\\r\\n")+"\\n"
+              clean=original.rstrip(" \t\r\n")+"\n"
               assert clean!=original
               lines[num-1]=clean
               file.write_text("".join(lines))
