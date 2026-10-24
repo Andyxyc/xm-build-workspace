@@ -10,29 +10,40 @@ out=Path(os.environ['GITHUB_WORKSPACE'])/'mm-diagnostics';out.mkdir(exist_ok=Tru
 env=os.environ.copy();env['PATH']=env['CLANG_PATH']+':'+env['PATH'];env.pop('DISABLE_LTO',None)
 args=['make','-j2','O=out','ARCH=arm64','CC=clang']
 for key in ['CUSTOM_CMDS','EXTRA_CMDS','GCC_64','GCC_32']:args+=shlex.split(env.get(key,''))
-def run(target,label):
+def run(target,label,extra=None):
     with (out/(label+'.log')).open('w') as log:
-        p=subprocess.run(args+[target],cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT)
+        p=subprocess.run(args+(extra or [])+[target],cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT)
     return p.returncode
 assert run('chopin_user_defconfig','configure')==0
 if env.get('MM_DIAG_CONTROLS_ONLY')=='1':
-    rows=[]
+    rows=[];failed=False
     controls=[('mm/backing-dev','bdi_register_va','5d89a086'),
               ('kernel/sched/core','wake_up_process','609fadad'),
               ('fs/inode','iget_locked','5eab1b42'),
               ('fs/file_table','alloc_file','dc878e5d'),
               ('drivers/base/core','device_add','74d18288')]
     for unit,symbol,expected in controls:
-        label=unit.replace('/','_');code=run(unit+'.o',label)
-        assert code==0,(unit,code)
+        label=unit.replace('/','_');extra=[]
+        if unit.startswith('kernel/'):
+            # A direct nested .o target skips kernel/Makefile's inherited paths.
+            # Restore its actual source-defined flags rather than hiding errors.
+            flags=re.findall(r'^subdir-ccflags-y\s*\+=\s*(.+)$',(root/'kernel/Makefile').read_text(),re.M)
+            assert len(flags)==5,flags
+            extra=['KCFLAGS='+' '.join(flags).replace('$(srctree)',str(root))]
+        code=run(unit+'.o',label,extra)
+        if code!=0:
+            failed=True;rows.append(dict(unit=unit,exit_code=code,status='COMPILE_FAILED'))
+            (out/'matching-controls.json').write_text(json.dumps(rows,indent=2));continue
         text=subprocess.check_output(['aarch64-linux-gnu-nm',str(root/'out'/(unit+'.o'))],text=True)
         values={n:v for v,n in re.findall(r'^([0-9a-f]+)\s+[Aa]\s+__crc_(\w+)$',text,re.M)}
-        assert int(values[symbol],16)==int(expected,16),(unit,symbol,values[symbol],expected)
+        match=int(values[symbol],16)==int(expected,16)
+        failed=failed or not match
         (out/(label+'.symtypes')).write_bytes((root/'out'/(unit+'.symtypes')).read_bytes())
-        row=dict(unit=unit,symbol=symbol,actual_crc=values[symbol],stock_crc=expected);rows.append(row);print(json.dumps(row),flush=True)
+        row=dict(unit=unit,symbol=symbol,actual_crc=values[symbol],stock_crc=expected,match=match);rows.append(row);print(json.dumps(row),flush=True)
+        (out/'matching-controls.json').write_text(json.dumps(rows,indent=2))
     (out/'matching-controls.json').write_text(json.dumps(rows,indent=2))
     (out/'status.txt').write_text('Read-only ABI diagnosis: stock-matching controls. No Image built.\n')
-    raise SystemExit(0)
+    raise SystemExit(int(failed))
 headers=['linux/netdevice.h','linux/fs_struct.h','linux/fdtable.h','linux/module.h',
          'linux/exportfs.h','linux/fscrypt.h','linux/pipe_fs_i.h','linux/binfmts.h',
          'linux/blk-mq.h','linux/device.h','linux/iommu.h','linux/key-type.h',

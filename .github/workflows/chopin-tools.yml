@@ -36,6 +36,16 @@ jobs:
           sha256sum tools-out/* > tools-out/SHA256SUMS.txt
       - name: Diagnose actual vendor symbol type generation
         run: python3 chopin/tools/diagnose_refcnt_abi.py
+      - name: Check installer source without constructing an ungated ZIP
+        run: |
+          python3 -m py_compile chopin/tools/installer/*.py
+          bash -n chopin/tools/installer/ak3-preflight.sh
+          bash -n chopin/tools/installer/chopin-anykernel-template.sh
+          if python3 -O chopin/tools/installer/build_gated_ak3.py > tools-out/optimized-installer-rejection.txt 2>&1; then
+            echo "::error::Optimized Python must not disable installer assertions"
+            exit 51
+          fi
+          grep -q 'Safety gates require normal Python mode' tools-out/optimized-installer-rejection.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
