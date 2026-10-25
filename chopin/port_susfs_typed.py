@@ -29,10 +29,22 @@ for function, structure in operations.items():
     end = source.index('\n}', start) + 2
     part = source[start:end]
     copy = '\tif (copy_from_user(&info, user_info, sizeof(info))) {\n\t\tSUSFS_LOGE("failed copying from userspace\\n");\n\t\treturn 1;\n\t}'
+    if function == 'susfs_set_uname':
+        copy = copy.replace('sizeof(info)', 'sizeof(struct st_susfs_uname)').replace('userspace\\n', 'userspace.\\n')
     assert part.count(copy) == 1, function
     extra = ', int uid_scheme' if function == 'susfs_add_open_redirect' else ''
     helper = part.replace(signature, f'int {function}_kern(const struct {structure} *snapshot{extra}) {{', 1)
     helper = helper.replace(copy, '\tinfo = *snapshot;', 1)
+    if function in ['susfs_add_sus_path', 'susfs_add_sus_kstat', 'susfs_add_open_redirect']:
+        # Validate/allocate/mark first; replace the old entry only at publication.
+        lock_start = helper.index('\tspin_lock(&susfs_spin_lock);')
+        lock_end = helper.index('\tspin_unlock(&susfs_spin_lock);', lock_start) + len('\tspin_unlock(&susfs_spin_lock);')
+        retire = helper[lock_start:lock_end]
+        helper = helper[:lock_start] + helper[lock_end:]
+        publish = helper.index('\tspin_lock(&susfs_spin_lock);')
+        inner = retire[len('\tspin_lock(&susfs_spin_lock);'): -len('\tspin_unlock(&susfs_spin_lock);')]
+        at = publish + len('\tspin_lock(&susfs_spin_lock);')
+        helper = helper[:at] + inner + helper[at:]
     if function == 'susfs_add_open_redirect':
         assert helper.count('new_entry->target_ino = info.target_ino;') == 1
         helper = helper.replace('new_entry->target_ino = info.target_ino;',
@@ -213,12 +225,13 @@ assert s.count(anchor) == 1
 f.write_text(s.replace(anchor, anchor + '\n#include "chopin_susfs_typed_reboot.c"', 1))
 f = root / 'kernel/reboot.c'
 s = f.read_text()
-anchor = 'extern int ksu_handle_sys_reboot'
+anchor = 'SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,'
+assert s.count(anchor) == 1
 at = s.index(anchor)
-s = s[:at] + 'extern int chopin_susfs_typed_reboot(unsigned int cmd, void __user *arg);\n' + s[at:]
+s = s[:at] + '#if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS)\nextern int chopin_susfs_typed_reboot(unsigned int cmd, void __user *arg);\n#endif\n' + s[at:]
 anchor = '\tif ((u32)magic1 == 0xDEADBEEFu && (u32)magic2 == 0xCAFEBABEu)'
 assert s.count(anchor) == 1
-s = s.replace(anchor, '\tif ((u32)magic1 == 0xDEADBEEFu && (u32)magic2 == 0xFAFAFAFAu)\n'
-              '\t\treturn chopin_susfs_typed_reboot(cmd, arg);\n' + anchor, 1)
+s = s.replace(anchor, '#ifdef CONFIG_KSU_SUSFS\n\tif ((u32)magic1 == 0xDEADBEEFu && (u32)magic2 == 0xFAFAFAFAu)\n'
+              '\t\treturn chopin_susfs_typed_reboot(cmd, arg);\n#endif\n' + anchor, 1)
 f.write_text(s)
 print('Shared v1.5.5 core snapshots and distinct typed reboot transport integrated')

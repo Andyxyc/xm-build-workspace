@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: GPL-2.0 */
 /* Fixed-width ABI from official SukiSU v4.2.1-r2 ksud susfs/abi/types.rs. */
 #ifndef CHOPIN_SUSFS_TYPED_ABI_H
 #define CHOPIN_SUSFS_TYPED_ABI_H
