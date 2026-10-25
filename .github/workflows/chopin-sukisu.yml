@@ -72,6 +72,8 @@ jobs:
           test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
           python3 ../chopin/port_cpu_stock.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_anon_vma_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/restore_module_validation.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/module-validation-restoration.json" "$GITHUB_WORKSPACE/release-evidence/"
           python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
           cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
 
@@ -86,9 +88,11 @@ jobs:
           /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/vendor-baseline.log"
           cp "$WORKSPACE/android-kernel/out/.config" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.config"
           cp "$WORKSPACE/android-kernel/out/Module.symvers" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.Module.symvers"
+          cp "$WORKSPACE/android-kernel/out/System.map" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.System.map"
           sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" > "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-image.sha256"
           cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/release-evidence/Image.vendor-baseline"
           python3 ../chopin/verify_image_entry.py "$GITHUB_WORKSPACE/release-evidence/Image.vendor-baseline" --report "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-entry.json"
+          python3 ../chopin/verify_module_loader.py --image "$GITHUB_WORKSPACE/release-evidence/Image.vendor-baseline" --system-map "$WORKSPACE/android-kernel/out/System.map" --config "$WORKSPACE/android-kernel/out/.config" --report "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-module-loader.json"
           python3 - <<'PY'
           from pathlib import Path
           import os
@@ -178,6 +182,7 @@ jobs:
       - name: Check vendor camera and root features
         run: |
           python3 chopin/verify_config.py "$WORKSPACE/android-kernel/out/.config"
+          python3 chopin/verify_module_loader.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --config "$WORKSPACE/android-kernel/out/.config" --report "$GITHUB_WORKSPACE/release-evidence/ported-module-loader.json"
           python3 - <<'PY'
           from pathlib import Path
           import os
