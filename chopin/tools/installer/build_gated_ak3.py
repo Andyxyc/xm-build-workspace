@@ -5,7 +5,8 @@ remains a test candidate until independent real-device acceptance succeeds.
 """
 from pathlib import Path
 import argparse,hashlib,json,struct,gzip,shutil,subprocess,zipfile,re
-from installer_transport import output_adapter,sys
+from installer_transport import output_adapter
+import sys
 if not __debug__:raise SystemExit('Safety gates require normal Python mode; -O is forbidden')
 p=argparse.ArgumentParser();p.add_argument('--slim',action='store_true');p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--licenses',type=Path,required=True);p.add_argument('--installer-commit',required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
 assert re.fullmatch('[0-9a-f]{40}',a.installer_commit)
