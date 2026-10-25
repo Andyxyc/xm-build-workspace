@@ -1,0 +1,30 @@
+name: Chopin MIUI14 family compatibility fixtures
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/installer/miui14-family/**', '.github/workflows/chopin-miui14-family.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fixtures:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare software-only ARM interpreter in cloud runner
+        run: |
+          command -v qemu-arm || { sudo timeout 240 apt-get update -qq && sudo timeout 240 apt-get install -y --no-install-recommends qemu-user; }
+          git init ak3-fixture
+          git -C ak3-fixture remote add origin https://github.com/osm0sis/AnyKernel3.git
+          git -C ak3-fixture fetch --depth=1 origin 020dfeccf9d7e962a48400fc94d3e451df92eead
+          git -C ak3-fixture checkout --detach FETCH_HEAD
+          test "$(git -C ak3-fixture rev-parse HEAD)" = 020dfeccf9d7e962a48400fc94d3e451df92eead
+      - name: Exercise real ARM cpio restore and file-only compatibility guards
+        run: python3 chopin/tools/installer/miui14-family/test_family.py ak3-fixture/tools/magiskboot
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopin-miui14-family-fixtures
+          path: miui14-family-fixtures.json
+          if-no-files-found: error
+          retention-days: 14
