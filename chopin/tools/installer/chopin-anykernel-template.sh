@@ -1,6 +1,6 @@
 ### chopin / MIUI 14 Android 13 source-built test candidate
 properties() { '
-kernel.string=chopin SukiSU SUSFS155 KPM TEST CANDIDATE
+kernel.string=小墨 XiaoMo
 do.devicecheck=1
 do.modules=0
 do.systemless=0
@@ -45,7 +45,8 @@ fi;
 
 # Install the supplied stock ramdisk rather than retaining a second root backend.
 # Keep all application data and existing /data/adb content available for rollback.
-gzip -dc "$AKHOME/stock-ramdisk.cpio.gz" > "$SPLITIMG/ramdisk.cpio" || abort "Stock ramdisk decompression failed";
+. "$AKHOME/tools/stock-ramdisk-source.sh";
+chopin_stock_ramdisk;
 [ "$(sha256sum "$SPLITIMG/ramdisk.cpio" | cut -d' ' -f1)" = 58e70342f8d631f26c95546f787933b744f8fbb67412ca22be561c0a30b42095 ] || abort "Stock ramdisk mismatch";
 cp "$AKHOME/stock-dtb.bin" "$SPLITIMG/dtb" || abort "Stock DTB copy failed";
 [ "$(sha256sum "$SPLITIMG/dtb" | cut -d' ' -f1)" = d6aa88bad3591b62473a2b753ccd19dc371dbb30bd8e1efa487c651fdefd27fc ] || abort "Stock DTB mismatch";
