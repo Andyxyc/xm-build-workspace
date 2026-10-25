@@ -21,7 +21,7 @@ chopin_family_modules() {
   [ "$count" = 10 ] || abort "Incomplete driver compatibility manifest";
   # Reject unexamined additional modules; never use force-load flags.
   found=$(find "$root" -name '*.ko' | wc -l);
-  [ "$found" = "$count" ] || abort "Additional vendor drivers require verification";
+  [ "$found" -eq "$count" ] || abort "Additional vendor drivers require verification";
   for root in /odm/lib/modules /system/lib/modules /system_dlkm/lib/modules /vendor_dlkm/lib/modules; do
     [ ! -d "$root" ] || [ -z "$(find "$root" -name '*.ko' -print -quit)" ] || abort "Additional driver partition requires verification";
   done;

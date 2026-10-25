@@ -33,5 +33,5 @@ files['payload.sha256']=''.join(sha(b)+'  '+n+'\n' for n,b in sorted(files.items
 assert not a.output.exists() and 'TEST-CANDIDATE' in a.output.name
 with zipfile.ZipFile(a.output,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
  for n,b in sorted(files.items()):
-  i=zipfile.ZipInfo(n,(2026,10,26,0,0,0));i.create_system=3;i.external_attr=(0o100755 if n.startswith('tools/') or n.endswith('.sh') or n.endswith('update-binary') else 0o100644)<<16;i.compress_type=zipfile.ZIP_DEFLATED;z.writestr(i,b)
+  i=zipfile.ZipInfo(n,(2026,10,26,0,0,0));i.create_system=3;i.external_attr=(0o100755 if n.startswith('tools/') or n.endswith('.sh') or n.endswith('update-binary') else 0o100644)<<16;i.compress_type=zipfile.ZIP_DEFLATED;z.writestr(i,b,compress_type=zipfile.ZIP_DEFLATED,compresslevel=9)
 print(json.dumps(dict(status='FAMILY_TEST_CANDIDATE_PACKAGED_ONLY',path=str(a.output),bytes=a.output.stat().st_size,sha256=sha(a.output.read_bytes()),hardware_validated=False),indent=2))

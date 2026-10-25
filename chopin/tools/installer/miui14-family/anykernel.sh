@@ -32,7 +32,7 @@ chopin_family_modules /vendor/lib/modules "$AKHOME/expected/vendor-modules.sha25
 
 ui_print "[2/5] Reading and backing up the active boot";
 split_boot 2>> "$AKHOME/install-detail.log";
-[ "$(wc -c < "$BOOTIMG")" = 134217728 ] || abort "Incomplete boot readback";
+[ "$(wc -c < "$BOOTIMG")" -eq 134217728 ] || abort "Incomplete boot readback";
 CHOPIN_BACKUP_SHA=$(sha256sum "$BOOTIMG" | cut -d' ' -f1);
 [ ${#CHOPIN_BACKUP_SHA} = 64 ] || abort "Cannot verify current boot";
 backup_dir=/data/adb/chopin-kernel-backups;
