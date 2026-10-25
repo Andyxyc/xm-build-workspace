@@ -45,7 +45,7 @@ jobs:
           git -C kp-tools remote add origin https://github.com/bmax121/KernelPatch.git
           git -C kp-tools fetch --depth=1 origin 052c73f93dbb84861218086e60a9962c48ff3f7f
           git -C kp-tools checkout --detach FETCH_HEAD
-          make -C kp-tools/tools -j2 CC=gcc CPPFLAGS=-I../kernel/include
+          make -C kp-tools/tools -j2 CC=gcc 'CPPFLAGS=-iquote ../kernel/include'
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git payload-source
           test "$(git -C payload-source rev-parse HEAD)" = 7c6289c95bdc786119b03d150236853b7b4872ca
           cp payload-source/kpm/kpimg release-evidence/kpimg.pinned
