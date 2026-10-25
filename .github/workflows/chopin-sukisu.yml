@@ -203,7 +203,7 @@ jobs:
           git -C "$WORKSPACE/KernelPatchTools" fetch --depth=1 origin 052c73f93dbb84861218086e60a9962c48ff3f7f
           git -C "$WORKSPACE/KernelPatchTools" checkout --detach FETCH_HEAD
           test "$(git -C "$WORKSPACE/KernelPatchTools" rev-parse HEAD)" = 052c73f93dbb84861218086e60a9962c48ff3f7f
-          make -C "$WORKSPACE/KernelPatchTools/tools" -j2 CC=gcc
+          make -C "$WORKSPACE/KernelPatchTools/tools" -j2 CC=gcc CPPFLAGS=-I../kernel/include
           cp "$WORKSPACE/SukiSU_patch/kpm/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
           python3 ../chopin/test_image_entry.py
           cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"

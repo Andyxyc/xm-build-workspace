@@ -1,0 +1,78 @@
+name: Chopin KPM correction from retained compiled Image
+
+on:
+  push:
+    branches: [chopin-sukisu-20261025]
+    paths: ['.github/workflows/chopin-kpm-reprocess.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  kpm-reprocess:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reuse the exact completed source compilation from the failed postprocessor run
+        uses: actions/download-artifact@v4
+        with:
+          name: chopin-failure-diagnostics
+          run-id: 40165599758
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: retained
+      - name: Bind retained Image, System.map, config and module CRCs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,shutil
+          root=Path('retained');d=root/'build-logs/diagnostics'
+          expected={'Image-compiled-not-flash-validated':'a5fc57312f977c0bca657a4a094b5e2caba5eca17bf59e09f86c24139a3d514b','System.map':'d636805502b73394418addf95a6dcea8064b0f2e8746744c0ec9379d6e5eb53f','Module.symvers':'1bf05f56a3ad9b76b502f21af68963665755043c1136a64c1345c292fa2c910e','.config':'d0b21c5065fec2e013b0be14827044ef2a595438814ec107c29924a26535ee92'}
+          for n,h in expected.items():assert hashlib.sha256((d/n).read_bytes()).hexdigest()==h,(n,'Retained compilation changed')
+          assert (root/'build-logs/root-build-complete.txt').read_text().strip()=='7a1a7ecd945e1b52b4cb73fe5547ef3b4cd74b81'
+          shutil.copytree(root/'release-evidence','release-evidence')
+          shutil.copytree(root/'build-logs','build-logs')
+          e=Path('release-evidence')
+          for src,dst in [('Image-compiled-not-flash-validated','Image.sukisu-susfs-before-kpm'),('System.map','System.map'),('Module.symvers','ported.Module.symvers'),('.config','chopin-built.config'),('utsrelease.h','utsrelease.h'),('vendor.patch','vendor-changes.patch'),('SukiSU.patch','SukiSU-changes.patch')]:shutil.copyfile(d/src,e/dst)
+          PY
+      - name: Build the pinned public postprocessor with its real include path
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential zlib1g-dev
+          git init kp-tools
+          git -C kp-tools remote add origin https://github.com/bmax121/KernelPatch.git
+          git -C kp-tools fetch --depth=1 origin 052c73f93dbb84861218086e60a9962c48ff3f7f
+          git -C kp-tools checkout --detach FETCH_HEAD
+          make -C kp-tools/tools -j2 CC=gcc CPPFLAGS=-I../kernel/include
+          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git payload-source
+          test "$(git -C payload-source rev-parse HEAD)" = 7c6289c95bdc786119b03d150236853b7b4872ca
+          cp payload-source/kpm/kpimg release-evidence/kpimg.pinned
+      - name: Apply and independently bind the full KPM payload to real entry code
+        run: |
+          set -o pipefail
+          python3 chopin/test_image_entry.py
+          python3 chopin/apply_verified_kpm.py \
+            --tool kp-tools/tools/kptools \
+            --before release-evidence/Image.sukisu-susfs-before-kpm \
+            --kpimg release-evidence/kpimg.pinned \
+            --system-map release-evidence/System.map \
+            --output Image.fixed \
+            --report release-evidence/kpm-entry-gate.json \
+            --log build-logs/kpm-reprocess.log
+          mkdir -p kernel_workspace/android-kernel/out/arch/arm64/boot
+          cp Image.fixed kernel_workspace/android-kernel/out/arch/arm64/boot/Image
+          printf '%s\n' "$GITHUB_SHA" > release-evidence/kpm-reprocess-source-commit.txt
+          sha256sum Image.fixed kp-tools/tools/kptools release-evidence/kpimg.pinned
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-kpm-entry-correction-candidate
+          path: |
+            kernel_workspace/android-kernel/out/arch/arm64/boot/Image
+            release-evidence/**
+            build-logs/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
