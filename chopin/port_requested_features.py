@@ -85,7 +85,7 @@ s=s[:start]+'''static inline long is_exec_adbd(const char *filename)
         return 0;
     if (!strcmp(filename, "/system/bin/adbd"))
         return 1;
-    return len > prefix + 9 && !strncmp(filename, apex, prefix) &&
+    return len >= prefix + 9 && !strncmp(filename, apex, prefix) &&
            (filename[prefix] == '/' || filename[prefix] == '@') &&
            !strcmp(filename + len - 9, "/bin/adbd");
 }
