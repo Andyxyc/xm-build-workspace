@@ -19,6 +19,17 @@ edit('KernelSU/kernel/policy/feature.c',
      '    [KSU_FEATURE_MOUNT_HIDE] = "mount_hide",',
      '    [KSU_FEATURE_MOUNT_HIDE] = "mount_hide",\n'
      '    [KSU_FEATURE_AVC_SPOOF] = "avc_spoof",')
+# The builtin tree uses a unity translation unit. Tentative bitmap definitions
+# shared a name while both fit in one word, but are independent subsystems.
+# The real official AVC ID extends only the feature bitmap to 10004 entries.
+import re
+feature_source = ksu / 'policy/feature.c'
+text = feature_source.read_text()
+for old in ['forced_mask', 'forced_pending']:
+    text, count = re.subn(r'\b' + old + r'\b', 'feature_' + old, text)
+    assert count == 4, (old, count)
+feature_source.write_text(text)
+
 edit('KernelSU/kernel/ksu_main.c', '#include "chopin_susfs_typed_reboot.c"',
      '#include "chopin_avc_audit_display.c"\n#include "chopin_susfs_typed_reboot.c"')
 edit('KernelSU/kernel/ksu_main.c', '    ksu_feature_init();',

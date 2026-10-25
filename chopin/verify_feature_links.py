@@ -48,6 +48,9 @@ for name in ['chopin_susfs_typed_kstat', 'chopin_susfs_typed_path',
              'chopin_susfs_typed_redirect', 'chopin_avc_feature_set',
              'chopin_selinux_hide_set', 'susfs_update_sus_kstat_typed_kern']:
     assert name in symbols, name
+for name in ['forced_mask', 'forced_pending']:
+    assert symbols['feature_' + name] != symbols[name], ('shared feature/extension bitmap', name)
+
 result = {'status': 'PASS_REAL_LINKED_FEATURE_PATHS_ONLY',
           'image_sha256': hashlib.sha256(data).hexdigest(), 'edges': records,
           'hardware_validated': False, 'runtime_feature_validation': 'PENDING'}
