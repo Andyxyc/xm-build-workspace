@@ -45,12 +45,47 @@ s=s[:start]+'''                installMethod = null
 # Keep Non-GKI installation on the real active slot. The generic GKI slot
 # dialog temporarily overrides ro.boot.slot_suffix, which cannot establish
 # which boot/vendor pair is actually running on this 4.14 device.
-s=s.replace('        isAbDevice = isAbDevice\n', '        isAbDevice = isAbDevice && isGkiDevice\n',1)
+s=s.replace('        isAbDevice = isAbDevice\n', '        isAbDevice = isAbDevice && isGkiDevice,\n        allowKpmPatch = isGkiDevice\n',1)
+s=s.replace('    val kpmPatchOption = anyKernel3State.kpmPatchOption','    val kpmPatchOption = if (isGkiDevice) anyKernel3State.kpmPatchOption else KpmPatchOption.FOLLOW_KERNEL',1)
+s=s.replace('selectedSlot = method.slot,','selectedSlot = if (isGkiDevice) method.slot else null,',1)
+p.write_text(s,encoding='utf-8',newline='\n')
+p=root/'manager/app/src/main/java/com/sukisu/ultra/ui/kernelFlash/AnyKernel3Flow.kt'
+s=p.read_text(encoding='utf-8')
+old='    isAbDevice: Boolean\n): AnyKernel3State'
+new='    isAbDevice: Boolean,\n    allowKpmPatch: Boolean = true\n): AnyKernel3State'
+assert s.count(old)==1;s=s.replace(old,new,1)
+old='            if (isAbDevice && method.slot == null) {'
+new='            if (!allowKpmPatch) {\n                installMethodState.value = method\n            } else if (isAbDevice && method.slot == null) {'
+assert s.count(old)==1;s=s.replace(old,new,1)
+old='                if (isAbDevice) {\n                    tempKernelUri = uri'
+new='                if (!allowKpmPatch) {\n                    installMethodState.value = method\n                } else if (isAbDevice) {\n                    tempKernelUri = uri'
+assert s.count(old)==1;s=s.replace(old,new,1)
+s=s.replace('LaunchedEffect(preselectedKernelUri, isAbDevice, horizonKernelSummary)', 'LaunchedEffect(preselectedKernelUri, isAbDevice, horizonKernelSummary, allowKpmPatch)',1)
 p.write_text(s,encoding='utf-8',newline='\n')
 p=root/'manager/app/src/main/java/com/sukisu/ultra/ui/kernelFlash/ExternalKernelFlasher.kt'
 s=p.read_text(encoding='utf-8')
-old='val abDevice = withContext(Dispatchers.IO) { isAbDevice() }'
-new='val abDevice = withContext(Dispatchers.IO) { isAbDevice() && com.sukisu.ultra.getKernelVersion().isGKI() }'
+old='''        val abDevice = withContext(Dispatchers.IO) { isAbDevice() }
+        kernelUri = uri
+        selectedSlot = null
+        showSlotDialog = abDevice
+        showKpmDialog = !abDevice'''
+new='''        val gki = withContext(Dispatchers.IO) { com.sukisu.ultra.getKernelVersion().isGKI() }
+        if (!gki) {
+            kernelUri = null
+            selectedSlot = null
+            showSlotDialog = false
+            showKpmDialog = false
+            navigator.push(Route.KernelFlash(
+                kernelUri = uri, selectedSlot = null,
+                kpmPatchEnabled = false, kpmUndoPatch = false,
+            ))
+        } else {
+            val abDevice = withContext(Dispatchers.IO) { isAbDevice() }
+            kernelUri = uri
+            selectedSlot = null
+            showSlotDialog = abDevice
+            showKpmDialog = !abDevice
+        }'''
 assert s.count(old)==1
 p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
 # A second check protects restored navigation state and other callers.
