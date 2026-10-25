@@ -28,7 +28,6 @@ jobs:
       - name: Build the actual ARM64 runtime and source-matched host tool
         run: |
           set -o pipefail
-          make -C paired-kp/kernel hdr TARGET_COMPILE=aarch64-linux-gnu-
           make -C paired-kp/kernel kpimg TARGET_COMPILE=aarch64-linux-gnu- -j2 2>&1 | tee paired-runtime-build.log
           make -C paired-kp/tools CC=gcc 'CPPFLAGS=-iquote ../kernel/include' -j2 2>&1 | tee paired-tool-build.log
           mkdir paired-evidence
