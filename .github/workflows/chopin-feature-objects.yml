@@ -1,0 +1,159 @@
+name: Chopin feature interface object checks
+
+on:
+  push:
+    branches: [chopin-interface-bringup-20261025]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chopin-kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace
+      CONFIG_ENV: config/chopin.env
+      KBUILD_BUILD_USER: xiaomo
+      KBUILD_BUILD_HOST: chopin-builder
+      BASELINE_REFERENCE_RUN: ""
+      CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
+      CCACHE_MAXSIZE: 512M
+    steps:
+      - name: Checkout isolated chopin branch
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex make build-essential git git-lfs python3 python-is-python3 \
+            curl wget unzip zip cpio device-tree-compiler libssl-dev libelf-dev \
+            libncurses-dev zlib1g-dev lz4 zstd ccache rsync ca-certificates \
+            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross
+          mkdir -p "$WORKSPACE"
+          mkdir -p build-logs release-evidence
+
+      - name: Restore bounded compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: kernel_workspace/.ccache
+          key: chopin-clang13-0647a49-v1-${{ github.run_id }}
+          restore-keys: chopin-clang13-0647a49-v1-
+
+      - name: Fetch existing non-GKI build framework (pinned)
+        run: |
+          git clone --depth=1 https://github.com/Owen0225/sukisu-Ultra-4.14.-.git builder
+          test "$(git -C builder rev-parse HEAD)" = 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          mkdir -p builder/config
+          cp chopin/target.env builder/config/chopin.env
+          echo "Builder: $(git -C builder rev-parse HEAD)"
+
+      - name: Resolve build profile
+        working-directory: builder
+        run: bash scripts/config.sh
+
+      - name: Prepare compiler and cross-toolchain
+        working-directory: builder
+        run: bash scripts/toolchain.sh
+
+      - name: Fetch matching chopin vendor source
+        working-directory: builder
+        run: |
+          bash scripts/source.sh
+          actual="$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
+          echo "Vendor kernel SHA: $actual"
+          test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
+          python3 ../chopin/port_cpu_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_anon_vma_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/restore_module_validation.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/module-validation-restoration.json" "$GITHUB_WORKSPACE/release-evidence/"
+          python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
+
+      - name: Integrate latest verified SukiSU builtin
+        working-directory: builder
+        run: |
+          bash scripts/kernelsu.sh
+          actual="$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
+          echo "SukiSU builtin SHA: $actual"
+          test "$actual" = "ce75122bec7423e0f1fa06e3e9a174085c5231ab"
+
+      - name: Port SUSFS 1.5.5 and old-kernel interfaces
+        working-directory: builder
+        run: |
+          # The stock 4.14 readdir.c diverges from generic SUSFS and cannot be fuzz-patched.
+          # Apply five function-scoped hooks, preserving all other SUSFS source patches.
+          python3 -m py_compile ../chopin/port_hooks.py ../chopin/port_readdir.py
+          python3 - <<'PY'
+          from pathlib import Path
+          f = Path('scripts/patches.sh')
+          s = f.read_text()
+          target = '( cd "$KERNEL_DIR" && apply_patch "$kernel_patch" 1 )'
+          assert s.count(target)==1, 'SUSFS builder changed'
+          prefix = 'python3 "${GITHUB_WORKSPACE}/chopin/port_readdir.py" "$kernel_patch" "$KERNEL_DIR"\n\t'
+          f.write_text(s.replace(target, prefix + target, 1))
+          PY
+          if ! bash scripts/patches.sh all; then
+            echo "::error::SUSFS vendor patch rejected; listing all exact failed hunks"
+            patchfile="$WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch"
+            (cd "$WORKSPACE/android-kernel" && patch -p1 --batch --dry-run --fuzz=3 < "$patchfile") 2>&1 | tee "$GITHUB_WORKSPACE/susfs-hunk-diagnostics.txt" || true
+            exit 44
+          fi
+          actual="$(git -C "$WORKSPACE/susfs4ksu" rev-parse HEAD)"
+          echo "SUSFS 4.14 SHA: $actual"
+          test "$actual" = "d18028f2a8f3ba16a907bff0edc16376cf38e2bf"
+          python3 ../chopin/stock_module_layout.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_vendor_refcnt.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_hooks.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_414_compat.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_414_optional.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_susfs155.py "$WORKSPACE/android-kernel" "$WORKSPACE/susfs4ksu"
+          python3 ../chopin/verify_sid_bootstrap.py "$WORKSPACE/android-kernel/KernelSU/kernel/selinux/rules.c" --report "$GITHUB_WORKSPACE/release-evidence/sid-bootstrap-source-check.json"
+          python3 ../chopin/port_kpm_io.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/preserve_vendor_abi.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_susfs_typed.py "$WORKSPACE/android-kernel"
+          grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
+          grep -n "IN_ALL_EVENTS" "$WORKSPACE/android-kernel/fs/notify/fdinfo.c"
+          # Normalize whitespace on SUSFS patch-added lines ONLY; do not alter vendor files globally.
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, os
+          root=Path(os.environ["WORKSPACE"])/"android-kernel"
+          p=subprocess.run(["git","-C",str(root),"diff","--check"],capture_output=True,text=True)
+          for row in p.stdout.splitlines():
+              if row.startswith("+"):  # git diff --check prints the offending content after its location
+                  continue
+              m=re.match(r"^(.+?):(\d+): trailing whitespace\.$",row)
+              if not m:
+                  raise SystemExit("Unhandled diff check: "+row)
+              name,num=m.group(1),int(m.group(2))
+              file=root/name
+              lines=file.read_text().splitlines(keepends=True)
+              original=lines[num-1]
+              clean=original.rstrip(" \t\r\n")+"\n"
+              assert clean!=original
+              lines[num-1]=clean
+              file.write_text("".join(lines))
+              print("Fixed upstream patch trailing whitespace:",name,num)
+          PY
+          git -C "$WORKSPACE/android-kernel" diff --check
+          echo "4.14 SUSFS / manual syscall ports integrated"
+
+      - name: Apply root defconfig extras
+        working-directory: builder
+        run: bash scripts/build.sh defconfig
+
+      - name: Compile real interface object files only
+        run: python3 chopin/tools/diagnose_feature_objects.py
+
+      - name: Upload feature object diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-feature-interface-objects
+          path: feature-object-diagnostics/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
