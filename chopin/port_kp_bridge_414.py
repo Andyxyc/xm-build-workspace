@@ -21,4 +21,12 @@ new='''    /* The chopin 4.14 syscall table has sys_truncate(path,len), not a
     }'''
 assert s.count(old)==1
 p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
+# A Linux-distribution cross compiler injects libc stack guards and outlined
+# atomic helpers by default. This freestanding runtime supplies neither libc
+# nor libgcc; match the original bare-metal compiler model explicitly.
+p=root/'kernel/Makefile';s=p.read_text(encoding='utf-8')
+anchor='CFLAGS += -g'
+assert s.count(anchor)==1
+s=s.replace(anchor,anchor+'\nCFLAGS += -fno-stack-protector -fno-pie -mno-outline-atomics',1)
+p.write_text(s,encoding='utf-8',newline='\n')
 print('Paired KPM endpoint ported; EL0 passthrough and all framing checks retained')
