@@ -25,7 +25,7 @@ with zipfile.ZipFile(a.zip) as z:
     assert image[start:start+64]==kp[:64] and target==start+4096
     assert len(image)>=start+len(kp) and image[target:target+64]==kp[4096:4160] and any(image[target:target+64])
     assert image[start+4096:start+len(kp)]==kp[4096:],'All pinned executable payload bytes must remain identical'
-    entry=json.loads(z.read('ENTRY-GATE.json'));assert entry['image_sha256']==sha(image) and entry['before_sha256']==sha(before) and entry['kpimg_sha256']==sha(kp)
+    entry=json.loads(z.read('ENTRY-GATE.json'));assert isinstance(entry,dict),'Entry proof must be a structured record';assert entry['image_sha256']==sha(image) and entry['before_sha256']==sha(before) and entry['kpimg_sha256']==sha(kp)
     assert sha(gzip.decompress(z.read('stock-ramdisk.cpio.gz')))=='58e70342f8d631f26c95546f787933b744f8fbb67412ca22be561c0a30b42095'
     assert sha(z.read('stock-dtb.bin'))=='d6aa88bad3591b62473a2b753ccd19dc371dbb30bd8e1efa487c651fdefd27fc'
     assert z.read('expected/header.sha256').decode().strip()=='597abf508e7e9fd153f952a352e04e09153945aab043113c07347a3c71674d40'

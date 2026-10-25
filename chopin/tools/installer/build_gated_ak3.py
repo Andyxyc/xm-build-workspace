@@ -48,7 +48,7 @@ stage=a.output.parent/('ak3-stage-'+g['image_sha256'][:12]);stage.mkdir(parents=
 # Read committed blobs, never a Windows checkout that may have CRLF conversion.
 entries=subprocess.check_output(['git','-C',str(a.ak3_source),'ls-tree','-r','HEAD','--','META-INF','tools'],text=True)
 for line in entries.splitlines():
-    entry,name=line.split('\t',1);mode,kind,oid=entry.split()
+    tree_record,name=line.split('\t',1);mode,kind,oid=tree_record.split()
     assert kind=='blob' and mode in ['100644','100755']
     assert not Path(name).is_absolute() and '..' not in Path(name).parts
     dest=stage/name;dest.parent.mkdir(parents=True,exist_ok=True)
