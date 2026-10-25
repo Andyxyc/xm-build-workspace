@@ -75,6 +75,22 @@ replace('arch/arm64/kernel/cpufeature.c','\tcase SYS_MIDR_EL1:\n\t\t*valp = read
         '\tcase SYS_MIDR_EL1:\n\t\t*valp = ksu_cpu_identity_midr(raw_smp_processor_id(), read_cpuid_id());')
 
 p=root/'KernelSU/kernel/feature/adb_root.c';s=p.read_text()
+start=s.index('static inline long is_exec_adbd(const char *filename)')
+end=s.index('\n#else',start)
+s=s[:start]+'''static inline long is_exec_adbd(const char *filename)
+{
+    static const char apex[] = "/apex/com.android.adbd";
+    size_t len = strlen(filename), prefix = sizeof(apex) - 1;
+    if (current_uid().val != 0)
+        return 0;
+    if (!strcmp(filename, "/system/bin/adbd"))
+        return 1;
+    return len > prefix + 9 && !strncmp(filename, apex, prefix) &&
+           (filename[prefix] == '/' || filename[prefix] == '@') &&
+           !strcmp(filename + len - 9, "/bin/adbd");
+}
+'''+s[end:]
+
 start=s.index('static long setup_ld_preload(void ***envp_user_ptr)')
 end=s.index('static long do_ksu_adb_root_handle_execveat', start)
 s=s[:start]+(here/'adb_root_env_414.inc').read_text()+'\n'+s[end:]
