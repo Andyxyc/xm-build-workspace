@@ -96,6 +96,20 @@ end=s.index('static long do_ksu_adb_root_handle_execveat', start)
 s=s[:start]+(here/'adb_root_env_414.inc').read_text()+'\n'+s[end:]
 s=s.replace('    bool enable = value != 0;', '    bool enable;\n    if (value > 1) return -EINVAL;\n    enable = value != 0;',1)
 p.write_text(s)
+# The SUSFS branch's original stat/access handlers exposed a virtual su to
+# every UID. Use the same authorization predicate as its real exec handler.
+p=root/'KernelSU/kernel/feature/sucompat.c';s=p.read_text()
+for name in ['ksu_handle_faccessat','ksu_handle_stat']:
+    start=s.index('int '+name+'(');end=s.index('\n}\n',start)+3
+    body=s[start:end];needle='    if (current_chrooted())'
+    assert body.count(needle)==1,name
+    guard='    if (!READ_ONCE(ksu_su_compat_enabled) ||\n        !__ksu_is_allow_uid_for_current(current_uid().val))\n        return 0;\n\n'
+    body=body.replace(needle,guard+needle,1);s=s[:start]+body+s[end:]
+needle='    if (likely(!__ksu_is_allow_uid_for_current(current_uid().val)))'
+assert s.count(needle)==1
+s=s.replace(needle,'    if (!READ_ONCE(ksu_su_compat_enabled))\n        return -EINVAL;\n\n'+needle,1)
+p.write_text(s)
+
 # Keep the official certificate allowlist and add only this owner's public key.
 cert=json.loads((here/'owner-manager-cert.json').read_text())
 assert re.fullmatch('[0-9a-f]{64}',cert['certificate_sha256'])
