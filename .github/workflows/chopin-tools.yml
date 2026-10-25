@@ -58,14 +58,19 @@ jobs:
           abort() { echo "ABORT: $*"; exit 23; }
           ui_print() { echo "$*"; }
           . chopin/tools/installer/ak3-preflight.sh
+          export CHOPIN_ATTEMPT_MARKER="$fixture/file-only-attempt.txt"
+          (set -C; printf 'phase=prepared\n' > "$CHOPIN_ATTEMPT_MARKER")
           CHOPIN_NEW_IMAGE_SHA=$(chopin_sha "$AKHOME/boot-new.img")
           chopin_postflash_verify
+          grep -qx 'phase=full_partition_readback_verified' "$CHOPIN_ATTEMPT_MARKER"
+          journal_before=$(sha256sum "$CHOPIN_ATTEMPT_MARKER" | cut -d' ' -f1)
           echo "PASS: matching ordinary padded file; no real partition" > tools-out/readback-fixture-results.txt
           printf X | dd of="$BLOCK" bs=1 seek=32 count=1 conv=notrunc status=none
           if (chopin_postflash_verify); then
             echo "::error::Corrupt ordinary fixture was accepted"
             exit 52
           fi
+          test "$(sha256sum "$CHOPIN_ATTEMPT_MARKER" | cut -d' ' -f1)" = "$journal_before"
           echo "PASS: corrupt ordinary file rejected; no real partition" >> tools-out/readback-fixture-results.txt
       - uses: actions/upload-artifact@v4
         if: always()
