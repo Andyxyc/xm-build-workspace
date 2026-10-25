@@ -61,5 +61,5 @@ certificate=data[pointer:pointer+64].decode('ascii')
 assert certificate=='33a63461c5442d981bcab44b168cb4ab6d50462e21ce5a6ecb668305a9b422cc'
 identity=json.loads((ev/'stock-identity.json').read_text(encoding='utf-8'))
 assert (identity['banner']+'\n').encode() in data
-record={'status':'PASS_LINKED_R6_REQUESTED_PATHS_AND_OWNER_CERT_ONLY','image_sha256':hashlib.sha256(data).hexdigest(),'edges':records,'avc_source_and_target_sites':avc,'adb_root_config':True,'manager_certificate_bytes':size,'manager_certificate_sha256':certificate,'original_banner_exact':True,'hardware_validated':False}
+record={'status':'PASS_COMPILED_FEATURE_PATHS_AND_MANAGER_CERT','image_sha256':hashlib.sha256(data).hexdigest(),'edges':records,'avc_source_and_target_sites':avc,'adb_root_config':True,'manager_certificate_bytes':size,'manager_certificate_sha256':certificate,'original_banner_exact':True,'hardware_validated':False}
 a.report.write_text(json.dumps(record,indent=2),encoding='utf-8');print(json.dumps(record,indent=2))

@@ -70,5 +70,8 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
  results.append({'case':'duplicate-kernel-attempt-refused','exit':99,'scope':'REAL_JOURNAL_FUNCTION_NO_DEVICE'})
 report={'status':'PASS_MANAGER_ADAPTER_SOCKET_OUTPUT_AND_DUPLICATE_ATTEMPT_FIXTURES','partition_writes':0,'real_device_test':False,'cases':results,'source_sha256':{n:hashlib.sha256((here/n).read_bytes()).hexdigest() for n in ['customize.sh','installer_transport.py','ak3-preflight.sh']}}
 report['family_mode']=family_mode
+if family_mode:
+ report['source_sha256']={n:hashlib.sha256((here/'miui14-family'/v).read_bytes()).hexdigest() for n,v in [('customize.sh','customize.sh'),('ak3-preflight.sh','preflight.sh')]}
+ report['source_sha256']['installer_transport.py']=hashlib.sha256((here/'installer_transport.py').read_bytes()).hexdigest()
 Path('installer-entry-family-fixtures.json' if family_mode else 'installer-entry-fixtures.json').write_text(json.dumps(report,indent=2))
 print(json.dumps(report,indent=2))

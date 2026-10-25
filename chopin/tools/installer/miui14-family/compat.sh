@@ -47,7 +47,7 @@ chopin_family_ramdisk() {
   local cpio state;
   cpio=$1;
   [ -f "$cpio" ] || abort "Current boot ramdisk is unavailable";
-  magiskboot cpio "$cpio" test; state=$?;
+  if magiskboot cpio "$cpio" test; then state=0; else state=$?; fi;
   case "$state" in
     0) ;;
     1)
