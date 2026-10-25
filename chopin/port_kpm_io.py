@@ -21,7 +21,7 @@ for old,new in [
  ('        if (copy_to_user(arg1, s->buf, len) != 0)\n            pr_info("kpm: Copy to user failed.");',
   '        if (copy_to_user((void __user *)arg1, s->buf, res))\n            res = -EFAULT;'),
  ('        int len = strlen(s->buffer);',
-  '        int len = strnlen(s->buffer, sizeof(s->buffer));\n'
+  '        size_t len = strnlen(s->buffer, sizeof(s->buffer));\n'
   '        if (!arg1 || !outlen) {\n            res = -EINVAL;\n            goto exit;\n        }\n'
   '        if (!len || len == sizeof(s->buffer)) {\n            res = -ENODEV;\n            goto exit;\n        }'),
  ('        if (len >= outlen)\n            len = outlen - 1;',
