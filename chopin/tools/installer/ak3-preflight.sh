@@ -39,7 +39,8 @@ chopin_record_attempt() {
   case "$payload" in *[!0-9a-f]*) abort "Invalid candidate digest";; esac;
   marker="$backup_dir/attempt${SLOT}-${payload}.txt";
   # Refuse a second automatic write of the same kernel even if repacking differs.
-  (set -C; printf 'target=%s\nkernel_sha256=%s\nimage_sha256=%s\nbackup_sha256=%s\n' "$BLOCK" "$payload" "$CHOPIN_NEW_IMAGE_SHA" "$CHOPIN_BACKUP_SHA" > "$marker") || abort "Write attempt already recorded; diagnose before another attempt";
+  CHOPIN_ATTEMPT_MARKER=$marker;
+  (set -C; printf 'phase=prepared\ntarget=%s\nkernel_sha256=%s\nimage_sha256=%s\nbackup_sha256=%s\n' "$BLOCK" "$payload" "$CHOPIN_NEW_IMAGE_SHA" "$CHOPIN_BACKUP_SHA" > "$marker") || abort "Write attempt already recorded; diagnose before another attempt";
   sync;
 }
 
@@ -53,5 +54,8 @@ chopin_postflash_verify() {
   expected=$({ cat "$AKHOME/boot-new.img"; head -c "$pad" /dev/zero; } | sha256sum | cut -d' ' -f1);
   actual=$(chopin_sha "$BLOCK");
   [ ${#expected} = 64 ] && [ "$actual" = "$expected" ] || abort "Boot readback failed; stop and restore saved backup, do not retry";
+  [ -f "$CHOPIN_ATTEMPT_MARKER" ] && [ ! -L "$CHOPIN_ATTEMPT_MARKER" ] || abort "Attempt journal is unavailable after write";
+  printf 'phase=full_partition_readback_verified\nreadback_sha256=%s\n' "$actual" >> "$CHOPIN_ATTEMPT_MARKER" || abort "Cannot persist completed readback journal";
+  sync;
   ui_print "Full boot partition readback verified";
 }

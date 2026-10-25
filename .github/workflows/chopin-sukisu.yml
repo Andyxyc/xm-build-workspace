@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison flex make build-essential git git-lfs python3 python-is-python3 \
             curl wget unzip zip cpio device-tree-compiler libssl-dev libelf-dev \
-            libncurses-dev lz4 zstd ccache rsync ca-certificates \
+            libncurses-dev zlib1g-dev lz4 zstd ccache rsync ca-certificates \
             binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross
           mkdir -p "$WORKSPACE"
           mkdir -p build-logs release-evidence
@@ -87,6 +87,8 @@ jobs:
           cp "$WORKSPACE/android-kernel/out/.config" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.config"
           cp "$WORKSPACE/android-kernel/out/Module.symvers" "$GITHUB_WORKSPACE/release-evidence/vendor-baseline.Module.symvers"
           sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" > "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-image.sha256"
+          cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/release-evidence/Image.vendor-baseline"
+          python3 ../chopin/verify_image_entry.py "$GITHUB_WORKSPACE/release-evidence/Image.vendor-baseline" --report "$GITHUB_WORKSPACE/release-evidence/vendor-baseline-entry.json"
           python3 - <<'PY'
           from pathlib import Path
           import os
@@ -193,9 +195,29 @@ jobs:
           set -o pipefail
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git "$WORKSPACE/SukiSU_patch"
           test "$(git -C "$WORKSPACE/SukiSU_patch" rev-parse HEAD)" = 7c6289c95bdc786119b03d150236853b7b4872ca
-          echo "489e9daa31d468659e4593b11a22b9ea2ac7edb268b2e965610f0d28d4d30cb1  $WORKSPACE/SukiSU_patch/kpm/patch_linux" | sha256sum -c -
+          # The previous opaque patch_linux returned success after producing a
+          # 16-byte placeholder payload and an initial branch beyond EOF.
+          # Build the corresponding public tool and pass the real kpimg explicitly.
+          git init "$WORKSPACE/KernelPatchTools"
+          git -C "$WORKSPACE/KernelPatchTools" remote add origin https://github.com/bmax121/KernelPatch.git
+          git -C "$WORKSPACE/KernelPatchTools" fetch --depth=1 origin 052c73f93dbb84861218086e60a9962c48ff3f7f
+          git -C "$WORKSPACE/KernelPatchTools" checkout --detach FETCH_HEAD
+          test "$(git -C "$WORKSPACE/KernelPatchTools" rev-parse HEAD)" = 052c73f93dbb84861218086e60a9962c48ff3f7f
+          make -C "$WORKSPACE/KernelPatchTools/tools" -j2 CC=gcc
+          cp "$WORKSPACE/SukiSU_patch/kpm/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
+          python3 ../chopin/test_image_entry.py
           cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"
-          bash scripts/build.sh check 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/kpm-postprocess.log"
+          cp "$WORKSPACE/Image.before-kpm" "$GITHUB_WORKSPACE/release-evidence/Image.sukisu-susfs-before-kpm"
+          python3 ../chopin/verify_image_entry.py "$WORKSPACE/Image.before-kpm" --report "$GITHUB_WORKSPACE/release-evidence/before-kpm-entry.json"
+          python3 ../chopin/apply_verified_kpm.py \
+            --tool "$WORKSPACE/KernelPatchTools/tools/kptools" \
+            --before "$WORKSPACE/Image.before-kpm" \
+            --kpimg "$WORKSPACE/SukiSU_patch/kpm/kpimg" \
+            --system-map "$WORKSPACE/android-kernel/out/System.map" \
+            --output "$WORKSPACE/Image.kpm-verified" \
+            --report "$GITHUB_WORKSPACE/release-evidence/kpm-entry-gate.json" \
+            --log "$GITHUB_WORKSPACE/build-logs/kpm-postprocess.log"
+          mv "$WORKSPACE/Image.kpm-verified" "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
           ! cmp -s "$WORKSPACE/Image.before-kpm" "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
           sha256sum "$WORKSPACE/Image.before-kpm" > "$GITHUB_WORKSPACE/release-evidence/Image.before-kpm.sha256"
           sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"

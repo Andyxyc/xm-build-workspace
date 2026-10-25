@@ -4,7 +4,7 @@ Never accesses ADB/Fastboot or writes any device partition. The produced ZIP
 remains a test candidate until independent real-device acceptance succeeds.
 """
 from pathlib import Path
-import argparse,hashlib,json,struct,gzip,shutil,subprocess,zipfile,re
+import argparse,hashlib,json,struct,gzip,shutil,subprocess,zipfile,re,sys
 if not __debug__:raise SystemExit('Safety gates require normal Python mode; -O is forbidden')
 p=argparse.ArgumentParser();p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--licenses',type=Path,required=True);p.add_argument('--installer-commit',required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
 assert re.fullmatch('[0-9a-f]{40}',a.installer_commit)
@@ -16,6 +16,12 @@ assert len(g['modules'])==10 and g['imports_checked']==1299
 images=list((a.candidate/'kernel_workspace').rglob('Image'));assert len(images)==1
 image=images[0].read_bytes();assert digest(image)==g['image_sha256']
 ev=a.candidate/'release-evidence'
+sys.path.insert(0,str(root.parents[1]))
+from verify_image_entry import inspect_kpm
+entry=inspect_kpm(image,(ev/'Image.sukisu-susfs-before-kpm').read_bytes(),(ev/'kpimg.pinned').read_bytes())
+assert entry['kpimg_sha256']=='396a20777668e85d674a23dd3945815f285332b5358be0bfc97297935e2d130b'
+entry_receipt=json.loads((ev/'kpm-entry-gate.json').read_text())
+assert entry_receipt['image_sha256']==digest(image) and entry_receipt['status']==entry['status']
 assert digest((ev/'ported.Module.symvers').read_bytes())==g['symvers_sha256']
 assert digest((ev/'System.map').read_bytes())==g['system_map_sha256']
 assert subprocess.check_output(['git','-C',str(a.ak3_source),'rev-parse','HEAD'],text=True).strip()=='020dfeccf9d7e962a48400fc94d3e451df92eead'
@@ -43,6 +49,14 @@ for line in entries.splitlines():
     assert not Path(name).is_absolute() and '..' not in Path(name).parts
     dest=stage/name;dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_bytes(subprocess.check_output(['git','-C',str(a.ak3_source),'show','HEAD:'+name]))
+# ADB shell stdout can be a socket which cannot be reopened via /proc/self/fd.
+# Duplicate the existing updater descriptor instead; preserve the real exit code.
+redirect=b'>> /proc/self/fd/$OUTFD'
+assert core.count(redirect)==1
+core=core.replace(redirect,b'>&$OUTFD')
+updater=stage/'META-INF/com/google/android/update-binary'
+updater_bytes=updater.read_bytes();assert updater_bytes.count(redirect)==2
+updater.write_bytes(updater_bytes.replace(redirect,b'>&$OUTFD'))
 # Insert a verified callback immediately before the sole active-boot write.
 # All other official core behavior remains byte-for-byte unchanged.
 start=core.index(b'flash_boot() {');end=core.index(b'\n# flash_generic ',start)
@@ -68,6 +82,7 @@ with (stage/'SOURCE.txt').open('a',newline='\n') as source:
     source.write('Installer source snapshot: https://github.com/Andyxyc/xm-build-workspace/tree/'+a.installer_commit+'/chopin/tools/installer\n')
 # The private module manifest remains local; only a minimal gate receipt ships.
 (stage/'ABI-GATE.json').write_text(json.dumps(dict(status=g['status'],image_sha256=g['image_sha256'],imports_checked=g['imports_checked'],actual_image_export_crcs_checked=g['actual_image_export_crcs_checked'],hardware_validated=False),indent=2),newline='\n')
+(stage/'ENTRY-GATE.json').write_text(json.dumps(entry,indent=2)+'\n',encoding='utf-8',newline='\n')
 files=sorted(f for f in stage.rglob('*') if f.is_file())
 (stage/'payload.sha256').write_text(''.join(digest(f.read_bytes())+'  '+f.relative_to(stage).as_posix()+'\n' for f in files),encoding='ascii',newline='\n')
 with zipfile.ZipFile(a.output,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=7) as z:
