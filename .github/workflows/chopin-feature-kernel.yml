@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   chopin-kernel:
@@ -99,11 +100,11 @@ jobs:
         working-directory: builder
         run: |
           bash scripts/kernelsu.sh
-          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1
-          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1
+          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin 6397fcb5d96e8f4953c71e02c73f8c6800541bff
+          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach 6397fcb5d96e8f4953c71e02c73f8c6800541bff
           actual="$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
           echo "SukiSU builtin SHA: $actual"
-          test "$actual" = "a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1"
+          test "$actual" = "6397fcb5d96e8f4953c71e02c73f8c6800541bff"
 
       - name: Port SUSFS 1.5.5 and old-kernel interfaces
         working-directory: builder
@@ -212,33 +213,34 @@ jobs:
       - name: Check genuine linked feature paths before KPM postprocessing
         run: |
           python3 chopin/verify_feature_links.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --report release-evidence/feature-linked-paths.json
+          python3 chopin/tools/verify_kpm_bridge_link.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --report release-evidence/kpm-bridge-linked-paths.json
 
       - name: Apply KPM to compiled arm64 Image
         working-directory: builder
         run: |
           set -o pipefail
-          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git "$WORKSPACE/SukiSU_patch"
-          git -C "$WORKSPACE/SukiSU_patch" fetch origin 7c6289c95bdc786119b03d150236853b7b4872ca
-          git -C "$WORKSPACE/SukiSU_patch" checkout --detach 7c6289c95bdc786119b03d150236853b7b4872ca
-          test "$(git -C "$WORKSPACE/SukiSU_patch" rev-parse HEAD)" = 7c6289c95bdc786119b03d150236853b7b4872ca
-          # The previous opaque patch_linux returned success after producing a
-          # 16-byte placeholder payload and an initial branch beyond EOF.
-          # Build the corresponding public tool and pass the real kpimg explicitly.
-          git init "$WORKSPACE/KernelPatchTools"
-          git -C "$WORKSPACE/KernelPatchTools" remote add origin https://github.com/bmax121/KernelPatch.git
-          git -C "$WORKSPACE/KernelPatchTools" fetch --depth=1 origin 052c73f93dbb84861218086e60a9962c48ff3f7f
-          git -C "$WORKSPACE/KernelPatchTools" checkout --detach FETCH_HEAD
-          test "$(git -C "$WORKSPACE/KernelPatchTools" rev-parse HEAD)" = 052c73f93dbb84861218086e60a9962c48ff3f7f
-          make -C "$WORKSPACE/KernelPatchTools/tools" -j2 CC=gcc 'CPPFLAGS=-iquote ../kernel/include'
-          cp "$WORKSPACE/SukiSU_patch/kpm/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
+          mkdir -p "$WORKSPACE/paired-kpm"
+          GH_TOKEN="${{ github.token }}" gh run download 40245093779 --repo "$GITHUB_REPOSITORY" --name chopin-paired-kpm-414 --dir "$WORKSPACE/paired-kpm"
+          python3 - <<'PYVERIFY'
+          from pathlib import Path
+          import hashlib,os
+          p=Path(os.environ['WORKSPACE'])/'paired-kpm/paired-evidence'
+          for n,h in [('kpimg','1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4'),('kptools','69defafa8e2e9f7b435823f1290cb981cdb62cee35b1d2f22f05b8ddb7d91ba6')]:
+              assert hashlib.sha256((p/n).read_bytes()).hexdigest()==h,n
+          PYVERIFY
+          chmod 755 "$WORKSPACE/paired-kpm/paired-evidence/kptools"
+          cp "$WORKSPACE/paired-kpm/paired-evidence/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
+          cp "$WORKSPACE/paired-kpm/paired-evidence/paired-kpm-protocol.json" "$GITHUB_WORKSPACE/release-evidence/"
+          cp "$WORKSPACE/paired-kpm/paired-evidence/4.14-endpoint.patch" "$GITHUB_WORKSPACE/release-evidence/"
+          printf '%s\n' 'a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 + 129d14a49c7b1daa1a68c5c6d493c534e9a84d20' > "$GITHUB_WORKSPACE/release-evidence/paired-kpm-source.txt"
           python3 ../chopin/test_image_entry.py
           cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"
           cp "$WORKSPACE/Image.before-kpm" "$GITHUB_WORKSPACE/release-evidence/Image.sukisu-susfs-before-kpm"
           python3 ../chopin/verify_image_entry.py "$WORKSPACE/Image.before-kpm" --report "$GITHUB_WORKSPACE/release-evidence/before-kpm-entry.json"
           python3 ../chopin/apply_verified_kpm.py \
-            --tool "$WORKSPACE/KernelPatchTools/tools/kptools" \
+            --tool "$WORKSPACE/paired-kpm/paired-evidence/kptools" \
             --before "$WORKSPACE/Image.before-kpm" \
-            --kpimg "$WORKSPACE/SukiSU_patch/kpm/kpimg" \
+            --kpimg "$WORKSPACE/paired-kpm/paired-evidence/kpimg" \
             --system-map "$WORKSPACE/android-kernel/out/System.map" \
             --output "$WORKSPACE/Image.kpm-verified" \
             --report "$GITHUB_WORKSPACE/release-evidence/kpm-entry-gate.json" \

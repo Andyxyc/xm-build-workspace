@@ -26,7 +26,7 @@ entry=inspect_kpm(image,(ev/'Image.sukisu-susfs-before-kpm').read_bytes(),(ev/'k
 resolver_log=a.candidate/'build-logs/kpm-reprocess.log'
 if not resolver_log.is_file():resolver_log=a.candidate/'build-logs/kpm-postprocess.log'
 entry['full_kallsyms_validation']=verify_resolver((ev/'Image.sukisu-susfs-before-kpm').read_bytes(),(ev/'System.map').read_text(encoding="utf-8"),resolver_log.read_text(encoding="utf-8"))
-assert entry['kpimg_sha256']=='396a20777668e85d674a23dd3945815f285332b5358be0bfc97297935e2d130b'
+assert entry['kpimg_sha256']=='1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4'
 entry_receipt=json.loads((ev/'kpm-entry-gate.json').read_text(encoding="utf-8"))
 assert entry_receipt['image_sha256']==digest(image) and entry_receipt['status']==entry['status']
 assert digest((ev/'ported.Module.symvers').read_bytes())==g['symvers_sha256']
@@ -46,7 +46,7 @@ assert digest(gzip.decompress(rd))=='58e70342f8d631f26c95546f787933b744f8fbb6741
 assert digest(dtb)=='d6aa88bad3591b62473a2b753ccd19dc371dbb30bd8e1efa487c651fdefd27fc'
 header=bytearray(stock[:1660]);header[8:12]=bytes(4);header[16:20]=bytes(4);header[576:608]=bytes(32)
 assert digest(header)=='597abf508e7e9fd153f952a352e04e09153945aab043113c07347a3c71674d40'
-assert 'TEST-CANDIDATE' in a.output.name and a.output.suffix=='.zip' and not a.output.exists()
+assert re.fullmatch(r'chopin-[A-Za-z0-9._-]+\.zip',a.output.name) and a.output.suffix=='.zip' and not a.output.exists()
 stage=a.output.parent/('ak3-r6-'+('slim-' if a.slim else 'full-')+g['image_sha256'][:12]);stage.mkdir(parents=False,exist_ok=False)
 # Read committed blobs, never a Windows checkout that may have CRLF conversion.
 entries=subprocess.check_output(['git','-C',str(a.ak3_source),'ls-tree','-r','HEAD','--','META-INF','tools'],text=True)
@@ -81,7 +81,7 @@ if not a.slim: (stage/'stock-ramdisk.cpio.gz').write_bytes(gzip.compress(gzip.de
 (stage/'expected/header.sha256').write_text(digest(header)+'\n',newline='\n')
 (stage/'expected/kernel.sha256').write_text(digest(image)+'\n',newline='\n')
 build_commit=(a.candidate/'build-logs/root-build-complete.txt').read_text(encoding="utf-8").strip();assert re.fullmatch('[0-9a-f]{40}',build_commit)
-(stage/'SOURCE.txt').write_text('TEST CANDIDATE - no real-device acceptance implied.\nSource and build scripts: https://github.com/Andyxyc/xm-build-workspace/tree/'+build_commit+'\nAnyKernel3: https://github.com/osm0sis/AnyKernel3/tree/020dfeccf9d7e962a48400fc94d3e451df92eead\nVendor source: https://github.com/ChopinKernels/android_kernel_chopin_android_T/tree/0647a49c9557faa92b90c4ae188587787226be9e\nSukiSU: https://github.com/SukiSU-Ultra/SukiSU-Ultra/tree/a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1\nSUSFS: https://github.com/Star-Seven/susfs4ksu/tree/d18028f2a8f3ba16a907bff0edc16376cf38e2bf\nKPM postprocessor source: https://github.com/bmax121/KernelPatch/tree/052c73f93dbb84861218086e60a9962c48ff3f7f (source-built kptools)\nPinned KPM runtime payload: https://github.com/ShirkNeko/SukiSU_patch/blob/7c6289c95bdc786119b03d150236853b7b4872ca/kpm/kpimg\n',newline='\n')
+(stage/'SOURCE.txt').write_text('TEST CANDIDATE - no real-device acceptance implied.\nSource and build scripts: https://github.com/Andyxyc/xm-build-workspace/tree/'+build_commit+'\nAnyKernel3: https://github.com/osm0sis/AnyKernel3/tree/020dfeccf9d7e962a48400fc94d3e451df92eead\nVendor source: https://github.com/ChopinKernels/android_kernel_chopin_android_T/tree/0647a49c9557faa92b90c4ae188587787226be9e\nSukiSU: https://github.com/SukiSU-Ultra/SukiSU-Ultra/tree/6397fcb5d96e8f4953c71e02c73f8c6800541bff\nSUSFS: https://github.com/Star-Seven/susfs4ksu/tree/d18028f2a8f3ba16a907bff0edc16376cf38e2bf\nKPM postprocessor source: https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/tree/a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 (source-built kptools)\nPaired KPM runtime source and build: https://github.com/Andyxyc/xm-build-workspace/tree/129d14a49c7b1daa1a68c5c6d493c534e9a84d20/chopin/port_kp_bridge_414.py\n',newline='\n')
 (stage/'AnyKernel3-LICENSE').write_bytes(subprocess.check_output(['git','-C',str(a.ak3_source),'show','HEAD:LICENSE']))
 licenses={'Linux-COPYING':'af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7','SukiSU-LICENSE':'8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643','SUSFS-LICENSE':'3da27bc7c6a063f498b4278372d48e113453f93aecc709f44276e278fc0cac12','KernelPatch-LICENSE':'ce7f2f7bc1c5b68f592a04b763abaa9c180c5e44e30563153bee280763b54ae7'}
 (stage/'LICENSES').mkdir()

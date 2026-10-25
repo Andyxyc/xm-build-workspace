@@ -46,10 +46,10 @@ with zipfile.ZipFile(a.apk) as z:
     at=pos+16+attr_start+i*attr_size;name=strings[u32(xml,at+4)];raw=u32(xml,at+8);value=u32(xml,at+16);typ=xml[at+15]
     manifest[name]=strings[raw] if raw!=0xffffffff else strings[value] if typ==3 else value
   pos+=length
- assert manifest['package']=='com.xiaomo.sukisu.chopin' and manifest['versionCode']==41083,manifest
+ assert manifest['package']=='com.xiaomo.sukisu.chopin' and manifest['versionCode']==41084,manifest
  native=[n for n in z.namelist() if n.startswith('lib/') and not n.endswith('/')]
  assert native and all(n.startswith('lib/arm64-v8a/') for n in native)
  assert 'lib/arm64-v8a/libksud.so' in native and 'lib/arm64-v8a/libadbroot.so' in native
- daemon=z.read('lib/arm64-v8a/libksud.so');assert hashlib.sha256(daemon).hexdigest()=='e9567e01a1886d5d340c1c60323b464d3832a6ab83ef7688479ffbc537d267f4'
+ daemon=z.read('lib/arm64-v8a/libksud.so');assert hashlib.sha256(daemon).hexdigest()=='8e07e8e85945558426ddff31a6e107d16400a2a1c5354ab9f8dcce130357c66d'
 report={'status':'PASS_BINARY_MANIFEST_V2_CERTIFICATE_NATIVE_PAYLOAD_ONLY','package':manifest['package'],'version_code':manifest['versionCode'],'version_name':manifest.get('versionName'),'certificate_bytes':len(certificate),'certificate_sha256':hashlib.sha256(certificate).hexdigest(),'apk_sha256':hashlib.sha256(blob).hexdigest(),'native_files':native,'installed':False,'ui_runtime_verified':False}
 a.report.write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2))

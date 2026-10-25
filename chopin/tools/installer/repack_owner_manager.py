@@ -6,7 +6,7 @@ This script never reads a signing key and never connects to a device.
 from pathlib import Path
 import argparse,copy,hashlib,json,struct,zipfile
 p=argparse.ArgumentParser();p.add_argument('--input',type=Path,required=True);p.add_argument('--daemon',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
-daemon=a.daemon.read_bytes();expected='e9567e01a1886d5d340c1c60323b464d3832a6ab83ef7688479ffbc537d267f4';assert hashlib.sha256(daemon).hexdigest()==expected
+daemon=a.daemon.read_bytes();expected='8e07e8e85945558426ddff31a6e107d16400a2a1c5354ab9f8dcce130357c66d';assert hashlib.sha256(daemon).hexdigest()==expected
 assert not a.output.exists()
 name='lib/arm64-v8a/libksud.so'
 with zipfile.ZipFile(a.input) as source, zipfile.ZipFile(a.output,'x') as dest:

@@ -7,6 +7,10 @@ import tempfile
 
 root = Path(os.environ['WORKSPACE']) / 'android-kernel'
 source = (root / 'KernelSU/kernel/extension/kpm/kpm.c').read_text()
+if 'static int chopin_kpm_copy_string(' in source:
+    import runpy
+    runpy.run_path(str(Path(__file__).with_name('check_kpm_bridge_copy.py')),run_name='__main__')
+    raise SystemExit(0)
 start = source.index('} else if (control_code == SUKISU_KPM_VERSION) {')
 start += len('} else if (control_code == SUKISU_KPM_VERSION) {')
 end = source.index('\n    }\n\nexit:', start)

@@ -25,7 +25,7 @@ with zipfile.ZipFile(a.zip) as z:
     if displacement&(1<<25):displacement-=1<<26
     target=off+4*displacement;assert 64<=target and target+64<=len(image),'Entry must have actual backed code'
     before=(ev/'Image.sukisu-susfs-before-kpm').read_bytes();kp=(ev/'kpimg.pinned').read_bytes()
-    assert len(kp)==294144 and sha(kp)=='396a20777668e85d674a23dd3945815f285332b5358be0bfc97297935e2d130b'
+    assert len(kp)==294144 and sha(kp)=='1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4'
     start=(len(before)+4095)//4096*4096
     assert image[start:start+64]==kp[:64] and target==start+4096
     assert len(image)>=start+len(kp) and image[target:target+64]==kp[4096:4160] and any(image[target:target+64])

@@ -4,6 +4,28 @@ from pathlib import Path
 import sys
 f=Path(sys.argv[1])/'KernelSU/kernel/extension/kpm/kpm.c'
 s=f.read_text()
+if (f.parent/'bridge.h').is_file():
+    assert 'access_ok(VERIFY_WRITE, u64_to_user_ptr(cmd.result_code), sizeof(result))' in s
+    for contract in ['len >= size', 'SUKISU_KPM_OUTPUT_MAX', '-ENAMETOOLONG', 'copy_to_user', 'result_code']:
+        assert contract in s, contract
+    # No user syscall in 4.14 has the required pt_regs prototype. This endpoint
+    # is resolved by the paired runtime; until it is hooked it returns an error.
+    endpoint='noinline __nocfi long ksu_kpm_bridge_trampoline(const struct pt_regs *regs)\n{\n    (void)regs;\n    /* Complete inline-hook window; the unhooked endpoint reports no support. */\n    __asm__ volatile("nop; nop; nop; nop" ::: "memory");\n    return -EOPNOTSUPP;\n}\nEXPORT_SYMBOL(ksu_kpm_bridge_trampoline);\n\n'
+    needle='long __nocfi sukisu_kpm_bridge('
+    assert s.count(needle)==1
+    s=s.replace(needle,endpoint+needle,1)
+    s=s.replace('long __nocfi sukisu_kpm_bridge(', 'noinline long __nocfi sukisu_kpm_bridge(',1)
+    needle='        fn = (handler_t)find_kernel_symbol_exact("__arm64_sys_truncate");'
+    replacement='        fn = (handler_t)find_kernel_symbol_exact("ksu_kpm_bridge_trampoline");\n        if (!fn) fn = (handler_t)find_kernel_symbol_exact("__arm64_sys_truncate");'
+    assert s.count(needle)==1;s=s.replace(needle,replacement,1)
+    s=s.replace('#include "bridge.h"','#include "bridge.h"\n#include <linux/export.h>',1)
+    # Prefix private unity-build helpers to avoid colliding with other includes.
+    for name in ['copy_string','copy_output','handle_kpm']:
+        import re
+        s=re.sub(r'\b'+name+r'\b','chopin_kpm_'+name,s)
+    f.write_text(s,encoding='utf-8',newline='\n')
+    print('Current KPM copy contract and real kernel-only endpoint retained')
+    raise SystemExit(0)
 def edit(old,new):
     global s
     assert s.count(old)==1,(old,s.count(old))
