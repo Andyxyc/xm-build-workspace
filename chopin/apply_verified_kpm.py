@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse,hashlib,json,re,secrets,subprocess
 from verify_image_entry import inspect,inspect_kpm
+from verify_kpm_resolver import verify as verify_resolver
 if not __debug__:raise SystemExit('Normal Python mode is required')
 p=argparse.ArgumentParser();p.add_argument('--tool',type=Path,required=True);p.add_argument('--before',type=Path,required=True);p.add_argument('--kpimg',type=Path,required=True);p.add_argument('--system-map',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--report',type=Path,required=True);p.add_argument('--log',type=Path,required=True);a=p.parse_args()
 assert not a.output.exists() and not a.report.exists() and not a.log.exists(),'Preserve earlier results'
@@ -18,6 +19,7 @@ assert key.strip().decode() not in log,'Root key leaked by tool'
 a.log.write_text(log,encoding='utf-8');print(log)
 assert q.returncode==0,'KPM postprocessor failed'
 image=a.output.read_bytes();report=inspect_kpm(image,before,kp)
+report['full_kallsyms_validation']=verify_resolver(before,a.system_map.read_text(),log)
 symbols={s[2]:int(s[0],16) for line in a.system_map.read_text().splitlines() if len(s:=line.split())==3}
 base=re.findall(r'kernel base address: 0x([0-9a-f]+)',log);assert len(base)==1
 base=int(base[0],16);checked=[]

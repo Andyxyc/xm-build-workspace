@@ -3,7 +3,7 @@ name: Chopin KPM correction from retained compiled Image
 on:
   push:
     branches: [chopin-sukisu-20261025]
-    paths: ['.github/workflows/chopin-kpm-reprocess.yml']
+    paths: ['.github/workflows/chopin-kpm-reprocess.yml', 'chopin/verify_kpm_resolver.py']
   workflow_dispatch:
 
 permissions:

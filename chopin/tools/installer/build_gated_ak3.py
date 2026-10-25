@@ -18,7 +18,11 @@ image=images[0].read_bytes();assert digest(image)==g['image_sha256']
 ev=a.candidate/'release-evidence'
 sys.path.insert(0,str(root.parents[1]))
 from verify_image_entry import inspect_kpm
+from verify_kpm_resolver import verify as verify_resolver
 entry=inspect_kpm(image,(ev/'Image.sukisu-susfs-before-kpm').read_bytes(),(ev/'kpimg.pinned').read_bytes())
+resolver_log=a.candidate/'build-logs/kpm-reprocess.log'
+if not resolver_log.is_file():resolver_log=a.candidate/'build-logs/kpm-postprocess.log'
+entry['full_kallsyms_validation']=verify_resolver((ev/'Image.sukisu-susfs-before-kpm').read_bytes(),(ev/'System.map').read_text(),resolver_log.read_text())
 assert entry['kpimg_sha256']=='396a20777668e85d674a23dd3945815f285332b5358be0bfc97297935e2d130b'
 entry_receipt=json.loads((ev/'kpm-entry-gate.json').read_text())
 assert entry_receipt['image_sha256']==digest(image) and entry_receipt['status']==entry['status']
@@ -80,6 +84,10 @@ for name,expected in licenses.items():
     (stage/'LICENSES'/name).write_bytes(blob)
 with (stage/'SOURCE.txt').open('a',newline='\n') as source:
     source.write('Installer source snapshot: https://github.com/Andyxyc/xm-build-workspace/tree/'+a.installer_commit+'/chopin/tools/installer\n')
+    kpm_source=ev/'kpm-reprocess-source-commit.txt'
+    kpm_commit=kpm_source.read_text().strip() if kpm_source.is_file() else build_commit
+    assert re.fullmatch('[0-9a-f]{40}',kpm_commit)
+    source.write('KPM processing source snapshot: https://github.com/Andyxyc/xm-build-workspace/tree/'+kpm_commit+'\n')
 # The private module manifest remains local; only a minimal gate receipt ships.
 (stage/'ABI-GATE.json').write_text(json.dumps(dict(status=g['status'],image_sha256=g['image_sha256'],imports_checked=g['imports_checked'],actual_image_export_crcs_checked=g['actual_image_export_crcs_checked'],hardware_validated=False),indent=2),newline='\n')
 (stage/'ENTRY-GATE.json').write_text(json.dumps(entry,indent=2)+'\n',encoding='utf-8',newline='\n')

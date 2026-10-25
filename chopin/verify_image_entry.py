@@ -33,6 +33,11 @@ def inspect_kpm(image,before,kpimg):
     size,kpsize=struct.unpack_from('<qq',image,aligned+64+8)
     if size!=len(before) or kpsize!=len(kpimg):
         raise ValueError('KPM saved image/payload lengths disagree')
+    setup=aligned+64
+    if image[setup+160:setup+168]!=before[:8]:
+        raise ValueError('KPM saved entry header does not match the unpatched Image')
+    if struct.unpack_from('<q',image,setup+24)[0]!=struct.unpack_from('<Q',before,16)[0] or struct.unpack_from('<q',image,setup+32)[0]!=12 or struct.unpack_from('<q',image,setup+40)[0]!=aligned:
+        raise ValueError('KPM setup memory size, page shift or payload offset disagrees with the Image')
     r.update(before_sha256=original['image_sha256'],kpimg_sha256=hashlib.sha256(kpimg).hexdigest(),kpimg_bytes=len(kpimg),kpimg_offset=aligned,kp_version_bytes=kpimg[8:12].hex(),status='PASS_ENTRY_AND_COMPLETE_PINNED_KPM_PAYLOAD_ONLY',hardware_validated=False)
     return r
 
