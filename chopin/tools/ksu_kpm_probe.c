@@ -53,7 +53,8 @@ int main(int argc, char **argv)
     if (ioctl(fd,KSU_IOCTL_EXTENSION,&extension)<0 || !(extension.supported&KSU_FEATURE_FLAG_SUPPORTED) || !extension.value) {
         fputs("KPM extension unavailable\n",stderr);goto done;
     }
-    int rc=kpm(fd,SUKISU_KPM_VERSION,buffer,sizeof(buffer));
+    /* The current legacy driver bounds VERSION by its 256-byte scratch string. */
+    int rc=kpm(fd,SUKISU_KPM_VERSION,buffer,256);
     if (rc<0) {fprintf(stderr,"KPM version error=%d\n",rc);goto done;}
     printf("KPM version=%.*s\n",(int)sizeof(buffer),buffer);
     before=kpm(fd,SUKISU_KPM_NUM,NULL,0);
