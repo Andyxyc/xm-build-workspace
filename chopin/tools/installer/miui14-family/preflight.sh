@@ -28,7 +28,7 @@ chopin_preflash_verify() {
   ) || abort "Repacked kernel, stock ramdisk or DTB verification failed";
   CHOPIN_NEW_IMAGE_SHA=$(chopin_sha "$AKHOME/boot-new.img");
   [ ${#CHOPIN_NEW_IMAGE_SHA} = 64 ] || abort "Cannot hash repacked boot";
-  ui_print "Repacked header/kernel/ramdisk/DTB verified";
+  ui_print "Boot image OK.";
 }
 
 chopin_record_attempt() {
@@ -59,5 +59,5 @@ chopin_postflash_verify() {
   [ -f "$CHOPIN_ATTEMPT_MARKER" ] && [ ! -L "$CHOPIN_ATTEMPT_MARKER" ] || abort "Attempt journal is unavailable after write";
   printf 'phase=full_partition_readback_verified\nreadback_sha256=%s\n' "$actual" >> "$CHOPIN_ATTEMPT_MARKER" || abort "Cannot persist completed readback journal";
   sync;
-  ui_print "Full boot partition readback verified";
+  ui_print "Boot readback OK.";
 }

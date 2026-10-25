@@ -5,7 +5,7 @@ SKIPUNZIP=1
 [ "$BOOTMODE" = true ] || abort "Use the AnyKernel3 recovery entry for recovery installation";
 [ "$(getprop ro.product.device)" = chopin ] || abort "Device is not chopin";
 [ "$(getprop ro.build.version.sdk)" = 33 ] || abort "Android 13 is required";
-case "$(getprop ro.miui.ui.version.name)" in V14|14) ;; *) abort "MIUI 14 is required";; esac;
+case "$(getprop ro.miui.ui.version.name)" in V14|V140|14|140) ;; *) abort "MIUI 14 is required";; esac;
 [ -n "$ZIPFILE" ] && [ -f "$ZIPFILE" ] || abort "Installation ZIP is unavailable";
 [ -d "$TMPDIR" ] || abort "Installer temporary directory is unavailable";
 chopin_bridge=$(mktemp -d "$TMPDIR/xiaomo-ak3.XXXXXX") || abort "Cannot create installer workspace";

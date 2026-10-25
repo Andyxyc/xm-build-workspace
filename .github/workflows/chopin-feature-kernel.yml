@@ -99,11 +99,11 @@ jobs:
         working-directory: builder
         run: |
           bash scripts/kernelsu.sh
-          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin ce75122bec7423e0f1fa06e3e9a174085c5231ab
-          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach ce75122bec7423e0f1fa06e3e9a174085c5231ab
+          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1
+          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1
           actual="$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
           echo "SukiSU builtin SHA: $actual"
-          test "$actual" = "ce75122bec7423e0f1fa06e3e9a174085c5231ab"
+          test "$actual" = "a864d15ab8984c15bf585fb9e4dfbc6ccc8aaee1"
 
       - name: Port SUSFS 1.5.5 and old-kernel interfaces
         working-directory: builder
@@ -149,6 +149,7 @@ jobs:
           python3 ../chopin/port_selinux_query_snapshot.py "$WORKSPACE/android-kernel"
           python3 ../chopin/complete_selinux_query_view.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_requested_features.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_ci_extensions.py "$WORKSPACE/android-kernel"
           python3 ../chopin/tools/check_adb_root_path.py "$WORKSPACE/android-kernel/KernelSU/kernel/feature/adb_root.c"
           python3 ../chopin/tools/check_su_visibility.py "$WORKSPACE/android-kernel/KernelSU/kernel/feature/sucompat.c"
           grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
@@ -265,6 +266,7 @@ jobs:
             test ! -f "$WORKSPACE/android-kernel/out/$f" || cp "$WORKSPACE/android-kernel/out/$f" release-evidence/abi-types/
           done
           git -C "$WORKSPACE/android-kernel" diff --binary > release-evidence/vendor-changes.patch
+          cp "$WORKSPACE/android-kernel/chopin-ci-port.json" release-evidence/chopin-ci-port.json
           git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > release-evidence/SukiSU-changes.patch
           cp "$WORKSPACE/android-kernel/KernelSU/kernel/chopin_susfs155_prctl.c" release-evidence/
           for f in chopin_susfs_typed_reboot.c chopin_susfs_typed_abi.h chopin_avc_audit_display.c chopin_selinux_query_snapshot.c; do

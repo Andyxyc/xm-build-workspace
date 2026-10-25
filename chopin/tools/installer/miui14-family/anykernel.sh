@@ -1,6 +1,6 @@
 ### chopin / MIUI 14 / Android 13 compatible driver family
 properties() { '
-kernel.string=小墨 XiaoMo
+kernel.string=小莫 XiaoMo
 do.devicecheck=1
 do.modules=0
 do.systemless=0
@@ -20,8 +20,8 @@ NO_MAGISK_CHECK=1;
 . "$AKHOME/tools/chopin-preflight.sh";
 . "$AKHOME/tools/miui14-compat.sh";
 
-ui_print " " "小墨 XiaoMo" "------------------------------";
-ui_print "[1/5] Checking device and driver compatibility";
+ui_print " " "小莫 XiaoMo" " ";
+ui_print "Checking compatibility...";
 chopin_family_rom;
 case "$SLOT" in _a|_b) ;; *) abort "Unknown active boot slot";; esac;
 [ "$BLOCK" = "/dev/block/by-name/boot$SLOT" ] || abort "Unexpected active boot target";
@@ -30,7 +30,7 @@ cd "$AKHOME" || abort "Installer workspace is unavailable";
 sha256sum -c payload.sha256 > "$AKHOME/payload-check.log" 2>&1 || abort "Package checksum verification failed";
 chopin_family_modules /vendor/lib/modules "$AKHOME/expected/vendor-modules.sha256";
 
-ui_print "[2/5] Reading and backing up the active boot";
+ui_print "Saving boot backup...";
 split_boot 2>> "$AKHOME/install-detail.log";
 [ "$(wc -c < "$BOOTIMG")" -eq 134217728 ] || abort "Incomplete boot readback";
 CHOPIN_BACKUP_SHA=$(sha256sum "$BOOTIMG" | cut -d' ' -f1);
@@ -46,13 +46,13 @@ fi;
 CHOPIN_DETAIL_LOG=$(mktemp "$backup_dir/install${SLOT}-XXXXXXXX.log") || abort "Cannot create installation log";
 cat "$AKHOME/install-detail.log" >> "$CHOPIN_DETAIL_LOG";
 
-ui_print "[3/5] Preserving this firmware's boot components";
+ui_print "Preparing boot image...";
 chopin_family_header "$BOOTIMG" "$AKHOME/current-header";
 chopin_family_ramdisk "$SPLITIMG/ramdisk.cpio" 2>> "$CHOPIN_DETAIL_LOG";
 chopin_family_dtb "$SPLITIMG/dtb";
 
-ui_print "[4/5] Installing to the verified active boot slot";
+ui_print "Writing boot$SLOT...";
 flash_boot 2>> "$CHOPIN_DETAIL_LOG";
 chopin_postflash_verify;
-ui_print "[5/5] Full boot readback verified";
-ui_print "Backup: $backup_file" "Log: $CHOPIN_DETAIL_LOG" "Installation completed. Reboot manually when ready.";
+
+ui_print "Backup: $backup_file" "Log: $CHOPIN_DETAIL_LOG" "Done. Reboot when ready.";

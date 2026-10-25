@@ -3,7 +3,7 @@
 chopin_family_rom() {
   [ "$(getprop ro.product.device)" = chopin ] || abort "This package supports chopin only";
   [ "$(getprop ro.build.version.sdk)" = 33 ] || abort "Android 13 is required";
-  case "$(getprop ro.miui.ui.version.name)" in V14|14) ;; *) abort "MIUI 14 is required";; esac;
+  case "$(getprop ro.miui.ui.version.name)" in V14|V140|14|140) ;; *) abort "MIUI 14 is required";; esac;
 }
 
 chopin_family_modules() {

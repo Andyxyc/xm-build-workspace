@@ -49,7 +49,7 @@ with zipfile.ZipFile(a.zip) as z:
     assert bridge.startswith(b'SKIPUNZIP=1\n') and b'tools/ak3-update-binary.sh' in bridge
     assert b'3 1 "$ZIPFILE"' in bridge and b'AnyKernel3 installation failed' in bridge
     assert z.read('META-INF/com/google/android/updater-script').startswith(b'#MAGISK\n')
-    assert z.read('module.prop').decode().splitlines()[1]=='name=小墨 XiaoMo'
+    assert z.read('module.prop').decode().splitlines()[1]=='name=小莫 XiaoMo'
 
     script=z.read('anykernel.sh').decode();assert '[ "$SLOT" = _a ]' in script and 'NO_MAGISK_CHECK=1' in script
     assert 'do.modules=0' in script and 'NO_VBMETA_PARTITION_PATCH=1' in script and script.rstrip().endswith('flash_boot;\nchopin_postflash_verify;')

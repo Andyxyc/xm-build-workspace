@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='chopin-family-files-') as temp:
   assert r.returncode==want,(name,r.returncode,r.stdout,r.stderr)
   results.append(dict(case=name,exit=r.returncode,scope='ORDINARY_FILES_ONLY_NO_DEVICE'))
   return r
- for name,device,sdk,miui,want in [('base-rom','chopin','33','V14',0),('different-miui14-incremental','chopin','33','14',0),('wrong-model','other','33','V14',99),('wrong-android','chopin','34','V14',99),('wrong-miui','chopin','33','V12',99)]:
+ for name,device,sdk,miui,want in [('base-rom','chopin','33','V14',0),('miui-real-V140','chopin','33','V140',0),('miui-numeric-140','chopin','33','140',0),('different-miui14-incremental','chopin','33','14',0),('wrong-model','other','33','V14',99),('wrong-android','chopin','34','V14',99),('wrong-miui','chopin','33','V12',99)]:
   prop='getprop() { case "$1" in ro.product.device) echo '+device+';; ro.build.version.sdk) echo '+sdk+';; ro.miui.ui.version.name) echo '+miui+';; *) echo DIFFERENT-ROM-INCREMENTAL;; esac; }\n'
   run(name,prop+'chopin_family_rom',want)
  run('matching-driver-family',f'chopin_family_modules {mods} {root}/modules.sha256')

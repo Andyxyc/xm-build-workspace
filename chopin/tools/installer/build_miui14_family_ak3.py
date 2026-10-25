@@ -15,7 +15,8 @@ with zipfile.ZipFile(a.base_zip) as z:
  manifest={n:h for h,n in (l.split('  ',1) for l in files['payload.sha256'].decode().splitlines())}
  assert set(manifest)==set(files)-{'payload.sha256'}
  for n,h in manifest.items():assert sha(files[n])==h
-assert sha(files['Image'])==abi['image_sha256'] and report['kallsyms_link_time_symbols']==129832
+assert sha(files['Image'])==abi['image_sha256']
+assert report['kallsyms_link_time_symbols']==json.loads(files['ENTRY-GATE.json'])['full_kallsyms_validation']['symbols_checked'] and report['kallsyms_link_time_symbols']>100000
 for n in ['payload.sha256','stock-dtb.bin','tools/stock-ramdisk-source.sh','expected/header.sha256']:del files[n]
 for n,s in [('anykernel.sh','anykernel.sh'),('customize.sh','customize.sh'),('tools/chopin-preflight.sh','preflight.sh'),('tools/miui14-compat.sh','compat.sh')]:files[n]=(source/s).read_bytes();assert b'\r' not in files[n]
 modules=abi['modules'];assert all(v['vermagic']=='4.14.186-gaa24d707761c SMP preempt mod_unload modversions aarch64' for v in modules.values())
@@ -26,7 +27,7 @@ for start,size in [(8,4),(16,4),(44,4),(576,32),(1648,4)]:h[start:start+size]=by
 files['expected/family-header.sha256']=(sha(h)+'\n').encode()
 policy=dict(model='chopin',equivalent='Redmi Note 10 Pro 5G / POCO X3 GT',android_sdk=33,miui='14',rom_incremental_binding=None,account_binding=False,serial_binding=False,device_uuid_binding=False,uid_binding=False,active_slots=['a','b'],driver_policy='All ten independently audited modules must match; reject additional or changed drivers',ramdisk_policy='Preserve current clean ramdisk; restore its own embedded Magisk backup if present; reject incomplete backup',dtb_policy='Preserve current DTB and verify identical bytes after repack',boot_header_policy='Preserve current boot header; family layout allows different OS patch stamp and DTB length',kernel_sha256=abi['image_sha256'],source_commit=a.source_commit,hardware_validated=False)
 files['COMPATIBILITY.json']=(json.dumps(policy,indent=2)+'\n').encode()
-files['module.prop']=b'id=xiaomo_chopin_ak3\n'+('name=小墨 XiaoMo\nversion=r6 MIUI14 FAMILY TEST CANDIDATE\nversionCode=6\nauthor=XiaoMo\ndescription=Chopin MIUI14 Android13 compatible driver family. Guarded AnyKernel3 installer receipt.\n').encode()
+files['module.prop']=b'id=xiaomo_chopin_ak3\n'+('name=小莫 XiaoMo\nversion=r7 CI41083 TEST CANDIDATE\nversionCode=6\nauthor=XiaoMo\ndescription=Chopin MIUI14 Android13 compatible driver family. Guarded AnyKernel3 installer receipt.\n').encode()
 files['SOURCE.txt']+=('MIUI14 family installer: https://github.com/Andyxyc/xm-build-workspace/tree/'+a.source_commit+'/chopin/tools/installer\nNo device identity or account binding. Hardware acceptance on each firmware remains separate.\n').encode()
 assert len(files)==30
 files['payload.sha256']=''.join(sha(b)+'  '+n+'\n' for n,b in sorted(files.items())).encode()

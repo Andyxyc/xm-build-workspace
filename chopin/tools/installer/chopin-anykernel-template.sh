@@ -1,6 +1,6 @@
 ### chopin / MIUI 14 Android 13 source-built test candidate
 properties() { '
-kernel.string=小墨 XiaoMo
+kernel.string=小莫 XiaoMo
 do.devicecheck=1
 do.modules=0
 do.systemless=0
