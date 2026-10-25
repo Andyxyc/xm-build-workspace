@@ -6,6 +6,8 @@
 struct chopin_original_policy {
     struct selinux_state state;
     struct selinux_ss server;
+    void *original_bytes;
+    size_t original_length;
 };
 static struct chopin_original_policy *chopin_original_policy;
 static DEFINE_MUTEX(chopin_policy_snapshot_mutex);
@@ -18,7 +20,8 @@ static noinline int chopin_selinux_capture_original(void)
     struct chopin_original_policy *snapshot = NULL;
     struct policy_file file;
     void *bytes = NULL;
-    size_t length = 0;
+    size_t length = 0, capacity;
+    u32 type_count;
     bool parsed = false, sidtab_ready = false;
     u16 map_size;
     int error = 0;
@@ -29,13 +32,44 @@ static noinline int chopin_selinux_capture_original(void)
         goto done;
     }
     chopin_policy_snapshot_attempted = true;
-    error = security_read_policy(&selinux_state, &bytes, &length);
-    if (error)
+    if (!READ_ONCE(selinux_state.initialized)) {
+        error = -ENODATA;
         goto fail;
-    if (!length || length > 64U * 1024U * 1024U) {
+    }
+    /* The parser adds self-type ebitmap entries on some device policies.
+     * Reserve the same bounded growth used by upstream ksu_dup_sepolicy. */
+    read_lock(&selinux_state.ss->policy_rwlock);
+    length = selinux_state.ss->policydb.len;
+    type_count = selinux_state.ss->policydb.p_types.nprim;
+    read_unlock(&selinux_state.ss->policy_rwlock);
+    if (!length || length > 64U * 1024U * 1024U ||
+        type_count > (64U * 1024U * 1024U - length) / (sizeof(u32) + sizeof(u64))) {
         error = -EOVERFLOW;
         goto fail;
     }
+    capacity = length + (size_t)type_count * (sizeof(u32) + sizeof(u64));
+    bytes = vmalloc_user(capacity);
+    if (!bytes) {
+        error = -ENOMEM;
+        goto fail;
+    }
+    file.data = bytes;
+    file.len = capacity;
+    read_lock(&selinux_state.ss->policy_rwlock);
+    error = policydb_write(&selinux_state.ss->policydb, &file);
+    /* This vendor writer omits its backported netlink-route config bit. */
+    if (!error && selinux_state.ss->policydb.android_netlink_route) {
+        size_t offset = 2 * sizeof(u32) + strlen(POLICYDB_STRING) + sizeof(u32);
+        __le32 *config = (__le32 *)((char *)bytes + offset);
+        if (capacity - file.len < offset + sizeof(*config))
+            error = -EINVAL;
+        else
+            *config = cpu_to_le32(le32_to_cpu(*config) | POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE);
+    }
+    read_unlock(&selinux_state.ss->policy_rwlock);
+    if (error)
+        goto fail;
+    length = capacity - file.len;
     snapshot = kzalloc(sizeof(*snapshot), GFP_KERNEL);
     if (!snapshot) {
         error = -ENOMEM;
@@ -83,8 +117,9 @@ static noinline int chopin_selinux_capture_original(void)
     read_unlock(&selinux_state.ss->policy_rwlock);
     snapshot->state.ss = &snapshot->server;
     /* Query SIDs belong to this independent table; live enforcement is untouched. */
+    snapshot->original_bytes = bytes;
+    snapshot->original_length = length;
     smp_store_release(&chopin_original_policy, snapshot);
-    vfree(bytes);
     pr_info("chopin selinux: original policy query snapshot ready (%zu bytes)\n", length);
     goto done;
 fail:
@@ -113,6 +148,19 @@ struct selinux_state *chopin_selinux_query_state(struct selinux_state *live)
         return live;
     snapshot = smp_load_acquire(&chopin_original_policy);
     return snapshot ? &snapshot->state : live;
+}
+
+int chopin_selinux_read_query_policy(struct selinux_state *state, void **data, size_t *length)
+{
+    struct chopin_original_policy *snapshot = smp_load_acquire(&chopin_original_policy);
+    if (!snapshot || state != &snapshot->state)
+        return security_read_policy(state, data, length);
+    *length = snapshot->original_length;
+    *data = vmalloc_user(*length);
+    if (!*data)
+        return -ENOMEM;
+    memcpy(*data, snapshot->original_bytes, *length);
+    return 0;
 }
 
 static int chopin_selinux_hide_get(u64 *value)

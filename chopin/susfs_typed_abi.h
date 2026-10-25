@@ -24,14 +24,14 @@ struct chopin_susfs_kstat {
     __aligned_u64 spoofed_dev;
     __u32 spoofed_nlink;
     __aligned_u64 spoofed_size;
-    __aligned_s64 spoofed_atime_tv_sec;
+    __s64 __attribute__((aligned(8))) spoofed_atime_tv_sec;
     __aligned_u64 spoofed_atime_tv_nsec;
-    __aligned_s64 spoofed_mtime_tv_sec;
+    __s64 __attribute__((aligned(8))) spoofed_mtime_tv_sec;
     __aligned_u64 spoofed_mtime_tv_nsec;
-    __aligned_s64 spoofed_ctime_tv_sec;
+    __s64 __attribute__((aligned(8))) spoofed_ctime_tv_sec;
     __aligned_u64 spoofed_ctime_tv_nsec;
     __aligned_u64 spoofed_blocks;
-    __aligned_s64 spoofed_blksize;
+    __s64 __attribute__((aligned(8))) spoofed_blksize;
     __u32 flags;
     __s32 err;
 };

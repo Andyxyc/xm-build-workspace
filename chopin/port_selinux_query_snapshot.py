@@ -46,11 +46,16 @@ for name in queries:
     assert body.count(old) == 1, name
     body = body.replace(old, '\tstruct selinux_state *state = chopin_selinux_query_state(fsi->state);', 1)
     text = text[:start] + body + text[end:]
+old = 'rc = security_read_policy(state, &plm->data, &plm->len);'
+assert text.count(old) == 1
+text = text.replace(old, 'rc = chopin_selinux_read_query_policy(state, &plm->data, &plm->len);', 1)
 path.write_text(text)
 edit('security/selinux/include/security.h', 'extern struct selinux_state selinux_state;',
      'extern struct selinux_state selinux_state;\n#ifdef CONFIG_KSU\n'
      'struct selinux_state *chopin_selinux_query_state(struct selinux_state *live);\n'
-     '#else\nstatic inline struct selinux_state *chopin_selinux_query_state(struct selinux_state *live)\n'
+     'int chopin_selinux_read_query_policy(struct selinux_state *state, void **data, size_t *length);\n'
+     '#else\n#define chopin_selinux_read_query_policy security_read_policy\n'
+     'static inline struct selinux_state *chopin_selinux_query_state(struct selinux_state *live)\n'
      '{\n\treturn live;\n}\n#endif')
 (ksu / 'chopin_selinux_query_snapshot.c').write_bytes(
     (Path(__file__).parent / 'selinux_query_snapshot.c').read_bytes())
