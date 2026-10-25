@@ -11,14 +11,18 @@ from installer_transport import NEW_UI,NEW_PROGRESS
 assert os.geteuid()==0,'Run only in the disposable CI runner chroot fixture'
 busybox=Path('/bin/busybox');assert busybox.is_file()
 results=[]
+family_mode="--family" in sys.argv
 def prepare(root,rom='V14.0.8.0.TKPCNXM'):
  for name in ['bin','system/bin','tmp','data/adb/modules_update/xiaomo_chopin_ak3','data/adb/chopin-kernel-backups','stage/expected']:(root/name).mkdir(parents=True,exist_ok=True)
  shutil.copyfile(busybox,root/'bin/busybox');(root/'bin/busybox').chmod(0o755)
  for n in ['sh','cat','cut','mkdir','mktemp','unzip','sha256sum','touch','printf','sync']:(root/'bin'/n).symlink_to('/bin/busybox')
  (root/'system/bin/sh').symlink_to('/bin/busybox')
- getprop='#!/bin/sh\ncase "$1" in ro.product.device) echo chopin;; ro.build.version.incremental) echo '+rom+';; esac\n'
+ miui='WRONG' if rom=='WRONG-ROM' else 'V140'
+ getprop='#!/bin/sh\ncase "$1" in ro.product.device) echo chopin;; ro.build.version.sdk) echo 33;; ro.miui.ui.version.name) echo '+miui+';; ro.build.version.incremental) echo '+rom+';; esac\n'
  (root/'bin/getprop').write_text(getprop);(root/'bin/getprop').chmod(0o755)
- for n in ['customize.sh','ak3-preflight.sh']:(root/n).write_bytes((here/n).read_bytes())
+ for n in ['customize.sh','ak3-preflight.sh']:
+  src=(here/'miui14-family'/('preflight.sh' if n=='ak3-preflight.sh' else n)) if family_mode else here/n
+  (root/n).write_bytes(src.read_bytes())
 def run(root,script,fd=None):
  (root/'run.sh').write_text(script)
  command=['chroot',str(root),'/bin/sh','/run.sh']
@@ -65,5 +69,6 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
  assert markers[0].read_text().startswith('phase=prepared\n') and not (root/'dev').exists()
  results.append({'case':'duplicate-kernel-attempt-refused','exit':99,'scope':'REAL_JOURNAL_FUNCTION_NO_DEVICE'})
 report={'status':'PASS_MANAGER_ADAPTER_SOCKET_OUTPUT_AND_DUPLICATE_ATTEMPT_FIXTURES','partition_writes':0,'real_device_test':False,'cases':results,'source_sha256':{n:hashlib.sha256((here/n).read_bytes()).hexdigest() for n in ['customize.sh','installer_transport.py','ak3-preflight.sh']}}
-Path('installer-entry-fixtures.json').write_text(json.dumps(report,indent=2))
+report['family_mode']=family_mode
+Path('installer-entry-family-fixtures.json' if family_mode else 'installer-entry-fixtures.json').write_text(json.dumps(report,indent=2))
 print(json.dumps(report,indent=2))

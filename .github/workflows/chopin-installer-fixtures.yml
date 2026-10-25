@@ -20,10 +20,12 @@ jobs:
           sudo timeout 180 apt-get install -y --no-install-recommends busybox-static
       - name: Exercise the actual adapter and output functions without an Image
         run: sudo python3 chopin/tools/installer/test_entrypoints.py
+      - name: Exercise family manager entry with the actual V140 property
+        run: sudo python3 chopin/tools/installer/test_entrypoints.py --family
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: chopin-installer-entry-fixtures
-          path: installer-entry-fixtures.json
+          path: installer-entry*-fixtures.json
           if-no-files-found: error
           retention-days: 14

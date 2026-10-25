@@ -15,9 +15,9 @@ jobs:
         run: |
           git init manager-source
           git -C manager-source remote add origin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
-          git -C manager-source fetch --depth=1 origin d6b36700f3bd0a4c1585549b470dd30bb8774534
+          git -C manager-source fetch --depth=1 origin 4cf754b254b918724cf28ce0f25e615efc46708e
           git -C manager-source checkout --detach FETCH_HEAD
-          test "$(git -C manager-source rev-parse HEAD)" = d6b36700f3bd0a4c1585549b470dd30bb8774534
+          test "$(git -C manager-source rev-parse HEAD)" = 4cf754b254b918724cf28ce0f25e615efc46708e
           python3 chopin/tools/patch_manager_ui.py manager-source
       - uses: actions/setup-java@v4
         with:
@@ -27,17 +27,12 @@ jobs:
       - name: Install the SDK components required by the pinned project
         run: |
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
-      - name: Reuse the exact released ARM64 daemon
-        run: |
-          mkdir -p manager-source/manager/app/src/main/jniLibs/arm64-v8a
-          curl --fail --location --retry 2 --max-time 180 https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v4.2.1-r2/ksud-aarch64-linux-android -o manager-source/manager/app/src/main/jniLibs/arm64-v8a/libksud.so
-          echo "abc3822f6b4b8521d57f9159aa5b7a56b51b4013eb13f9e38297339cbd79ddec  manager-source/manager/app/src/main/jniLibs/arm64-v8a/libksud.so" | sha256sum -c -
       - name: Compile unsigned ARM64 manager
         working-directory: manager-source/manager
         run: |
           set -o pipefail
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace -PKSU_PACKAGE_NAME=com.xiaomo.sukisu.chopin -PKSU_NAME="SukiSU XiaoMo" 2>&1 | tee "$GITHUB_WORKSPACE/manager-build.log"
+          ./gradlew assembleRelease --no-daemon --stacktrace -PKSU_PACKAGE_NAME=com.xiaomo.sukisu.chopin -PKSU_NAME="SukiSU 小莫" 2>&1 | tee "$GITHUB_WORKSPACE/manager-build.log"
       - name: Collect APK and public build evidence
         if: always()
         run: |
