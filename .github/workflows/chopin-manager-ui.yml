@@ -33,7 +33,8 @@ jobs:
         run: |
           set -o pipefail
           chmod +x gradlew
-          ./gradlew :app:testReleaseUnitTest --tests com.sukisu.ultra.ui.screen.install.InstallInputTest :app:assembleRelease --no-daemon --stacktrace -PKSU_PACKAGE_NAME=com.xiaomo.sukisu.chopin -PKSU_NAME="SukiSU 小莫" 2>&1 | tee "$GITHUB_WORKSPACE/manager-build.log"
+          ./gradlew -p install-input-tests test --tests com.sukisu.ultra.ui.screen.install.InstallInputTest --no-daemon --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/manager-build.log"
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace -PKSU_PACKAGE_NAME=com.xiaomo.sukisu.chopin -PKSU_NAME="SukiSU 小莫" 2>&1 | tee -a "$GITHUB_WORKSPACE/manager-build.log"
       - name: Collect APK and public build evidence
         if: always()
         run: |
@@ -44,7 +45,7 @@ jobs:
           find manager-source/manager/app/build/outputs/apk/release -name '*.apk' -type f -exec cp '{}' manager-evidence/ \; 2>/dev/null || test ! -d manager-source/manager/app/build/outputs/apk/release
           find manager-evidence -maxdepth 1 -type f -exec sha256sum '{}' \; > manager-evidence-files.sha256
           cp manager-evidence-files.sha256 manager-evidence/
-          cp -r manager-source/manager/app/build/test-results/testReleaseUnitTest manager-evidence/ 2>/dev/null || test ! -d manager-source/manager/app/build/test-results/testReleaseUnitTest
+          cp -r manager-source/manager/install-input-tests/build/test-results/test manager-evidence/ 2>/dev/null || test ! -d manager-source/manager/install-input-tests/build/test-results/test
       - uses: actions/upload-artifact@v4
         if: always()
         with:

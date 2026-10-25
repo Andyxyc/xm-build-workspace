@@ -65,4 +65,24 @@ for folder,text in [('values','Select an AnyKernel3 kernel ZIP.'),('values-zh-rC
   s=p.read_text(encoding='utf-8');assert s.count('</resources>')==1 and 'name="select_ak3_zip"' not in s
   s=s.replace('</resources>',f'    <string name="select_ak3_zip">{text}</string>\n</resources>')
   p.write_text(s,encoding='utf-8',newline='\n')
+# Keep routing tests independent of Android variant test task naming.
+harness=root/'manager/install-input-tests';harness.mkdir()
+(harness/'settings.gradle.kts').write_text('rootProject.name = "install-input-tests"\n',encoding='utf-8')
+(harness/'build.gradle.kts').write_text('''plugins { kotlin("jvm") version "2.4.20" }
+repositories { mavenCentral() }
+dependencies { testImplementation("junit:junit:4.13.2") }
+kotlin { jvmToolchain(21) }
+sourceSets {
+    main {
+        kotlin.srcDir("../app/src/main/java")
+        kotlin.include("com/sukisu/ultra/ui/screen/install/InstallInput.kt")
+        kotlin.include("com/sukisu/ultra/ui/navigation3/ZipFileType.kt")
+    }
+    test {
+        kotlin.srcDir("../app/src/test/java")
+        kotlin.include("com/sukisu/ultra/ui/screen/install/InstallInputTest.kt")
+    }
+}
+tasks.test { useJUnit() }
+''',encoding='utf-8')
 print('Non-GKI exposes AK3; content determines routing before boot patching')
