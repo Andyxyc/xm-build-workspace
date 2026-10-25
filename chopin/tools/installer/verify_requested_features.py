@@ -43,7 +43,9 @@ def calls(caller,callee):
 
 edges=[('c_show','ksu_cpu_identity_get'),('midr_el1_show','ksu_cpu_identity_midr'),
        ('emulate_mrs','ksu_cpu_identity_midr'),('sel_open_handle_status','chopin_selinux_query_state'),
-       ('selinux_setprocattr','chopin_selinux_query_state'),('SyS_newuname','susfs_spoof_uname')]
+       ('selinux_setprocattr','chopin_selinux_query_state'),('SyS_newuname','susfs_spoof_uname'),
+       ('ksu_handle_faccessat','__ksu_is_allow_uid_for_current'),
+       ('ksu_handle_stat','__ksu_is_allow_uid_for_current')]
 records=[dict(caller=x,callee=y,sites=calls(x,y)) for x,y in edges]
 avc=calls('slow_avc_audit','chopin_avc_audit_tsid');assert len(avc)>=2,'Both source and target must use audit rendering'
 for name in ['ksu_adb_root_handle_execveat','ksu_adb_root_init','ksu_adb_root_handler']:

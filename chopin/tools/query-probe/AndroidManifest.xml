@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.chopin.queryprobe" android:versionCode="6" android:versionName="r6">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="32" />
+  <application android:label="XiaoMo Query Probe" android:allowBackup="false" android:debuggable="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <activity android:name=".QueryActivity" android:exported="true" />
+  </application>
+</manifest>

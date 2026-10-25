@@ -1,0 +1,22 @@
+name: Chopin ordinary app query observer
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/query-probe/**', '.github/workflows/chopin-query-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and verify ordinary app using existing SDK
+        run: python3 chopin/tools/query-probe/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopin-ordinary-query-probe
+          path: query-probe-out/*
+          if-no-files-found: error
+          retention-days: 14
