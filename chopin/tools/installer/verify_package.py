@@ -34,7 +34,7 @@ with zipfile.ZipFile(a.zip) as z:
     if not slim: assert sha(gzip.decompress(z.read('stock-ramdisk.cpio.gz')))=='58e70342f8d631f26c95546f787933b744f8fbb67412ca22be561c0a30b42095'
     stock_source=z.read('tools/stock-ramdisk-source.sh')
     assert b'58e70342f8d631f26c95546f787933b744f8fbb67412ca22be561c0a30b42095' in stock_source
-    assert b'use the full XiaoMo AK3 fallback ZIP' in stock_source
+    assert b'use the full AK3 fallback ZIP' in stock_source
     assert sha(z.read('stock-dtb.bin'))=='d6aa88bad3591b62473a2b753ccd19dc371dbb30bd8e1efa487c651fdefd27fc'
     assert z.read('expected/header.sha256').decode().strip()=='597abf508e7e9fd153f952a352e04e09153945aab043113c07347a3c71674d40'
     core=z.read('tools/ak3-core.sh');original=subprocess.check_output(['git','-C',str(a.ak3),'show','HEAD:tools/ak3-core.sh'])
@@ -51,7 +51,7 @@ with zipfile.ZipFile(a.zip) as z:
     assert bridge.startswith(b'SKIPUNZIP=1\n') and b'tools/ak3-update-binary.sh' in bridge
     assert b'3 1 "$ZIPFILE"' in bridge and b'AnyKernel3 installation failed' in bridge
     assert z.read('META-INF/com/google/android/updater-script').startswith(b'#MAGISK\n')
-    assert z.read('module.prop').decode().splitlines()[1]=='name=小莫 XiaoMo'
+    assert z.read('module.prop').decode().splitlines()[1]=='name=小莫'
 
     script=z.read('anykernel.sh').decode();assert '[ "$SLOT" = _a ]' in script and 'NO_MAGISK_CHECK=1' in script
     assert 'do.modules=0' in script and 'NO_VBMETA_PARTITION_PATCH=1' in script and script.rstrip().endswith('flash_boot;\nchopin_postflash_verify;')

@@ -11,7 +11,7 @@ chopin_stock_ramdisk() {
     elif [ -f "$cache" ] && [ ! -L "$cache" ]; then
       gzip -dc "$cache" > "$SPLITIMG/ramdisk.cpio" || abort "Cached stock ramdisk decompression failed";
     else
-      abort "Current ramdisk is not stock; use the full XiaoMo AK3 fallback ZIP";
+      abort "Current ramdisk is not stock; use the full AK3 fallback ZIP";
     fi;
   fi;
   [ "$(sha256sum "$SPLITIMG/ramdisk.cpio" | cut -d' ' -f1)" = "$expected" ] || abort "Stock ramdisk mismatch";

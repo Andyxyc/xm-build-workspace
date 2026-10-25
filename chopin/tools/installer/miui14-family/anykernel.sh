@@ -1,6 +1,6 @@
 ### chopin / MIUI 14 / Android 13 compatible driver family
 properties() { '
-kernel.string=小莫 XiaoMo
+kernel.string=小莫
 do.devicecheck=1
 do.modules=0
 do.systemless=0
@@ -20,7 +20,7 @@ NO_MAGISK_CHECK=1;
 . "$AKHOME/tools/chopin-preflight.sh";
 . "$AKHOME/tools/miui14-compat.sh";
 
-ui_print " " "小莫 XiaoMo" " ";
+ui_print " " "小莫" " ";
 ui_print "Checking compatibility...";
 chopin_family_rom;
 case "$SLOT" in _a|_b) ;; *) abort "Unknown active boot slot";; esac;

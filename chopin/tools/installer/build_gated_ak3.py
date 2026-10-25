@@ -47,7 +47,7 @@ assert digest(dtb)=='d6aa88bad3591b62473a2b753ccd19dc371dbb30bd8e1efa487c651fdef
 header=bytearray(stock[:1660]);header[8:12]=bytes(4);header[16:20]=bytes(4);header[576:608]=bytes(32)
 assert digest(header)=='597abf508e7e9fd153f952a352e04e09153945aab043113c07347a3c71674d40'
 assert re.fullmatch(r'chopin-[A-Za-z0-9._-]+\.zip',a.output.name) and a.output.suffix=='.zip' and not a.output.exists()
-stage=a.output.parent/('ak3-r6-'+('slim-' if a.slim else 'full-')+g['image_sha256'][:12]);stage.mkdir(parents=False,exist_ok=False)
+stage=a.output.parent/('ak3-'+('slim-' if a.slim else 'full-')+g['image_sha256'][:12]);stage.mkdir(parents=False,exist_ok=False)
 # Read committed blobs, never a Windows checkout that may have CRLF conversion.
 entries=subprocess.check_output(['git','-C',str(a.ak3_source),'ls-tree','-r','HEAD','--','META-INF','tools'],text=True)
 for line in entries.splitlines():
@@ -62,7 +62,7 @@ updater.write_bytes(backend)
 (stage/'tools/ak3-update-binary.sh').write_bytes(backend)
 (stage/'customize.sh').write_bytes((root/'customize.sh').read_bytes())
 (stage/'tools/stock-ramdisk-source.sh').write_bytes((root/'stock-ramdisk-source.sh').read_bytes())
-(stage/'module.prop').write_text('id=xiaomo_chopin_ak3\nname=小莫 XiaoMo\nversion=r6 TEST CANDIDATE\nversionCode=6\nauthor=XiaoMo\ndescription=AnyKernel3 guarded kernel installer receipt; no boot service or mount payload.\n',encoding='utf-8',newline='\n')
+(stage/'module.prop').write_text('id=xiaomo_chopin_ak3\nname=小莫\nversion=r8 CI41084\nversionCode=6\nauthor=小莫\ndescription=AnyKernel3 guarded kernel installer receipt; no boot service or mount payload.\n',encoding='utf-8',newline='\n')
 marker=stage/'META-INF/com/google/android/updater-script'
 marker.write_text('#MAGISK\n'+marker.read_text(encoding="utf-8"),encoding='utf-8',newline='\n')
 # Insert a verified callback immediately before the sole active-boot write.
