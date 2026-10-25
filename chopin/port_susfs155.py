@@ -16,6 +16,16 @@ def edit(file,old,new):
 assert '#define SUSFS_VERSION "v1.5.5"' in (root/'include/linux/susfs.h').read_text()
 assert 'VERSION = 4\nPATCHLEVEL = 14\n' in (root/'Makefile').read_text()
 
+# The upstream modern-policy branch resolves the SUSFS domain SIDs, but its
+# legacy-policy branch never does.  The task_fix_setuid hook then rejects the
+# real zygote SID and cannot pass the driver fd to the manager.  Both legacy
+# update paths meet here after the policy lock / stop_machine has been released;
+# resolving a context while holding the policy write lock would deadlock.
+edit(ksu/'selinux/rules.c',
+     'out_flush:\n    smp_mb();\n    reset_avc_cache();\n#endif',
+     'out_flush:\n    smp_mb();\n    reset_avc_cache();\n'
+     '#ifdef CONFIG_KSU_SUSFS\n    susfs_set_batch_sid();\n#endif\n#endif')
+
 # Reuse the existing bounded no-fault string reader. The pinned builder also
 # dereferences USER_ARG_NULL unconditionally, but the SUSFS branch takes a pointer.
 f=ksu/'sulog/event.c'
