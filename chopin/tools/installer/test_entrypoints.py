@@ -13,7 +13,7 @@ busybox=Path('/bin/busybox');assert busybox.is_file()
 results=[]
 def prepare(root,rom='V14.0.8.0.TKPCNXM'):
  for name in ['bin','system/bin','tmp','data/adb/modules_update/xiaomo_chopin_ak3','data/adb/chopin-kernel-backups','stage/expected']:(root/name).mkdir(parents=True,exist_ok=True)
- shutil.copyfile(busybox,root/'bin/busybox')
+ shutil.copyfile(busybox,root/'bin/busybox');(root/'bin/busybox').chmod(0o755)
  for n in ['sh','cat','cut','mkdir','mktemp','unzip','sha256sum','touch','printf','sync']:(root/'bin'/n).symlink_to('/bin/busybox')
  (root/'system/bin/sh').symlink_to('/bin/busybox')
  getprop='#!/bin/sh\ncase "$1" in ro.product.device) echo chopin;; ro.build.version.incremental) echo '+rom+';; esac\n'
