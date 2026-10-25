@@ -40,7 +40,7 @@ new='''        if (success) {
 assert body.count(old)==1;body=body.replace(old,new,1);p.write_text(s[:start]+body+s[end:],encoding='utf-8',newline='\n')
 
 # Build a separate package, keep the installed official manager and its data.
-p=root/'manager/build.gradle.kts';s=p.read_text(encoding='utf-8');s=s.replace('extra["managerVersionCode"] = getVersionCode()', 'extra["managerVersionCode"] = 41083',1);s=s.replace('extra["managerVersionName"] = getVersionName()', 'extra["managerVersionName"] = "v4.2.1-r2+4cf754b2-chopin"',1);p.write_text(s,encoding='utf-8',newline='\n')
+p=root/'manager/build.gradle.kts';s=p.read_text(encoding='utf-8');s=s.replace('extra["managerVersionCode"] = getVersionCode()', 'extra["managerVersionCode"] = 41084',1);s=s.replace('extra["managerVersionName"] = getVersionName()', 'extra["managerVersionName"] = "v4.2.1-r2+3b58d46f-chopin"',1);p.write_text(s,encoding='utf-8',newline='\n')
 p=root/'manager/app/build.gradle.kts';s=p.read_text(encoding='utf-8');assert s.count('    alias(libs.plugins.lsplugin.apksign)')==1;s=s.replace('    alias(libs.plugins.lsplugin.apksign)\n','',1)
 start=s.index('apksign {');end=s.index('\n}\n',start)+3;s=s[:start]+s[end:]
 old='abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "riscv64")';assert s.count(old)==1;s=s.replace(old,'abiFilters += listOf("arm64-v8a")',1);p.write_text(s,encoding='utf-8',newline='\n')
