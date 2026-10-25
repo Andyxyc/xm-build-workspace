@@ -50,7 +50,7 @@ start=s.index('fun installBoot(');at=s.index('    val bootFile = bootUri?.let { 
 guard='''    if (bootUri != null) {
         val kind = inspectInstallInput { resolver.openInputStream(bootUri) }
         if (routeInstallInput(kind, com.sukisu.ultra.getKernelVersion().isGKI()) != InstallInputRoute.BOOT_PATCH) {
-            val message = ksuApp.getString(R.string.select_ak3_zip)
+            val message = ksuApp.getString(com.sukisu.ultra.R.string.select_ak3_zip)
             onStderr(message)
             return FlashResult(-1, message, false)
         }
