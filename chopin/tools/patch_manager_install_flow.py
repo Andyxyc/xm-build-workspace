@@ -19,7 +19,9 @@ new='''            if (isGkiDevice) {
 assert s.count(old)==1;s=s.replace(old,new,1)
 start=s.index('                val option = when (installMethod) {')
 end=s.index('\n            }\n        }\n    }\n\n    val state = InstallUiState(',start)
-s=s[:start]+'''                scope.launch {
+s=s[:start]+'''                installMethod = null
+                installMethodState.value = null
+                scope.launch {
                     val kind = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         inspectInstallInput { context.contentResolver.openInputStream(uri) }
                     }
@@ -40,7 +42,17 @@ s=s[:start]+'''                scope.launch {
                         }
                     }
                 }'''+s[end:]
+# Keep Non-GKI installation on the real active slot. The generic GKI slot
+# dialog temporarily overrides ro.boot.slot_suffix, which cannot establish
+# which boot/vendor pair is actually running on this 4.14 device.
+s=s.replace('        isAbDevice = isAbDevice\n', '        isAbDevice = isAbDevice && isGkiDevice\n',1)
 p.write_text(s,encoding='utf-8',newline='\n')
+p=root/'manager/app/src/main/java/com/sukisu/ultra/ui/kernelFlash/ExternalKernelFlasher.kt'
+s=p.read_text(encoding='utf-8')
+old='val abDevice = withContext(Dispatchers.IO) { isAbDevice() }'
+new='val abDevice = withContext(Dispatchers.IO) { isAbDevice() && com.sukisu.ultra.getKernelVersion().isGKI() }'
+assert s.count(old)==1
+p.write_text(s.replace(old,new,1),encoding='utf-8',newline='\n')
 # A second check protects restored navigation state and other callers.
 p=root/'manager/app/src/main/java/com/sukisu/ultra/ui/util/KsuCli.kt'
 s=p.read_text(encoding='utf-8')
