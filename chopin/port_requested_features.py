@@ -69,8 +69,8 @@ replace(name,'CPUREGS_ATTR_RO(midr_el1, midr);', '''static ssize_t midr_el1_show
     return midr ? sprintf(buf, "0x%016x\\n", midr) : 0;
 }
 static struct kobj_attribute cpuregs_attr_midr_el1 = __ATTR_RO(midr_el1);''')
-replace('arch/arm64/kernel/cpufeature.c','#include <linux/smp.h>',
-        '#include <linux/smp.h>\n#include <linux/chopin_cpu_identity.h>')
+replace('arch/arm64/kernel/cpufeature.c','#include <linux/cpumask.h>',
+        '#include <linux/cpumask.h>\n#include <linux/chopin_cpu_identity.h>')
 replace('arch/arm64/kernel/cpufeature.c','\tcase SYS_MIDR_EL1:\n\t\t*valp = read_cpuid_id();',
         '\tcase SYS_MIDR_EL1:\n\t\t*valp = ksu_cpu_identity_midr(raw_smp_processor_id(), read_cpuid_id());')
 
