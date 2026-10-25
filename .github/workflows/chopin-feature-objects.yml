@@ -76,6 +76,8 @@ jobs:
         working-directory: builder
         run: |
           bash scripts/kernelsu.sh
+          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin ce75122bec7423e0f1fa06e3e9a174085c5231ab
+          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach ce75122bec7423e0f1fa06e3e9a174085c5231ab
           actual="$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
           echo "SukiSU builtin SHA: $actual"
           test "$actual" = "ce75122bec7423e0f1fa06e3e9a174085c5231ab"
@@ -90,6 +92,11 @@ jobs:
           from pathlib import Path
           f = Path('scripts/patches.sh')
           s = f.read_text()
+          clone_done = '\tlocal kp="${susfs_dir}/kernel_patches"'
+          assert s.count(clone_done) == 1
+          pin = 'd18028f2a8f3ba16a907bff0edc16376cf38e2bf'
+          s = s.replace(clone_done, '\tgit -C "$susfs_dir" fetch origin ' + pin + '\n'
+                        '\tgit -C "$susfs_dir" checkout --detach ' + pin + '\n' + clone_done, 1)
           target = '( cd "$KERNEL_DIR" && apply_patch "$kernel_patch" 1 )'
           assert s.count(target)==1, 'SUSFS builder changed'
           prefix = 'python3 "${GITHUB_WORKSPACE}/chopin/port_readdir.py" "$kernel_patch" "$KERNEL_DIR"\n\t'
