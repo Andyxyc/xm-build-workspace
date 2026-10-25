@@ -22,7 +22,7 @@ flags = re.findall(r'^subdir-ccflags-y\s*\+=\s*(.+)$',
 assert len(flags) == 5
 kernel_flags = 'KCFLAGS=' + ' '.join(flags).replace('$(srctree)', str(root))
 rows = []
-targets = ['chopin_user_defconfig', 'drivers/kernelsu/ksu_main.o',
+targets = ['chopin_user_defconfig', 'init/version.o', 'drivers/kernelsu/ksu_main.o',
            'fs/susfs.o', 'fs/proc_namespace.o', 'fs/namei.o', 'kernel/reboot.o',
            'security/selinux/avc.o', 'security/selinux/selinuxfs.o']
 for target in targets:

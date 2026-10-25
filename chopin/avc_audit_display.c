@@ -18,7 +18,7 @@ u32 chopin_avc_audit_tsid(u32 tsid)
     return tsid;
 }
 
-static void chopin_avc_resolve_sids(void)
+static noinline void chopin_avc_resolve_sids(void)
 {
     u32 ksu = 0, su = 0, app = 0;
     int error;

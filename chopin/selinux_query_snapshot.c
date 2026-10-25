@@ -13,7 +13,7 @@ static bool chopin_policy_snapshot_attempted;
 static bool chopin_selinux_hide_enabled = true;
 
 /* Allocate and parse before the legacy policy write lock or stop_machine. */
-static int chopin_selinux_capture_original(void)
+static noinline int chopin_selinux_capture_original(void)
 {
     struct chopin_original_policy *snapshot = NULL;
     struct policy_file file;

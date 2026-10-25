@@ -119,6 +119,7 @@ jobs:
           python3 ../chopin/port_susfs155.py "$WORKSPACE/android-kernel" "$WORKSPACE/susfs4ksu"
           python3 ../chopin/verify_sid_bootstrap.py "$WORKSPACE/android-kernel/KernelSU/kernel/selinux/rules.c" --report "$GITHUB_WORKSPACE/release-evidence/sid-bootstrap-source-check.json"
           python3 ../chopin/port_kpm_io.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/check_kpm_version_copy.py
           python3 ../chopin/preserve_vendor_abi.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_susfs_typed.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_avc_audit_display.py "$WORKSPACE/android-kernel"
