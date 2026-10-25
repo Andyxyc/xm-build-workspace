@@ -2,6 +2,7 @@
 /* Read-only driver transport probe: no root grant, module load or real reboot. */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
