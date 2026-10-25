@@ -23,7 +23,8 @@ assert len(flags) == 5
 kernel_flags = 'KCFLAGS=' + ' '.join(flags).replace('$(srctree)', str(root))
 rows = []
 targets = ['chopin_user_defconfig', 'drivers/kernelsu/ksu_main.o',
-           'fs/susfs.o', 'fs/proc_namespace.o', 'fs/namei.o', 'kernel/reboot.o']
+           'fs/susfs.o', 'fs/proc_namespace.o', 'fs/namei.o', 'kernel/reboot.o',
+           'security/selinux/avc.o', 'security/selinux/selinuxfs.o']
 for target in targets:
     command = args + ([kernel_flags] if target.startswith('kernel/') else []) + [target]
     log = out / (target.replace('/', '_') + '.log')
@@ -47,6 +48,9 @@ files = ['out/.config', 'out/include/generated/autoconf.h',
          'include/linux/chopin_susfs_state.h',
          'KernelSU/kernel/chopin_susfs_typed_reboot.c',
          'KernelSU/kernel/chopin_susfs_typed_abi.h',
+         'KernelSU/kernel/chopin_avc_audit_display.c',
+         'KernelSU/kernel/chopin_selinux_query_snapshot.c',
+         'security/selinux/avc.c', 'security/selinux/selinuxfs.c',
          'KernelSU/kernel/extension/kpm/kpm.c']
 manifest = []
 for name in files:

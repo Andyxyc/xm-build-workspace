@@ -121,6 +121,8 @@ jobs:
           python3 ../chopin/port_kpm_io.py "$WORKSPACE/android-kernel"
           python3 ../chopin/preserve_vendor_abi.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_susfs_typed.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_avc_audit_display.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_selinux_query_snapshot.py "$WORKSPACE/android-kernel"
           grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
           grep -n "IN_ALL_EVENTS" "$WORKSPACE/android-kernel/fs/notify/fdinfo.c"
           # Normalize whitespace on SUSFS patch-added lines ONLY; do not alter vendor files globally.
