@@ -10,7 +10,8 @@ assert hashlib.sha256(kp).hexdigest()=='396a20777668e85d674a23dd3945815f285332b5
 assert kp[:8]==b'KP1158\0\0' and kp[8:12]==bytes.fromhex('00090d00') and len(kp)==294144
 # An unretained random root key is hashed in the payload. Never store a direct
 # superkey or print it in argv/logs. SukiSU's authorized KPM API is independent.
-key=(secrets.token_hex(32)+'\n').encode()
+key=(secrets.token_hex(24)+'\n').encode()
+assert 0<len(key.strip())<64,'Pinned tool reserves one byte for the key terminator'
 q=subprocess.run([str(a.tool.resolve()),'-p','-i',str(a.before.resolve()),'-k',str(a.kpimg.resolve()),'-o',str(a.output.resolve()),'--root-skey-fd','0'],input=key,capture_output=True,timeout=120)
 log=q.stdout.decode('utf-8','replace')+q.stderr.decode('utf-8','replace')
 assert key.strip().decode() not in log,'Root key leaked by tool'
