@@ -25,6 +25,8 @@ rows = []
 targets = ['chopin_user_defconfig', 'init/version.o',
            'fs/susfs.o', 'fs/proc_namespace.o', 'fs/namei.o', 'kernel/reboot.o',
            'security/selinux/avc.o', 'security/selinux/selinuxfs.o',
+           'security/selinux/hooks.o', 'arch/arm64/kernel/cpuinfo.o',
+           'arch/arm64/kernel/cpufeature.o',
            'drivers/kernelsu/ksu_main.o']
 for target in targets:
     command = args + ([kernel_flags] if target.startswith('kernel/') else []) + [target]

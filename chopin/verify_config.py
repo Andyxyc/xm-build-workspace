@@ -17,6 +17,7 @@ for ln in path.read_text().splitlines():
 
 required = {
  "CONFIG_KSU":"y",
+ "CONFIG_KSU_FEATURE_ADBROOT":"y",
  "CONFIG_KPM":"y",
  "CONFIG_KALLSYMS":"y",
  "CONFIG_KALLSYMS_ALL":"y",

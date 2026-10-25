@@ -147,6 +147,8 @@ jobs:
           python3 ../chopin/port_susfs_typed.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_avc_audit_display.py "$WORKSPACE/android-kernel"
           python3 ../chopin/port_selinux_query_snapshot.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/complete_selinux_query_view.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_requested_features.py "$WORKSPACE/android-kernel"
           grep -n "static_call.h" "$WORKSPACE/android-kernel/KernelSU/kernel/kernel_includes.h"
           grep -n "IN_ALL_EVENTS" "$WORKSPACE/android-kernel/fs/notify/fdinfo.c"
           # Normalize whitespace on SUSFS patch-added lines ONLY; do not alter vendor files globally.
@@ -181,6 +183,12 @@ jobs:
           bash scripts/build.sh defconfig
           /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/ported-kernel.log"
           echo "$GITHUB_SHA" > "$GITHUB_WORKSPACE/build-logs/root-build-complete.txt"
+
+      - name: Verify exact original kernel display identity
+        run: |
+          python3 chopin/verify_stock_identity.py "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/android-kernel/out/include/generated/utsrelease.h" "$WORKSPACE/android-kernel/out/include/generated/compile.h"
+          cp chopin/stock-identity.json release-evidence/stock-identity.json
+          cp "$WORKSPACE/android-kernel/out/include/generated/compile.h" release-evidence/compile.h
 
       - name: Check vendor camera and root features
         run: |

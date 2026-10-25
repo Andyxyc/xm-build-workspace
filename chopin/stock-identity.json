@@ -1,0 +1,9 @@
+{
+  "release": "4.14.186-gaa24d707761c",
+  "version": "#1 SMP PREEMPT Thu Nov 2 16:13:34 UTC 2023",
+  "compile_by": "builder",
+  "compile_host": "pangu-build-component-vendor-176809-mjwkw-h4m64-542cj",
+  "compiler": "Android (6443078 based on r383902) clang version 11.0.1 (https://android.googlesource.com/toolchain/llvm-project b397f81060ce6d701042b782172ed13bee898b79), LLD 11.0.1 (/buildbot/tmp/tmp6_m7QH b397f81060ce6d701042b782172ed13bee898b79)",
+  "banner": "Linux version 4.14.186-gaa24d707761c (builder@pangu-build-component-vendor-176809-mjwkw-h4m64-542cj) (Android (6443078 based on r383902) clang version 11.0.1 (https://android.googlesource.com/toolchain/llvm-project b397f81060ce6d701042b782172ed13bee898b79), LLD 11.0.1 (/buildbot/tmp/tmp6_m7QH b397f81060ce6d701042b782172ed13bee898b79)) #1 SMP PREEMPT Thu Nov 2 16:13:34 UTC 2023",
+  "source_boot_sha256": "ec7ef1343b410d04c35fb3567374418173d0dff104352711c2d24b41d467ad1a"
+}
