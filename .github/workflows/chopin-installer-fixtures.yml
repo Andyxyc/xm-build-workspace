@@ -1,0 +1,29 @@
+name: Chopin installer entry and socket fixtures
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths:
+      - .github/workflows/chopin-installer-fixtures.yml
+      - chopin/tools/installer/**
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  entry-fixtures:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the static fixture shell
+        run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends busybox-static
+      - name: Exercise the actual adapter and output functions without an Image
+        run: sudo python3 chopin/tools/installer/test_entrypoints.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-installer-entry-fixtures
+          path: installer-entry-fixtures.json
+          if-no-files-found: error
+          retention-days: 14
