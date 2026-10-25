@@ -1,0 +1,54 @@
+name: Chopin paired KPM runtime for 4.14
+on:
+  push:
+    branches: [chopin-kpm-bridge-20261026]
+    paths: ['chopin/port_kp_bridge_414.py', 'chopin/tools/check_paired_kpm_protocol.py', '.github/workflows/chopin-paired-kpm.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  paired-runtime:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      SOURCE_DATE_EPOCH: '1792886400'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the exact paired runtime source
+        run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu zlib1g-dev
+          git init paired-kp
+          git -C paired-kp remote add origin https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch.git
+          git -C paired-kp fetch --depth=1 origin a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0
+          git -C paired-kp checkout --detach FETCH_HEAD
+          test "$(git -C paired-kp rev-parse HEAD)" = a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0
+          python3 chopin/port_kp_bridge_414.py paired-kp
+          python3 chopin/tools/check_paired_kpm_protocol.py paired-kp
+      - name: Build the actual ARM64 runtime and source-matched host tool
+        run: |
+          set -o pipefail
+          make -C paired-kp/kernel hdr TARGET_COMPILE=aarch64-linux-gnu-
+          make -C paired-kp/kernel kpimg TARGET_COMPILE=aarch64-linux-gnu- -j2 2>&1 | tee paired-runtime-build.log
+          make -C paired-kp/tools CC=gcc 'CPPFLAGS=-iquote ../kernel/include' -j2 2>&1 | tee paired-tool-build.log
+          mkdir paired-evidence
+          cp paired-kp/kernel/kpimg paired-kp/kernel/kpimg.elf paired-kp/tools/kptools paired-evidence/
+          aarch64-linux-gnu-readelf -h -s paired-kp/kernel/kpimg.elf > paired-evidence/payload-elf.txt
+          git -C paired-kp diff > paired-evidence/4.14-endpoint.patch
+          cp paired-kp/version paired-evidence/source-version.txt
+          gcc --version > paired-evidence/host-compiler.txt
+          aarch64-linux-gnu-gcc --version > paired-evidence/payload-compiler.txt
+          cp paired-kpm-protocol.json paired-runtime-build.log paired-tool-build.log paired-evidence/
+          cd paired-evidence
+          sha256sum * > files.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-paired-kpm-414
+          path: |
+            paired-evidence/*
+            paired-runtime-build.log
+            paired-tool-build.log
+            paired-kpm-protocol.json
+          if-no-files-found: error
+          retention-days: 14
