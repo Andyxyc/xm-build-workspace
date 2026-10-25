@@ -8,7 +8,7 @@ OLD_UI = b'''ui_print() {
 }'''
 NEW_UI = b'''ui_print() {
   until [ ! "$1" ]; do
-    if [ "$CHOPIN_UI_STDOUT" = 1 ]; then
+    if [ "$CHOPIN_UI_STDOUT" = 1 ] && [ -z "${POSTINSTALL:-}" ]; then
       printf '%s\\n' "$1";
     else
       printf 'ui_print %s\\nui_print\\n' "$1" >&$OUTFD;

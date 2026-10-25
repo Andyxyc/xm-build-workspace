@@ -47,9 +47,9 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
   if backend_code:assert b'Kernel installation and full partition readback completed' not in p.stdout
   assert not (root/'dev').exists()
   results.append({'case':name,'exit':p.returncode,'scope':'MOCK_BACKEND_NO_IMAGE_NO_DEVICE'})
- for mode in ['boot','recovery']:
+ for mode in ['boot','recovery','sukisu']:
   root=parent/('socket-'+mode);prepare(root)
-  script='export CHOPIN_UI_STDOUT='+('1' if mode=='boot' else '0')+' OUTFD=1\n'+NEW_UI.decode()+'\n'+NEW_PROGRESS.decode()+'\nui_print "XiaoMo"\nshow_progress 1 2\n'
+  script='export CHOPIN_UI_STDOUT='+('0' if mode=='recovery' else '1')+' OUTFD=1 POSTINSTALL='+('/fixture-sukisu' if mode=='sukisu' else '""')+'\n'+NEW_UI.decode()+'\n'+NEW_PROGRESS.decode()+'\nui_print "XiaoMo"\nshow_progress 1 2\n'
   left,right=socket.socketpair()
   try:
    p=run(root,script,right.fileno());right.close();left.settimeout(2);received=b''
@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
     if not chunk:break
     received+=chunk
    assert p.returncode==0,(mode,p.stderr)
-   expected=b'XiaoMo\n' if mode=='boot' else b'ui_print XiaoMo\nui_print\nprogress 1 2\n'
+   expected=b'XiaoMo\n' if mode=='boot' else b'ui_print XiaoMo\nui_print\n' if mode=='sukisu' else b'ui_print XiaoMo\nui_print\nprogress 1 2\n'
    assert received==expected,(mode,received)
   finally:left.close();right.close()
   results.append({'case':'socket-'+mode,'exit':0,'scope':'REAL_OUTPUT_FUNCTION_SOCKET_NO_DEVICE'})
