@@ -43,7 +43,7 @@ if [ ! -e "$backup_file" ]; then
   (set -C; cat "$BOOTIMG" > "$backup_file") || abort "Cannot save complete boot backup";
 fi;
 [ -f "$backup_file" ] && [ ! -L "$backup_file" ] && [ "$(sha256sum "$backup_file" | cut -d' ' -f1)" = "$CHOPIN_BACKUP_SHA" ] || abort "Boot backup verification failed";
-CHOPIN_DETAIL_LOG=$(mktemp "$backup_dir/install${SLOT}-XXXXXXXX.log") || abort "Cannot create installation log";
+CHOPIN_DETAIL_LOG=$(mktemp "$backup_dir/install${SLOT}.log.XXXXXXXX") || abort "Cannot create installation log";
 cat "$AKHOME/install-detail.log" >> "$CHOPIN_DETAIL_LOG";
 
 ui_print "Preparing boot image...";

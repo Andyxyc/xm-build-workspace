@@ -3,7 +3,7 @@
 No real boot image, device node, root grant, module loading or partition write.
 """
 from pathlib import Path
-import hashlib,json,os,subprocess,tempfile,sys,shutil
+import hashlib,json,os,subprocess,tempfile,sys,shutil,re
 source=Path(__file__).resolve().parent
 tool=Path(sys.argv[1]).resolve();assert tool.is_file();tool.chmod(0o755)
 results=[];sha=lambda b:hashlib.sha256(b).hexdigest()
@@ -16,6 +16,15 @@ def newc(entries):
 def mb(*args):return subprocess.run(['qemu-arm',str(tool),*map(str,args)],capture_output=True,timeout=15)
 with tempfile.TemporaryDirectory(prefix='chopin-family-files-') as temp:
  root=Path(temp);(root/'expected').mkdir();mods=root/'modules';mods.mkdir()
+ # Exercise the actual packaged ARM BusyBox, including the phone failure case.
+ busybox=tool.with_name('busybox');assert sha(busybox.read_bytes())=='66436dc1e97d22886ed2d35bd69a9cb82bb0fdba4e4267c5184cee1d39a2f5f4';busybox.chmod(0o755)
+ template=re.search(r'CHOPIN_DETAIL_LOG=\$\(mktemp "\$backup_dir/([^"\n]+)"\)',(source/'anykernel.sh').read_text()).group(1).replace('${SLOT}','_a')
+ def bmk(template):return subprocess.run(['qemu-arm',str(busybox),'mktemp',str(root/template)],capture_output=True,timeout=15)
+ bad=bmk('install_a-XXXXXXXX.log');assert bad.returncode!=0
+ results.append(dict(case='actual-busybox-old-log-template-rejected',exit=bad.returncode,scope='ACTUAL_ARM_BUSYBOX_ORDINARY_FILE_ONLY'))
+ first=bmk(template);second=bmk(template);assert first.returncode==second.returncode==0
+ f1=Path(first.stdout.decode().strip());f2=Path(second.stdout.decode().strip());assert f1.is_file() and f2.is_file() and f1!=f2 and f1.parent==f2.parent==root
+ results.append(dict(case='actual-busybox-source-log-template-unique',exit=0,scope='ACTUAL_ARM_BUSYBOX_ORDINARY_FILE_ONLY'))
  manifest=''
  for i in range(10):
   n=f'driver{i}.ko';b=f'file-only fixture {i}\n'.encode();(mods/n).write_bytes(b);manifest+=sha(b)+'  '+n+'\n'
