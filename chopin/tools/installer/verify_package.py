@@ -1,7 +1,8 @@
 """Independent ZIP/entry/component/source checks; never uses ADB or Fastboot."""
 from pathlib import Path
 import argparse,zipfile,json,hashlib,re,struct,gzip,subprocess
-from installer_transport import OLD_UI,NEW_UI,BOOT_ANCHOR,BOOT_ADAPTER,OLD_PROGRESS,NEW_PROGRESS
+from installer_transport import OLD_UI,NEW_UI,BOOT_ANCHOR,BOOT_ADAPTER,OLD_PROGRESS,NEW_PROGRESS,OLD_UNZIP,NEW_UNZIP
+from installer_write import ORIGINAL_WRITE,GUARDED_WRITE_CALL
 if not __debug__:raise SystemExit('Normal Python mode is required')
 p=argparse.ArgumentParser();p.add_argument('--zip',type=Path,required=True);p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--ak3',type=Path,required=True);p.add_argument('--report',type=Path,required=True);a=p.parse_args()
 assert not a.report.exists(),'Preserve earlier report'
@@ -39,12 +40,13 @@ with zipfile.ZipFile(a.zip) as z:
     core=z.read('tools/ak3-core.sh');original=subprocess.check_output(['git','-C',str(a.ak3),'show','HEAD:tools/ak3-core.sh'])
     hook=b'  chopin_preflash_verify || abort "Chopin preflash validation failed";\n  chopin_record_attempt || abort "Cannot record the single write attempt";\n'
     assert core.count(hook)==1 and core.count(NEW_UI)==1
-    assert core.replace(hook,b'',1).replace(NEW_UI,OLD_UI,1)==original
+    assert core.count(GUARDED_WRITE_CALL)==1
+    assert core.replace(hook,b'',1).replace(NEW_UI,OLD_UI,1).replace(GUARDED_WRITE_CALL,ORIGINAL_WRITE,1)==original
     up='META-INF/com/google/android/update-binary';original_up=subprocess.check_output(['git','-C',str(a.ak3),'show','HEAD:'+up])
     backend=z.read(up)
     assert backend==z.read('tools/ak3-update-binary.sh')
     assert sha(backend)==z.read('expected/backend.sha256').decode().strip()
-    assert backend.replace(NEW_UI,OLD_UI,1).replace(BOOT_ADAPTER+BOOT_ANCHOR,BOOT_ANCHOR,1).replace(NEW_PROGRESS,OLD_PROGRESS,1)==original_up
+    assert backend.replace(NEW_UI,OLD_UI,1).replace(BOOT_ADAPTER+BOOT_ANCHOR,BOOT_ANCHOR,1).replace(NEW_PROGRESS,OLD_PROGRESS,1).replace(NEW_UNZIP,OLD_UNZIP,1)==original_up
     bridge=z.read('customize.sh')
     assert bridge.startswith(b'SKIPUNZIP=1\n') and b'tools/ak3-update-binary.sh' in bridge
     assert b'3 1 "$ZIPFILE"' in bridge and b'AnyKernel3 installation failed' in bridge

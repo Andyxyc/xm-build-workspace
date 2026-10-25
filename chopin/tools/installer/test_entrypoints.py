@@ -15,7 +15,7 @@ family_mode="--family" in sys.argv
 def prepare(root,rom='V14.0.8.0.TKPCNXM'):
  for name in ['bin','system/bin','tmp','data/adb/modules_update/xiaomo_chopin_ak3','data/adb/chopin-kernel-backups','stage/expected']:(root/name).mkdir(parents=True,exist_ok=True)
  shutil.copyfile(busybox,root/'bin/busybox');(root/'bin/busybox').chmod(0o755)
- for n in ['sh','cat','cut','mkdir','mktemp','unzip','sha256sum','touch','printf','sync']:(root/'bin'/n).symlink_to('/bin/busybox')
+ for n in ['sh','cat','cut','mkdir','mktemp','unzip','sha256sum','touch','printf','sync','dd','wc']:(root/'bin'/n).symlink_to('/bin/busybox')
  (root/'system/bin/sh').symlink_to('/bin/busybox')
  miui='WRONG' if rom=='WRONG-ROM' else 'V140'
  getprop='#!/bin/sh\ncase "$1" in ro.product.device) echo chopin;; ro.build.version.sdk) echo 33;; ro.miui.ui.version.name) echo '+miui+';; ro.build.version.incremental) echo '+rom+';; esac\n'
@@ -62,6 +62,28 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
    assert received==expected,(mode,received)
   finally:left.close();right.close()
   results.append({'case':'socket-'+mode,'exit':0,'scope':'REAL_OUTPUT_FUNCTION_SOCKET_NO_DEVICE'})
+ # Ordinary-file write fixtures. There are no block device nodes or kernel
+ # images; a returned flush error is injected after the real file copy.
+ for mode,want in [('success',0),('flush-error',99),('wrong-target',99),('short-image',99),('missing-journal',99)]:
+  root=parent/('write-'+mode);prepare(root)
+  (root/'dev/block/by-name').mkdir(parents=True)
+  src=root/'stage/boot-new.img';target=root/'dev/block/by-name/boot_a'
+  for f,tag in [(src,b'new ordinary-file fixture'),(target,b'old ordinary-file fixture')]:
+   with f.open('wb') as out:out.write(tag);out.truncate(134217728)
+  if mode=='short-image':src.write_bytes(b'short fixture')
+  journal=root/'data/adb/chopin-kernel-backups/attempt-fixture.txt'
+  if mode!='missing-journal':journal.write_text('phase=prepared\n')
+  body='export PATH=/bin AKHOME=/stage\nSLOT=_a\nBLOCK=/dev/block/by-name/boot_'+('b' if mode=='wrong-target' else 'a')+'\nCHOPIN_ATTEMPT_MARKER=/data/adb/chopin-kernel-backups/attempt-fixture.txt\n'
+  body+='abort() { printf "%s\\n" "$*" >&2; exit 99; }\nblockdev() { [ "$1" = --setrw ] && [ "$2" = /dev/block/by-name/boot_a ]; }\n'
+  body+='dd() { printf "%s\\n" "$*" >> /write-calls; command dd "$@"; result=$?; '+('echo "injected deferred I/O error" >&2; return 1;' if mode=='flush-error' else 'return "$result";')+' }\n. /ak3-preflight.sh\nchopin_write_boot\n'
+  q=run(root,body);assert q.returncode==want,(mode,q.stdout,q.stderr)
+  if mode in ['success','flush-error']:
+   calls=(root/'write-calls').read_text().splitlines();assert len(calls)==1 and 'conv=fsync,notrunc' in calls[0] and 'if=/dev/zero' not in calls[0]
+   assert hashlib.sha256(src.read_bytes()).digest()==hashlib.sha256(target.read_bytes()).digest()
+   assert ('phase=write_and_flush_completed' if mode=='success' else 'phase=write_or_flush_failed') in journal.read_text()
+  else:assert not (root/'write-calls').exists()
+  assert target.is_file() and not target.is_block_device()
+  results.append({'case':'ordinary-file-write-'+mode,'exit':q.returncode,'scope':'SYNTHETIC_REGULAR_FILES_MOCK_BLOCKDEV_NO_DEVICE'})
  root=parent/'single-attempt';prepare(root);(root/'stage/expected/kernel.sha256').write_text('b'*64+'\n')
  script='export PATH=/bin AKHOME=/stage\numask 077\nbackup_dir=/data/adb/chopin-kernel-backups\nBLOCK=/dev/block/by-name/boot_a\nSLOT=_a\nCHOPIN_NEW_IMAGE_SHA='+('a'*64)+'\nCHOPIN_BACKUP_SHA='+('c'*64)+'\nabort() { printf "%s\\n" "$*" >&2; exit 99; }\n. /ak3-preflight.sh\nchopin_record_attempt\nchopin_record_attempt\n'
  p=run(root,script);assert p.returncode==99

@@ -20,9 +20,12 @@ BOOT_ANCHOR=b'\nDIR=/sdcard;'
 BOOT_ADAPTER=b'\n[ "$BOOTMODE" = true ] && export CHOPIN_UI_STDOUT=1;\ncase "$OUTFD" in ""|*[!0-9]*) echo "Invalid updater output descriptor" >&2; exit 1;; esac;\n'
 OLD_PROGRESS=b'show_progress() { echo "progress $1 $2" >> /proc/self/fd/$OUTFD; }'
 NEW_PROGRESS=b'show_progress() { [ "$CHOPIN_UI_STDOUT" = 1 ] || printf "progress %s %s\\n" "$1" "$2" >&$OUTFD; }'
+OLD_UNZIP=b'unzip -o "$ZIPFILE";'
+NEW_UNZIP=b'unzip -qo "$ZIPFILE";'
 def output_adapter(core,backend):
+    assert backend.count(OLD_UNZIP)==1
     assert core.count(OLD_UI)==1 and backend.count(OLD_UI)==1
     assert backend.count(BOOT_ANCHOR)==1 and backend.count(OLD_PROGRESS)==1
     return (core.replace(OLD_UI,NEW_UI,1),backend.replace(OLD_UI,NEW_UI,1)
             .replace(BOOT_ANCHOR,BOOT_ADAPTER+BOOT_ANCHOR,1)
-            .replace(OLD_PROGRESS,NEW_PROGRESS,1))
+            .replace(OLD_PROGRESS,NEW_PROGRESS,1).replace(OLD_UNZIP,NEW_UNZIP,1))

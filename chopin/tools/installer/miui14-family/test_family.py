@@ -62,6 +62,11 @@ with tempfile.TemporaryDirectory(prefix='chopin-family-files-') as temp:
  run('unsupported-root-ramdisk-rejected',f'chopin_family_ramdisk {unsupported}',99)
  for name,magic,want in [('current-dtb',b'\xd7\xb7\xab\x1e',0),('current-fdt',b'\xd0\x0d\xfe\xed',0),('invalid-dtb',b'bad!',99)]:
   f=root/name;f.write_bytes(magic+bytes(60));run(name,f'chopin_family_dtb {f}',want)
+ # Confirm that the shipped BusyBox supports and completes its fsync path.
+ data=root/'flush-input';copy=root/'flush-output';data.write_bytes(b'ordinary file flush fixture\n')
+ q=subprocess.run(['qemu-arm',str(busybox),'dd','if='+str(data),'of='+str(copy),'bs=4096','conv=fsync,notrunc'],capture_output=True,timeout=15)
+ assert q.returncode==0 and copy.read_bytes()==data.read_bytes(),q.stderr
+ results.append(dict(case='actual-busybox-dd-fsync',exit=0,scope='ACTUAL_ARM_BUSYBOX_ORDINARY_FILE_ONLY'))
  assert not (root/'dev').exists()
 report=dict(status='PASS_FAMILY_ROM_MODULE_HEADER_AND_ACTUAL_RAMDISK_FIXTURES',cases=results,partition_writes=0,real_device_test=False,actual_tool_sha256=sha(tool.read_bytes()),source_sha256={n:sha((source/n).read_bytes()) for n in ['compat.sh','preflight.sh','anykernel.sh','customize.sh']})
 Path('miui14-family-fixtures.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))

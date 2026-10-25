@@ -6,6 +6,7 @@ remains a test candidate until independent real-device acceptance succeeds.
 from pathlib import Path
 import argparse,hashlib,json,struct,gzip,shutil,subprocess,zipfile,re
 from installer_transport import output_adapter
+from installer_write import guarded_writer
 import sys
 if not __debug__:raise SystemExit('Safety gates require normal Python mode; -O is forbidden')
 p=argparse.ArgumentParser();p.add_argument('--slim',action='store_true');p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--licenses',type=Path,required=True);p.add_argument('--installer-commit',required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
@@ -70,7 +71,7 @@ start=core.index(b'flash_boot() {');end=core.index(b'\n# flash_generic ',start)
 part=core[start:end];needle=b'  blockdev --setrw $BLOCK 2>/dev/null;'
 assert part.count(needle)==1
 part=part.replace(needle,b'  chopin_preflash_verify || abort "Chopin preflash validation failed";\n  chopin_record_attempt || abort "Cannot record the single write attempt";\n'+needle,1)
-(stage/'tools/ak3-core.sh').write_bytes(core[:start]+part+core[end:])
+(stage/'tools/ak3-core.sh').write_bytes(guarded_writer(core[:start]+part+core[end:]))
 (stage/'tools/chopin-preflight.sh').write_text((root/'ak3-preflight.sh').read_text(encoding="utf-8"),encoding='utf-8',newline='\n')
 (stage/'anykernel.sh').write_text((root/'chopin-anykernel-template.sh').read_text(encoding="utf-8"),encoding='utf-8',newline='\n')
 (stage/'Image').write_bytes(image);(stage/'stock-dtb.bin').write_bytes(dtb)

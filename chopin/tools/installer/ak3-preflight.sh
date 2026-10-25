@@ -59,3 +59,19 @@ chopin_postflash_verify() {
   sync;
   ui_print "Full boot partition readback verified";
 }
+
+# Write one complete, verified boot image; fsync must report success.
+# No preliminary erase, ignored I/O error, or secondary partition target.
+chopin_write_boot() {
+  case "$SLOT" in _a|_b) ;; *) abort "Unknown boot slot before write";; esac;
+  [ "$BLOCK" = "/dev/block/by-name/boot$SLOT" ] || abort "Unexpected boot target before write";
+  [ "$(wc -c < "$AKHOME/boot-new.img")" = 134217728 ] || abort "A complete boot partition image is required";
+  [ -f "$CHOPIN_ATTEMPT_MARKER" ] && [ ! -L "$CHOPIN_ATTEMPT_MARKER" ] || abort "Write attempt journal is unavailable";
+  blockdev --setrw "$BLOCK" || abort "Boot target cannot be opened for writing";
+  if dd if="$AKHOME/boot-new.img" of="$BLOCK" bs=1048576 conv=fsync,notrunc; then
+    printf 'phase=write_and_flush_completed\n' >> "$CHOPIN_ATTEMPT_MARKER" || abort "Cannot preserve write result";
+  else
+    printf 'phase=write_or_flush_failed\n' >> "$CHOPIN_ATTEMPT_MARKER" || abort "Cannot preserve write failure";
+    abort "Boot write or flush failed; keep the backup and use the verified Fastboot path";
+  fi;
+}
