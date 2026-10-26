@@ -1,0 +1,34 @@
+name: Chopin read-only app profile diagnosis tool
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-profile-readonly.yml', 'chopin/tools/profile_readonly.c']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          git init sukisu
+          git -C sukisu remote add origin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+          git -C sukisu fetch --depth=1 origin 608040a7028a0b4a709f3891bd3286ce236c7ba7
+          git -C sukisu checkout --detach FETCH_HEAD
+          mkdir evidence
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -Isukisu chopin/tools/profile_readonly.c -o evidence/profile_readonly
+          aarch64-linux-gnu-readelf -h evidence/profile_readonly > evidence/ELF-header.txt
+          cp chopin/tools/profile_readonly.c evidence/
+          cd evidence
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-profile-readonly
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 14
