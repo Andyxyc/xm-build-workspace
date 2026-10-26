@@ -1,0 +1,25 @@
+name: Chopin minimal installer ordinary-file fixtures
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/installer/minimal/**', '.github/workflows/chopin-minimal-installer.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  file-fixtures:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends busybox-static
+      - run: sudo python3 chopin/tools/installer/minimal/test_io.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-minimal-installer-fixtures
+          path: minimal-installer-fixtures.json
+          if-no-files-found: error
+          retention-days: 14
