@@ -31,6 +31,22 @@ entry_receipt=json.loads((ev/'kpm-entry-gate.json').read_text(encoding="utf-8"))
 assert entry_receipt['image_sha256']==digest(image) and entry_receipt['status']==entry['status']
 assert digest((ev/'ported.Module.symvers').read_bytes())==g['symvers_sha256']
 assert digest((ev/'System.map').read_bytes())==g['system_map_sha256']
+port=json.loads((ev/'chopin-ci-port.json').read_text(encoding='utf-8'))
+assert port['version_code']==41085 and port['uapi_version']==6
+assert port['manager_ci_commit']=='536c173c885bfc68ca33410dbc5c10f6270f4a09'
+native=port.get('susfs_version')=='2.3.0'
+revision='r10' if native else 'r9a'
+if native:
+    assert port['susfs_core_upstream']=='5419f4ee97cc8bf7ca67a9ff207f39653d7784f4'
+    assert port['priority_uid_filter_supported'] and port['personal_manager_signature_added'] is False
+    assert '#define SUSFS_VERSION "v2.3.0"' in (ev/'susfs-native.h').read_text(encoding='utf-8')
+    binding=json.loads((ev/'native-lsm-hook-binding.json').read_text(encoding='utf-8'))
+    assert binding['status']=='PASS_REAL_NATIVE_LSM_HOOK_TABLE_RELOCATION' and binding['image_sha256']==digest(image)
+    susfs_source=('Native SUSFS 2.3.0 upstream semantic source: https://gitlab.com/simonpunk/susfs4ksu/-/tree/5419f4ee97cc8bf7ca67a9ff207f39653d7784f4\n'
+                  '4.14 port reference (filesystem hooks only; no foreign device image): https://github.com/souta-lab/agate-bakasu-susfs/tree/9f3ab3fbd2b0cef34aeb441f2216d8e83e09776e\n')
+else:
+    assert b'v1.5.5\x00' in image
+    susfs_source='SUSFS: https://github.com/Star-Seven/susfs4ksu/tree/d18028f2a8f3ba16a907bff0edc16376cf38e2bf\n'
 assert subprocess.check_output(['git','-C',str(a.ak3_source),'rev-parse','HEAD'],text=True).strip()=='020dfeccf9d7e962a48400fc94d3e451df92eead'
 core=subprocess.check_output(['git','-C',str(a.ak3_source),'show','HEAD:tools/ak3-core.sh'])
 assert digest(core)=='f7a51cfe2e093016a34a76e16de6c9885c2d1992c3482fcabc668680e1f0f6bb'
@@ -62,7 +78,7 @@ updater.write_bytes(backend)
 (stage/'tools/ak3-update-binary.sh').write_bytes(backend)
 (stage/'customize.sh').write_bytes((root/'customize.sh').read_bytes())
 (stage/'tools/stock-ramdisk-source.sh').write_bytes((root/'stock-ramdisk-source.sh').read_bytes())
-(stage/'module.prop').write_text('id=xiaomo_chopin_ak3\nname=小莫\nversion=r9a CI41085\nversionCode=6\nauthor=小莫\ndescription=AnyKernel3 guarded kernel installer receipt; no boot service or mount payload.\n',encoding='utf-8',newline='\n')
+(stage/'module.prop').write_text('id=xiaomo_chopin_ak3\nname=小莫\nversion='+revision+' CI41085\nversionCode=6\nauthor=小莫\ndescription=AnyKernel3 guarded kernel installer receipt; no boot service or mount payload.\n',encoding='utf-8',newline='\n')
 marker=stage/'META-INF/com/google/android/updater-script'
 marker.write_text('#MAGISK\n'+marker.read_text(encoding="utf-8"),encoding='utf-8',newline='\n')
 # Insert a verified callback immediately before the sole active-boot write.
@@ -81,7 +97,7 @@ if not a.slim: (stage/'stock-ramdisk.cpio.gz').write_bytes(gzip.compress(gzip.de
 (stage/'expected/header.sha256').write_text(digest(header)+'\n',newline='\n')
 (stage/'expected/kernel.sha256').write_text(digest(image)+'\n',newline='\n')
 build_commit=(a.candidate/'build-logs/root-build-complete.txt').read_text(encoding="utf-8").strip();assert re.fullmatch('[0-9a-f]{40}',build_commit)
-(stage/'SOURCE.txt').write_text('TEST CANDIDATE - no real-device acceptance implied.\nSource and build scripts: https://github.com/Andyxyc/xm-build-workspace/tree/'+build_commit+'\nAnyKernel3: https://github.com/osm0sis/AnyKernel3/tree/020dfeccf9d7e962a48400fc94d3e451df92eead\nVendor source: https://github.com/ChopinKernels/android_kernel_chopin_android_T/tree/0647a49c9557faa92b90c4ae188587787226be9e\nSukiSU: https://github.com/SukiSU-Ultra/SukiSU-Ultra/tree/6397fcb5d96e8f4953c71e02c73f8c6800541bff\nSUSFS: https://github.com/Star-Seven/susfs4ksu/tree/d18028f2a8f3ba16a907bff0edc16376cf38e2bf\nKPM postprocessor source: https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/tree/a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 (source-built kptools)\nPaired KPM runtime source and build: https://github.com/Andyxyc/xm-build-workspace/tree/129d14a49c7b1daa1a68c5c6d493c534e9a84d20/chopin/port_kp_bridge_414.py\n',newline='\n')
+(stage/'SOURCE.txt').write_text('TEST CANDIDATE - no real-device acceptance implied.\nSource and build scripts: https://github.com/Andyxyc/xm-build-workspace/tree/'+build_commit+'\nAnyKernel3: https://github.com/osm0sis/AnyKernel3/tree/020dfeccf9d7e962a48400fc94d3e451df92eead\nVendor source: https://github.com/ChopinKernels/android_kernel_chopin_android_T/tree/0647a49c9557faa92b90c4ae188587787226be9e\nSukiSU: https://github.com/SukiSU-Ultra/SukiSU-Ultra/tree/6397fcb5d96e8f4953c71e02c73f8c6800541bff\n'+susfs_source+'KPM postprocessor source: https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/tree/a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 (source-built kptools)\nPaired KPM runtime source and build: https://github.com/Andyxyc/xm-build-workspace/tree/129d14a49c7b1daa1a68c5c6d493c534e9a84d20/chopin/port_kp_bridge_414.py\n',newline='\n')
 (stage/'AnyKernel3-LICENSE').write_bytes(subprocess.check_output(['git','-C',str(a.ak3_source),'show','HEAD:LICENSE']))
 licenses={'Linux-COPYING':'af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7','SukiSU-LICENSE':'8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643','SUSFS-LICENSE':'3da27bc7c6a063f498b4278372d48e113453f93aecc709f44276e278fc0cac12','KernelPatch-LICENSE':'ce7f2f7bc1c5b68f592a04b763abaa9c180c5e44e30563153bee280763b54ae7'}
 (stage/'LICENSES').mkdir()

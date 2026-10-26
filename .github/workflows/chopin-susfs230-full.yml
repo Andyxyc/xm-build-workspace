@@ -222,7 +222,7 @@ jobs:
             echo "status=compiled_only; NOT FLASHABLE; NO HARDWARE OR CAMERA VALIDATION"
             echo "vendor=$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
             echo "sukisu=$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
-            echo "susfs=$(git -C "$WORKSPACE/susfs4ksu" rev-parse HEAD)"
+            echo "susfs=2.3.0; native upstream5419f4ee97cc8bf7ca67a9ff207f39653d7784f4; 4.14 reference9f3ab3fbd2b0cef34aeb441f2216d8e83e09776e; exact file manifest attached"
             sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
           } > release-evidence/BUILD-STATUS.txt
 
