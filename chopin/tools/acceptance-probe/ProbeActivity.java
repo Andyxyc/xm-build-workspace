@@ -41,8 +41,7 @@ public final class ProbeActivity extends Activity {
     File f=new File(getFilesDir(),"map-probe.txt");try(FileInputStream in=new FileInputStream(f)){mapped=in.getChannel().map(FileChannel.MapMode.READ_ONLY,0,f.length());report.put("mapped_first_byte",mapped.get(0)&255);}
     String maps=Observation.read("/proc/self/maps",262144);report.put("map_path_visible",maps.contains(f.getAbsolutePath()));
    }
-   // Linux UAPI PRIO_USER=2; Android's public OsConstants omits this constant.
-   int target=getIntent().getIntExtra("target_uid",-1);if(target>=0){try{report.put("target_priority",Os.getpriority(2,target));}catch(Exception e){report.put("target_priority_error",e.toString());}}
+   // Per-UID priority needs a separate native observer; do not infer a result.
    if(mode.equals("zygote")){bound=bindService(new Intent(this,IsolatedProbe.class),conn,BIND_AUTO_CREATE);report.put("isolated_service_bind",bound);}
    save();
   }catch(Exception e){try{if(report==null)report=new JSONObject();report.put("error",e.toString());save();}catch(Exception ignored){view.setText(e.toString());}}
