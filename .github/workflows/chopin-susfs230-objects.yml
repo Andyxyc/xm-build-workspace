@@ -106,7 +106,9 @@ jobs:
         run: python3 chopin/tools/susfs230/apply.py "$WORKSPACE/android-kernel"
       - name: Resolve experimental defconfig
         working-directory: builder
-        run: bash scripts/build.sh defconfig
+        run: |
+          sed -i 's/CONFIG_KSU_SUSFS_SUS_MAP=n/CONFIG_KSU_SUSFS_SUS_MAP=y/' "$CONFIG_ENV"
+          bash scripts/build.sh defconfig
       - name: Compile real filesystem objects only
         run: python3 chopin/tools/susfs230/compile.py
       - uses: actions/upload-artifact@v4
