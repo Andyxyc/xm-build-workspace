@@ -40,7 +40,7 @@ edit('kernel/reboot.c','\tksu_handle_sys_reboot(magic1, magic2, cmd, &arg);',
 edit('KernelSU/kernel/hook/lsm_hook.c',
      'static struct security_hook_list ksu_hooks[] = {',
      '''#ifdef CONFIG_KSU_SUSFS
-static int chopin_native_task_fix_setuid(struct cred *new,
+static noinline int chopin_native_task_fix_setuid(struct cred *new,
                                         const struct cred *old, int flags)
 {
     if (!new || !old || old->uid.val != 0)
@@ -52,6 +52,7 @@ static struct security_hook_list ksu_hooks[] = {''')
 edit('KernelSU/kernel/hook/lsm_hook.c',
      '#ifndef CONFIG_KSU_SUSFS\n    LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid),\n#endif',
      '#ifdef CONFIG_KSU_SUSFS\n    LSM_HOOK_INIT(task_fix_setuid, chopin_native_task_fix_setuid),\n#else\n    LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid),\n#endif')
+edit('KernelSU/kernel/hook/lsm_hook.c','int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)', 'noinline int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)')
 guard='#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)\n'
 edit('KernelSU/kernel/policy/feature.c',
      '    [KSU_FEATURE_SELINUX_HIDE] = "selinux_hide",',
