@@ -58,7 +58,7 @@
 +#endif
  	if (!res)
  		mnt_group_start = mnt->mnt_group_id + 1;
-@@ -200,4 +236,128 @@
+@@ -200,4 +236,130 @@
  	mntput(&m->mnt);
  }
 +
@@ -104,7 +104,8 @@
 +		INIT_HLIST_NODE(&mnt->mnt_mp_list);
 +		INIT_LIST_HEAD(&mnt->mnt_umounting);
 +#ifdef CONFIG_FSNOTIFY
-+		INIT_HLIST_HEAD(&mnt->mnt_fsnotify_marks);
++		mnt->mnt_fsnotify_marks = NULL;
++		mnt->mnt_fsnotify_mask = 0;
 +#endif
 +		init_fs_pin(&mnt->mnt_umount, drop_mountpoint);
 +	}
@@ -168,7 +169,8 @@
 +		INIT_HLIST_NODE(&mnt->mnt_mp_list);
 +		INIT_LIST_HEAD(&mnt->mnt_umounting);
 +#ifdef CONFIG_FSNOTIFY
-+		INIT_HLIST_HEAD(&mnt->mnt_fsnotify_marks);
++		mnt->mnt_fsnotify_marks = NULL;
++		mnt->mnt_fsnotify_mask = 0;
 +#endif
 +		init_fs_pin(&mnt->mnt_umount, drop_mountpoint);
 +	}
@@ -187,7 +189,7 @@
 +#endif
  
  static struct mount *alloc_vfsmnt(const char *name)
-@@ -703,4 +863,22 @@
+@@ -703,4 +865,22 @@
  	struct mount *p;
  
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -210,7 +212,7 @@
 +
  	hlist_for_each_entry_rcu(p, head, mnt_hash)
  		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
-@@ -1039,5 +1217,21 @@
+@@ -1039,5 +1219,21 @@
  		return ERR_PTR(-ENODEV);
  
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -232,7 +234,7 @@
 +#endif
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
-@@ -1094,5 +1288,43 @@
+@@ -1094,5 +1290,43 @@
  	int err;
  
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -276,7 +278,7 @@
 +#endif
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
-@@ -1119,4 +1351,12 @@
+@@ -1119,4 +1353,12 @@
  	mnt->mnt.mnt_flags = old->mnt.mnt_flags;
  	mnt->mnt.mnt_flags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
 +
@@ -289,7 +291,7 @@
 +
  	/* Don't allow unprivileged users to change mount flags */
  	if (flag & CL_UNPRIVILEGED) {
-@@ -2999,4 +3239,7 @@
+@@ -2999,4 +3241,7 @@
  	if (user_ns != ns->user_ns)
  		copy_flags |= CL_SHARED_TO_SLAVE | CL_UNPRIVILEGED;
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -297,7 +299,7 @@
 +#endif
  	new = copy_tree(old, old->mnt.mnt_root, copy_flags);
  	if (IS_ERR(new)) {
-@@ -3575,2 +3818,40 @@
+@@ -3575,2 +3820,40 @@
  	.owner		= mntns_owner,
  };
 +

@@ -18,11 +18,15 @@ for row in cfg['patches']:
 for row in cfg['remote_sources']:
     with urllib.request.urlopen(row['url'],timeout=40) as r:data=r.read(200000)
     assert sha(data)==row['sha256'],row['file']
-    if row['file'].endswith('susfs_def.h'):
-        # 4.14 defines the required bit primitives in bitops.h.
-        assert data.count(b'#include <linux/bits.h>')==1
-        data=data.replace(b'#include <linux/bits.h>',b'#include <linux/bitops.h>',1)
     (kernel/row['file']).write_bytes(data)
+# Exact source sync to upstream 5419f4ee (priority UID filter and its real backend).
+for row in json.loads((here/'upstream-sync.json').read_text(encoding='utf-8')):
+    p=kernel/row['file'];text=p.read_text(encoding='utf-8')
+    assert text.count(row['old'])==1,(row['file'],'upstream sync context')
+    p.write_text(text.replace(row['old'],row['new'],1),encoding='utf-8',newline='\n')
+p=kernel/'include/linux/susfs_def.h';data=p.read_bytes()
+assert data.count(b'#include <linux/bits.h>')==1
+p.write_bytes(data.replace(b'#include <linux/bits.h>',b'#include <linux/bitops.h>',1))
 config=kernel/'arch/arm64/configs/chopin_user_defconfig'
 with config.open('a') as f:
     f.write('\nCONFIG_KSU=y\nCONFIG_KSU_SUSFS=y\nCONFIG_KSU_SUSFS_SUS_PATH=y\nCONFIG_KSU_SUSFS_SUS_MOUNT=y\nCONFIG_KSU_SUSFS_SUS_KSTAT=y\nCONFIG_KSU_SUSFS_SUS_MAP=y\nCONFIG_KSU_SUSFS_SPOOF_UNAME=y\nCONFIG_KSU_SUSFS_OPEN_REDIRECT=y\n')

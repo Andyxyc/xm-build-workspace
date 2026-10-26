@@ -15,6 +15,12 @@ for target in targets:
         rc=subprocess.run(args+[target],cwd=kernel,env=env,stdout=log,stderr=subprocess.STDOUT).returncode
     rows.append({'target':target,'exit':rc});print(json.dumps(rows[-1]),flush=True)
     if target=='chopin_user_defconfig' and rc: raise SystemExit(rc)
+    if target=='chopin_user_defconfig':
+        subprocess.run(['bash','scripts/config','--file','out/.config','-e','KSU_SUSFS_SUS_MAP'],cwd=kernel,check=True)
+        with path.open('a') as log:
+            subprocess.run(args+['olddefconfig'],cwd=kernel,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        assert 'CONFIG_KSU_SUSFS_SUS_MAP=y' in (kernel/'out/.config').read_text()
+
     obj=kernel/'out'/target
     if not rc and obj.is_file():shutil.copyfile(obj,out/target.replace('/','_'))
     (out/'commands.json').write_text(json.dumps(rows,indent=2))

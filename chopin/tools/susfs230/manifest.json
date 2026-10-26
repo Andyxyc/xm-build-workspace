@@ -33,16 +33,16 @@
     {
       "file": "fs/namespace.c",
       "stock_sha256": "ae13d29b24d55be3067e8e6043608d1681728dee47b33708639c4689e4bb83a1",
-      "patched_sha256": "183806ecada82e7e3eff4a0fd25a3f7d2de15885a9b80ca84c2358c95ee19f05",
+      "patched_sha256": "4ce0315d916d98f4fc223e3461cc4d941632173e37e2ac2e42aca5b8cc982df0",
       "patch": "fs_namespace.c.patch",
-      "patch_sha256": "028c159af38ea46aa76fc576e6d335d17b9d7ac4c09084f7b5b36e41430ae39c"
+      "patch_sha256": "8a27413e668e3f82e64978fc0b01d40b8eec195fa594a1435ee4c2a464fe0e62"
     },
     {
       "file": "fs/notify/fdinfo.c",
       "stock_sha256": "0ea0df1cc611a4947d26d2a49543df5573e841e539cfd8c2e97c6efe195eba40",
-      "patched_sha256": "9e9a997d359dbf4886d561e8bd2c8c814168209e8302bd2404d704a5bb22e996",
+      "patched_sha256": "d8cdba49402a4678370700127e3b5b09d1e4a26d4fbb0e1e1d0a86bdae6aa058",
       "patch": "fs_notify_fdinfo.c.patch",
-      "patch_sha256": "f446b7cf3a2232d8a44992d822f2a95625d1e430806541c27f59ea399098b092"
+      "patch_sha256": "fb83928c1662c8af938945b48476c0323aebeb43b1a3a4077546d66cbb7f58e8"
     },
     {
       "file": "fs/open.c",
@@ -68,9 +68,9 @@
     {
       "file": "fs/proc/cmdline.c",
       "stock_sha256": "c1a9373d8a3ce1f0a7267222c8d18f1354ab838d4f3d7db1c6acb6b852216aaf",
-      "patched_sha256": "fb50f5d6bebd9c422ad14738c3bb2f92d9c94589fbb44876ca7af845ad8336f0",
+      "patched_sha256": "35e3885a89876c8789b164acc695afd57df15a9d91451ef6ad41b00c916b986b",
       "patch": "fs_proc_cmdline.c.patch",
-      "patch_sha256": "b12fd978f800ebc31df646a979b1e360760340884e91f8582c86f0df95b4fae2"
+      "patch_sha256": "9aac0725b6c9ef754bdff54ffcbae3e31fe5a66f7f032b2dfd37b923493be387"
     },
     {
       "file": "fs/proc/fd.c",

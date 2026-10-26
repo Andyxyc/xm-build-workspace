@@ -1,6 +1,10 @@
 --- a/fs/proc/cmdline.c
 +++ b/fs/proc/cmdline.c
-@@ -7,4 +7,9 @@
+@@ -4,7 +4,19 @@
+ #include <linux/proc_fs.h>
+ #include <linux/seq_file.h>
++#include <linux/jump_label.h>
+ 
  static int cmdline_proc_show(struct seq_file *m, void *v)
  {
 +#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
@@ -8,14 +12,11 @@
 +extern void susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
 +#endif
 +
- 	seq_printf(m, "%s\n", saved_command_line);
- 	return 0;
-@@ -29,2 +34,8 @@
- }
- fs_initcall(proc_cmdline_init);
 +#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 +	if (static_branch_likely(&susfs_is_fake_cmdline_or_bootconfig_buffer_set)) {
 +		susfs_spoof_cmdline_or_bootconfig(m);
 +		return 0;
 +	}
 +#endif
+ 	seq_printf(m, "%s\n", saved_command_line);
+ 	return 0;
