@@ -10,7 +10,15 @@ ports=here.parents[1];ksu=root/'KernelSU/kernel'
 def edit(path,old,new):
     p=root/path;s=p.read_text();assert s.count(old)==1,(path,old[:80],s.count(old))
     p.write_text(s.replace(old,new,1))
-def run(name):runpy.run_path(str(ports/name),run_name='__main__')
+def run(name):
+    try:
+        runpy.run_path(str(ports/name),run_name='__main__')
+    except SystemExit as result:
+        # Some standalone port scripts explicitly exit(0) after a successful
+        # version branch. Only that success ends the child script, not this
+        # multi-step port. Every nonzero error must still abort the build.
+        if result.code not in (None,0):raise
+
 def prefix(name,delimiter,changes=()):
     p=ports/name;s=p.read_text().split(delimiter)[0]
     for old,new in changes:s=s.replace(old,new)
