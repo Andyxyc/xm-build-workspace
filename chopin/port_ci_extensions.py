@@ -37,8 +37,8 @@ start=new.index('bool ksu_uid_should_umount(uid_t uid)');end=new.index('\nvoid k
 at=s.index('bool ksu_uid_should_umount(uid_t uid)');finish=s.index('\nvoid ksu_put_app_profile',at);s=s[:at]+body+s[finish:];p.write_text(s,encoding='utf-8',newline='\n')
 # Pin the version to the published CI revision rather than a network-dependent
 # mutable main-branch commit count during an incremental build.
-p=ksu/'Makefile';s=p.read_text(encoding='utf-8');s,n=re.subn(r'(?m)^KSU_VERSION\s*:=.*$','KSU_VERSION := 41084',s);assert n==1
-s,n=re.subn(r'(?m)^KSU_VERSION_FULL\s*:=.*$','KSU_VERSION_FULL := v4.2.1-r2-6397fcb5@builtin+3b58d46f',s);assert n==1;p.write_text(s,encoding='utf-8',newline='\n')
-record=dict(builtin_commit='6397fcb5d96e8f4953c71e02c73f8c6800541bff',manager_ci_commit='3b58d46f7e109e49d4133d6c04636f724bd65983',version_code=41084,uapi_version=6,version_spoof_default_mask=0,priority_uid_filter_supported=False,upstream_files={str(p.relative_to(up)):hashlib.sha256(p.read_bytes()).hexdigest() for p in up.rglob('*') if p.is_file()})
+p=ksu/'Makefile';s=p.read_text(encoding='utf-8');s,n=re.subn(r'(?m)^KSU_VERSION\s*:=.*$','KSU_VERSION := 41085',s);assert n==1
+s,n=re.subn(r'(?m)^KSU_VERSION_FULL\s*:=.*$','KSU_VERSION_FULL := v4.2.1-r2-6397fcb5@builtin+536c173c',s);assert n==1;p.write_text(s,encoding='utf-8',newline='\n')
+record=dict(builtin_commit='6397fcb5d96e8f4953c71e02c73f8c6800541bff',manager_ci_commit='536c173c885bfc68ca33410dbc5c10f6270f4a09',version_code=41085,uapi_version=6,version_spoof_default_mask=0,priority_uid_filter_supported=False,upstream_files={str(p.relative_to(up)):hashlib.sha256(p.read_bytes()).hexdigest() for p in up.rglob('*') if p.is_file()})
 (root/'chopin-ci-port.json').write_text(json.dumps(record,indent=2))
 print('Applied CI version extension and RCU profile lookup; UAPI remains 6')

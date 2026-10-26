@@ -1,0 +1,30 @@
+name: Chopin read-only UFS diagnostic
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/ufs_readonly.c', '.github/workflows/chopin-ufs-readonly.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      - name: Build restricted read-only probe
+        run: |
+          mkdir diagnostic
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror chopin/tools/ufs_readonly.c -o diagnostic/ufs-readonly
+          cp chopin/tools/ufs_readonly.c diagnostic/
+          aarch64-linux-gnu-readelf -h diagnostic/ufs-readonly > diagnostic/elf-header.txt
+          sha256sum diagnostic/* > diagnostic/files.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopin-ufs-readonly
+          path: diagnostic/*
+          if-no-files-found: error

@@ -110,9 +110,5 @@ assert s.count(needle)==1
 s=s.replace(needle,'    if (!READ_ONCE(ksu_su_compat_enabled))\n        return -EINVAL;\n\n'+needle,1)
 p.write_text(s)
 
-# Keep the official certificate allowlist and add only this owner's public key.
-cert=json.loads((here/'owner-manager-cert.json').read_text())
-assert re.fullmatch('[0-9a-f]{64}',cert['certificate_sha256'])
-replace('KernelSU/kernel/manager/apk_sign.c','} apk_sign_keys[] = {',
-        '} apk_sign_keys[] = {\n    { '+str(cert['certificate_bytes'])+', "'+cert['certificate_sha256']+'" }, /* owner-built manager; private key stays offline */')
-print('Applied stock display identity, ARM64 4.14 CPU identity reporting, ADB root and owner manager certificate')
+# Use the upstream official manager certificate list without personal additions.
+print('Applied stock display identity, ARM64 4.14 CPU identity reporting and ADB root; official manager certificates unchanged')

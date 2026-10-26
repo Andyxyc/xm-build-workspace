@@ -56,9 +56,9 @@ for name in ['ksu_adb_root_handle_execveat','ksu_adb_root_init','ksu_adb_root_ha
 assert 'CONFIG_KSU_FEATURE_ADBROOT=y' in (ev/'chopin-built.config').read_text(encoding='utf-8')
 # Decode the actual compiled certificate entry, not a detached JSON declaration.
 entry=symbols['apk_sign_keys']-base;size=struct.unpack_from('<I',data,entry)[0];pointer=relocations[symbols['apk_sign_keys']+8]-base
-assert size==1149 and 0<=pointer<len(data)
+assert size==860 and 0<=pointer<len(data)
 certificate=data[pointer:pointer+64].decode('ascii')
-assert certificate=='33a63461c5442d981bcab44b168cb4ab6d50462e21ce5a6ecb668305a9b422cc'
+assert certificate=='947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef'
 identity=json.loads((ev/'stock-identity.json').read_text(encoding='utf-8'))
 assert (identity['banner']+'\n').encode() in data
 record={'status':'PASS_COMPILED_FEATURE_PATHS_AND_MANAGER_CERT','image_sha256':hashlib.sha256(data).hexdigest(),'edges':records,'avc_source_and_target_sites':avc,'adb_root_config':True,'manager_certificate_bytes':size,'manager_certificate_sha256':certificate,'original_banner_exact':True,'hardware_validated':False}
