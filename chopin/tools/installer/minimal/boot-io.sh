@@ -59,6 +59,12 @@ chopin_record_attempt() {
 }
 
 chopin_write_boot() {
+  CHOPIN_ALREADY_INSTALLED=0;
+  if [ "$CHOPIN_NEW_IMAGE_SHA" = "$CHOPIN_BACKUP_SHA" ]; then
+    CHOPIN_ALREADY_INSTALLED=1;
+    printf 'phase=already_installed_no_partition_write\n' >> "$CHOPIN_DETAIL_LOG";
+    return 0;
+  fi;
   blockdev --setrw "$BLOCK" || return 1;
   if dd if="$AKHOME/boot-new.img" of="$BLOCK" bs=1048576 conv=fsync,notrunc; then
     printf 'phase=write_and_flush_completed\n' >> "$CHOPIN_DETAIL_LOG";

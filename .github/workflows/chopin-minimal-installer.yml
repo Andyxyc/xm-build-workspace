@@ -6,22 +6,16 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  actions: write
 jobs:
   file-fixtures:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Cancel the redundant full build triggered by the postprocessor edit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          state=$(gh api repos/$GITHUB_REPOSITORY/actions/runs/40314582812 --jq '.status + " " + .head_sha')
-          if [ "$state" = 'in_progress eecc28814edcf0d6269c00d34d6ed84b61cfef08' ] || [ "$state" = 'queued eecc28814edcf0d6269c00d34d6ed84b61cfef08' ]; then
-            gh run cancel 40314582812 --repo "$GITHUB_REPOSITORY"
-          fi
       - run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
           sudo timeout 180 apt-get update -qq
           sudo timeout 180 apt-get install -y --no-install-recommends busybox-static qemu-user
           git init ak3-fixture

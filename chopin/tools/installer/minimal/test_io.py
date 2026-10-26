@@ -4,7 +4,7 @@ import hashlib,json,os,shutil,subprocess,tempfile
 assert os.geteuid()==0,'Disposable CI chroot only; never run on a phone'
 here=Path(__file__).resolve().parent;results=[]
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
-cases=[('firmware-1408-slot-a',0),('firmware-1409-slot-a',0),('firmware-1408-slot-b',0),('firmware-1409-slot-b',0),('old-failure-and-repeat-install',0),('changed-target',99),('changed-slot',99),('oversize-image',99),('short-image',99),('corrupt-backup',99),('flush-error',99),('readback-error',99),('readonly-target',99)]
+cases=[('firmware-1408-slot-a',0),('firmware-1409-slot-a',0),('firmware-1408-slot-b',0),('firmware-1409-slot-b',0),('old-failure-and-repeat-install',0),('same-image-readonly-target',0),('changed-target',99),('changed-slot',99),('oversize-image',99),('short-image',99),('corrupt-backup',99),('flush-error',99),('readback-error',99),('readonly-target',99)]
 with tempfile.TemporaryDirectory(prefix='chopin-minimal-io-') as tmp:
     for name,want in cases:
         root=Path(tmp)/name
@@ -22,11 +22,12 @@ with tempfile.TemporaryDirectory(prefix='chopin-minimal-io-') as tmp:
         slot='_b' if name.endswith('slot-b') else '_a'
         if name=='oversize-image':(root/'stage/boot-new.img').write_bytes(bytes(8193))
         if name=='short-image':(root/'stage/boot-new.img').write_bytes(b'short')
+        if name=='same-image-readonly-target':(root/'stage/boot-new.img').write_bytes(old)
         if name=='corrupt-backup':(root/('data/adb/chopin-kernel-backups/boot'+slot+'-'+sha(root/'target')+'.img')).write_bytes(b'corrupt')
         script='export PATH=/bin AKHOME=/stage BOOTIMG=/stage/boot.img BLOCK=/target\nSLOT='+slot+'\n'
         script+='abort() { printf "%s\\n" "$*" >&2; exit 99; }\n'
         script+='getprop() { case "$1" in ro.boot.slot_suffix) echo '+('_b' if name=='changed-slot' else slot)+';; ro.build.version.incremental) echo '+rom+';; esac; }\n'
-        script+='blockdev() { case "$1" in --getsize64) echo 8192;; --setrw) return '+('1' if name=='readonly-target' else '0')+';; *) return 1;; esac; }\n'
+        script+='blockdev() { case "$1" in --getsize64) echo 8192;; --setrw) return '+('1' if name in ['readonly-target','same-image-readonly-target'] else '0')+';; *) return 1;; esac; }\n'
         script+='dd() { printf "%s\\n" "$*" >> /write-calls; command dd "$@"; rc=$?; '+('return 1;' if name=='flush-error' else 'return "$rc";')+' }\n. /io.sh\nchopin_backup_boot\n'
         if name=='changed-target':script+='printf CHANGED >> /target\n'
         script+='chopin_preflash_verify\nchopin_record_attempt || abort journal\nchopin_write_boot || abort write\n'
@@ -39,8 +40,11 @@ with tempfile.TemporaryDirectory(prefix='chopin-minimal-io-') as tmp:
         assert marker.read_bytes()==marker_before,'Historical failure evidence changed'
         writes=(root/'write-calls').read_text().splitlines() if (root/'write-calls').exists() else []
         if want==0:
-            assert (root/'target').read_bytes()==new+bytes(4096)
-            assert len(writes)==(2 if name=='old-failure-and-repeat-install' else 1)
+            assert (root/'target').read_bytes()==(old if name=='same-image-readonly-target' else new+bytes(4096))
+            assert len(writes)==(0 if name=='same-image-readonly-target' else 1)
+            if name in ['same-image-readonly-target','old-failure-and-repeat-install']:
+                logs=''.join(f.read_text() for f in (root/'data/adb/chopin-kernel-backups').glob('install*.log.*'))
+                assert 'phase=already_installed_no_partition_write' in logs
         elif name in ['flush-error','readback-error']:assert len(writes)==1
         else:assert not writes
         assert all('conv=fsync,notrunc' in w and 'if=/dev/zero' not in w for w in writes)

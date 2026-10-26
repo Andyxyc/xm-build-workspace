@@ -26,7 +26,11 @@ split_boot 2>> "$AKHOME/install-detail.log";
 chopin_backup_boot;
 ui_print "Preparing kernel...";
 chopin_clean_ramdisk "$SPLITIMG/ramdisk.cpio" 2>> "$CHOPIN_DETAIL_LOG";
-ui_print "Writing boot$SLOT...";
+ui_print "Installing boot$SLOT...";
 flash_boot 2>> "$CHOPIN_DETAIL_LOG";
 chopin_postflash_verify;
-ui_print "Installed. Reboot when ready.";
+if [ "${CHOPIN_ALREADY_INSTALLED:-0}" = 1 ]; then
+  ui_print "Already installed. No boot changes.";
+else
+  ui_print "Installed. Reboot when ready.";
+fi;
