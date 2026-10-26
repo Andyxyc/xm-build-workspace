@@ -4,4 +4,5 @@ public final class NativeProbe {
  public static native String status();
  public static native String connect(String path);
  public static native String priority(int uid);
+ public static native String scheduler(int pid);
 }

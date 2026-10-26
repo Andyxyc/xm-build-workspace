@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/select.h>
 #include <sys/resource.h>
+#include <sched.h>
 #ifndef CHOPIN_SOCKET_LISTENER
 #include <jni.h>
 JNIEXPORT jstring JNICALL Java_cn_chopin_acceptanceprobe_NativeProbe_status(JNIEnv *e,jclass c) {
@@ -41,9 +42,13 @@ JNIEXPORT jstring JNICALL Java_cn_chopin_acceptanceprobe_NativeProbe_priority(JN
  (void)c;char out[128];errno=0;int value=getpriority(PRIO_USER,uid),err=errno;
  snprintf(out,sizeof(out),"{\"uid\":%d,\"value\":%d,\"errno\":%d,\"read_only\":true}",uid,value,err);return (*e)->NewStringUTF(e,out);
 }
+JNIEXPORT jstring JNICALL Java_cn_chopin_acceptanceprobe_NativeProbe_scheduler(JNIEnv *e,jclass c,jint pid){
+ (void)c;char out[160];errno=0;int value=pid>1?sched_getscheduler(pid):-1,err=pid>1?errno:EINVAL;
+ snprintf(out,sizeof(out),"{\"target_pid\":%d,\"result\":%d,\"errno\":%d,\"read_only\":true}",pid,value,err);return (*e)->NewStringUTF(e,out);
+}
 #else
 int main(int argc,char **argv){
- const char *prefix="/data/user/0/cn.chopin.acceptanceprobe2/files/chopin-avc-";
+ const char *prefix="/data/user/0/cn.chopin.acceptanceprobe3/files/chopin-avc-";
  if(argc!=2||strncmp(argv[1],prefix,strlen(prefix)))return 2;
  struct sockaddr_un a={.sun_family=AF_UNIX};struct stat initial,owned,current;
  if(strlen(argv[1])>=sizeof(a.sun_path)||lstat(argv[1],&initial)==0||errno!=ENOENT)return 3;

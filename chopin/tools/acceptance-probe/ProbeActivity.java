@@ -49,6 +49,8 @@ public final class ProbeActivity extends Activity {
     report.put("maps_bytes",maps.length());report.put("map_path_visible",found);
    }
    report.put("self_priority",new JSONObject(NativeProbe.priority(android.os.Process.myUid())));
+   int targetPid=getIntent().getIntExtra("scheduler_pid",-1);
+   if(targetPid>1)report.put("scheduler_query",new JSONObject(NativeProbe.scheduler(targetPid)));
    String socket=getIntent().getStringExtra("socket_path");
    if(socket!=null && socket.startsWith(getFilesDir().getAbsolutePath()+"/chopin-avc-"))report.put("local_socket",new JSONObject(NativeProbe.connect(socket)));
    if(mode.equals("zygote")){bound=bindService(new Intent(this,IsolatedProbe.class),conn,BIND_AUTO_CREATE);report.put("isolated_service_bind",bound);}

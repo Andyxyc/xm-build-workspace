@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.chopin.acceptanceprobe2" android:versionCode="2" android:versionName="2">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.chopin.acceptanceprobe3" android:versionCode="3" android:versionName="3">
   <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="32" />
   <application android:label="Chopin 功能验证" android:allowBackup="false" android:zygotePreloadName="cn.chopin.acceptanceprobe.Preload" android:theme="@android:style/Theme.Material.Light.NoActionBar">
     <activity android:name="cn.chopin.acceptanceprobe.ProbeActivity" android:exported="true" />
