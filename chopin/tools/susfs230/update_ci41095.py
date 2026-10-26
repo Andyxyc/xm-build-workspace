@@ -1,7 +1,8 @@
 """CI41095 compatibility with the actually boot-tested ABI1 KPM runtime.
 
 The official ksud load_module_at_event falls back ONLY on EOPNOTSUPP.
-An unknown op used to return EINVAL, preventing boot-stage KPM loading.
+The old generic unknown-op branch already returned EOPNOTSUPP.
+The explicit op8 branch documents that existing compatibility contract.
 Do not switch the bridge ABI without rebuilding and testing its paired runtime.
 """
 from pathlib import Path
