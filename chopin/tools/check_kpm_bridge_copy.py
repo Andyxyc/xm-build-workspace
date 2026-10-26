@@ -40,6 +40,7 @@ typedef uint32_t __u32;
 #define SUKISU_KPM_INFO 5
 #define SUKISU_KPM_CONTROL 6
 #define SUKISU_KPM_VERSION 7
+#define SUKISU_KPM_LOAD_EVENT 8
 static unsigned char output[8192];
 static size_t capacity, copied;
 static int fault, alloc_fault, bridge_error, bridge_calls;
@@ -85,6 +86,14 @@ int main(void) {
     alloc_fault=1;assert(do_kpm(&cmd)==0 && result==-ENOMEM);alloc_fault=0;
     cmd.result_code=0;assert(do_kpm(&cmd)==-EFAULT);assert(do_kpm(NULL)==-EFAULT);
     cmd.result_code=(uintptr_t)&result;cmd.control_code=999;assert(do_kpm(&cmd)==0 && result==-EOPNOTSUPP);
+    /* CI41095 ksud falls back to LOAD only on EOPNOTSUPP, not EINVAL.
+     * A paired ABI1 runtime must not receive the unsupported ABI2 operation. */
+    cmd.control_code=SUKISU_KPM_LOAD_EVENT;cmd.arg1=0;cmd.arg2=0;
+    int event_before=bridge_calls;
+    assert(do_kpm(&cmd)==0 && result==-EOPNOTSUPP && bridge_calls==event_before);
+    char valid_path[]="/data/local/tmp/chopin-test.kpm";
+    cmd.control_code=SUKISU_KPM_LOAD;cmd.arg1=(uintptr_t)valid_path;
+    assert(do_kpm(&cmd)==0 && result==0 && bridge_calls==event_before+1);
     char long_name[2048];memset(long_name,'x',sizeof(long_name));
     cmd.control_code=SUKISU_KPM_LOAD;cmd.arg1=(uintptr_t)long_name;cmd.arg2=0;
     int before=bridge_calls;assert(do_kpm(&cmd)==0 && result==-ENAMETOOLONG && bridge_calls==before);
@@ -96,5 +105,5 @@ with tempfile.TemporaryDirectory(prefix='kpm-current-copy-') as temp:
     q=subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Wno-misleading-indentation',str(c),'-o',str(exe)],capture_output=True)
     assert q.returncode==0,q.stderr.decode()
     subprocess.run([str(exe)],check=True)
-report=dict(status='PASS_CURRENT_KPM_ACTUAL_COPY_AND_DISPATCH_FUNCTIONS_HOST_MOCKS',scope='NO_KERNEL_NO_DEVICE_HOST_MOCKS',capacities=[0,1,4,256,1024,4096,4097],error_cases=['copy-fault','bridge-error','allocation-failure','null-result','null-command','unknown-op','truncated-path'],source_sha256=hashlib.sha256(source.encode()).hexdigest(),hardware_verified=False)
+report=dict(status='PASS_CURRENT_KPM_ACTUAL_COPY_AND_DISPATCH_FUNCTIONS_HOST_MOCKS',scope='NO_KERNEL_NO_DEVICE_HOST_MOCKS',capacities=[0,1,4,256,1024,4096,4097],error_cases=['copy-fault','bridge-error','allocation-failure','null-result','null-command','unknown-op','truncated-path','ABI1-event-EOPNOTSUPP-no-bridge-call','ordinary-load-after-event-fallback'],source_sha256=hashlib.sha256(source.encode()).hexdigest(),hardware_verified=False)
 Path('kpm-version-copy-tests.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))

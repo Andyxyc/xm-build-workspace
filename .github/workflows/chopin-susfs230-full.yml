@@ -1,4 +1,4 @@
-name: Chopin native SUSFS2.3 full kernel candidate
+name: Chopin native SUSFS2.3 full kernel CI41095 candidate
 
 on:
   push:
