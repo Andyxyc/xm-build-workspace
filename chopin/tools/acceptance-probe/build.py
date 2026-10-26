@@ -2,7 +2,8 @@ from pathlib import Path
 import os,subprocess,zipfile,json,hashlib
 root=Path(__file__).resolve().parent;sdk=Path(os.environ['ANDROID_SDK_ROOT'])
 tools=sorted(p for p in (sdk/'build-tools').iterdir() if (p/'aapt2').is_file() and (p/'d8').is_file())[-1]
-platform=sorted((sdk/'platforms').glob('android-*/android.jar'))[-1]
+platform=next((sdk/'platforms'/('android-'+str(n))/'android.jar' for n in [35,34,33,36] if (sdk/'platforms'/('android-'+str(n))/'android.jar').is_file()),None)
+assert platform is not None,'A preinstalled stable public Android SDK is required'
 out=Path('acceptance-evidence');out.mkdir();classes=out/'classes';classes.mkdir();dex=out/'dex';dex.mkdir()
 def call(a):subprocess.run(list(map(str,a)),check=True)
 call([tools/'aapt2','link','-I',platform,'--manifest',root/'AndroidManifest.xml','--min-sdk-version','29','--target-sdk-version','32','-o',out/'unsigned.apk'])
