@@ -22,5 +22,6 @@ jobs:
             acceptance-evidence/signature.txt
             acceptance-evidence/badging.txt
             acceptance-evidence/build-record.json
+            acceptance-evidence/chopin_socket_listener
           if-no-files-found: error
           retention-days: 14

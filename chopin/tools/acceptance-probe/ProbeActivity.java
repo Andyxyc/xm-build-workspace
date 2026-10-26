@@ -41,7 +41,9 @@ public final class ProbeActivity extends Activity {
     File f=new File(getFilesDir(),"map-probe.txt");try(FileInputStream in=new FileInputStream(f)){mapped=in.getChannel().map(FileChannel.MapMode.READ_ONLY,0,f.length());report.put("mapped_first_byte",mapped.get(0)&255);}
     String maps=Observation.read("/proc/self/maps",262144);report.put("map_path_visible",maps.contains(f.getAbsolutePath()));
    }
-   // Per-UID priority needs a separate native observer; do not infer a result.
+   report.put("self_priority",new JSONObject(NativeProbe.priority(android.os.Process.myUid())));
+   String socket=getIntent().getStringExtra("socket_path");
+   if(socket!=null && socket.startsWith(getFilesDir().getAbsolutePath()+"/chopin-avc-"))report.put("local_socket",new JSONObject(NativeProbe.connect(socket)));
    if(mode.equals("zygote")){bound=bindService(new Intent(this,IsolatedProbe.class),conn,BIND_AUTO_CREATE);report.put("isolated_service_bind",bound);}
    save();
   }catch(Exception e){try{if(report==null)report=new JSONObject();report.put("error",e.toString());save();}catch(Exception ignored){view.setText(e.toString());}}

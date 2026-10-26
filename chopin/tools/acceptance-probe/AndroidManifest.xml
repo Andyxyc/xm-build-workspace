@@ -1,7 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.chopin.acceptanceprobe" android:versionCode="1" android:versionName="1">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.chopin.acceptanceprobe2" android:versionCode="2" android:versionName="2">
   <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="32" />
   <application android:label="Chopin 功能验证" android:allowBackup="false" android:zygotePreloadName="cn.chopin.acceptanceprobe.Preload" android:theme="@android:style/Theme.Material.Light.NoActionBar">
-    <activity android:name=".ProbeActivity" android:exported="true" />
-    <service android:name=".IsolatedProbe" android:process=":isolated" android:isolatedProcess="true" android:useAppZygote="true" android:exported="false" />
+    <activity android:name="cn.chopin.acceptanceprobe.ProbeActivity" android:exported="true" />
+    <service android:name="cn.chopin.acceptanceprobe.IsolatedProbe" android:process=":isolated" android:isolatedProcess="true" android:useAppZygote="true" android:exported="false" />
   </application>
 </manifest>

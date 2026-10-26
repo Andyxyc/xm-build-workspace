@@ -24,10 +24,8 @@ public final class Observation {
  public static JSONObject selinux()throws Exception{
   JSONObject r=new JSONObject();r.put("uid",Process.myUid());r.put("pid",Process.myPid());r.put("elapsed_ms",SystemClock.elapsedRealtime());r.put("root_requested",false);
   try{r.put("context",read("/proc/self/attr/current",512));}catch(Exception e){r.put("context_error",e.toString());}
-  try(FileInputStream f=new FileInputStream("/sys/fs/selinux/status")){
-   ByteBuffer b=f.getChannel().map(FileChannel.MapMode.READ_ONLY,0,20);b.order(ByteOrder.LITTLE_ENDIAN);JSONObject s=new JSONObject();
-   for(String n:new String[]{"version","sequence","enforcing","policyload","deny_unknown"})s.put(n,((long)b.getInt())&0xffffffffL);r.put("status",s);
-  }catch(Exception e){r.put("status_error",e.toString());}
+  try{r.put("status",new JSONObject(NativeProbe.status()));}
+  catch(Throwable e){r.put("status_error",e.toString());}
   try{
    int cls=Integer.parseInt(read("/sys/fs/selinux/class/process/index",64).trim());r.put("process_class",cls);
    r.put("positive",access("u:r:app_zygote:s0","u:r:app_zygote:s0",cls));

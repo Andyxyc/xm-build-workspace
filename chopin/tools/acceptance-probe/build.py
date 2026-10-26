@@ -6,10 +6,17 @@ platform=next((sdk/'platforms'/('android-'+str(n))/'android.jar' for n in [35,34
 assert platform is not None,'A preinstalled stable public Android SDK is required'
 out=Path('acceptance-evidence');out.mkdir();classes=out/'classes';classes.mkdir();dex=out/'dex';dex.mkdir()
 def call(a):subprocess.run(list(map(str,a)),check=True)
+ndks=sorted(p for p in (sdk/'ndk').glob('*') if (p/'toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang').is_file())
+assert ndks,'Use the runner preinstalled NDK; no local virtualization or NDK download'
+cc=ndks[-1]/'toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang'
+call([cc,'-O2','-Wall','-Wextra','-Werror','-fPIC','-shared',root/'native_probe.c','-o',out/'libchopin_probe.so'])
+call([cc,'-O2','-Wall','-Wextra','-Werror','-DCHOPIN_SOCKET_LISTENER',root/'native_probe.c','-o',out/'chopin_socket_listener'])
 call([tools/'aapt2','link','-I',platform,'--manifest',root/'AndroidManifest.xml','--min-sdk-version','29','--target-sdk-version','32','-o',out/'unsigned.apk'])
 call(['javac','-source','8','-target','8','-cp',platform,'-d',classes,*root.glob('*.java')])
 call([tools/'d8','--lib',platform,'--min-api','29','--output',dex,*classes.rglob('*.class')])
-with zipfile.ZipFile(out/'unsigned.apk','a') as z:z.write(dex/'classes.dex','classes.dex')
+with zipfile.ZipFile(out/'unsigned.apk','a') as z:
+ z.write(dex/'classes.dex','classes.dex')
+ z.write(out/'libchopin_probe.so','lib/arm64-v8a/libchopin_probe.so')
 call([tools/'zipalign','-p','4',out/'unsigned.apk',out/'aligned.apk'])
 call(['keytool','-genkeypair','-keystore',out/'ephemeral-probe.jks','-storepass','android','-keypass','android','-alias','probe','-keyalg','RSA','-keysize','2048','-validity','3650','-dname','CN=Chopin unprivileged acceptance probe'])
 apk=out/'Chopin-Acceptance-Probe.apk'
