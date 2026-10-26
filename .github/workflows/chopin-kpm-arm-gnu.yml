@@ -1,0 +1,71 @@
+name: Chopin KPM with upstream Arm GNU compiler
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-kpm-arm-gnu.yml', 'chopin/tools/compare_kpm_bootstrap.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  paired-runtime:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      SOURCE_DATE_EPOCH: '1792886400'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare host prerequisites
+        run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends zlib1g-dev xz-utils
+      - uses: actions/cache@v4
+        with:
+          path: arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf
+          key: chopin-kp-upstream-arm-gnu-12.2.rel1-v1
+      - name: Use the exact compiler family specified by upstream
+        run: |
+          set -e
+          if [ ! -x arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-gcc ]; then
+            curl --fail --location --retry 2 --max-time 180 -o toolchain.tar.xz https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu/12.2.rel1/binrel/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf.tar.xz
+            sha256sum toolchain.tar.xz > toolchain-download.sha256
+            tar -Jxf toolchain.tar.xz
+          fi
+          echo "TARGET_COMPILE=$GITHUB_WORKSPACE/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-" >> "$GITHUB_ENV"
+          arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-gcc --version | head -n 1
+      - name: Stage the existing pinned runtime and public booted reference
+        run: |
+          git init baseline-kp
+          git -C baseline-kp remote add origin https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch.git
+          git -C baseline-kp fetch --depth=1 origin a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0
+          git -C baseline-kp checkout --detach FETCH_HEAD
+          cp -a baseline-kp paired-kp
+          python3 chopin/port_kp_bridge_414.py paired-kp
+          python3 chopin/tools/check_paired_kpm_protocol.py paired-kp
+          curl --fail --location --retry 2 --max-time 60 -o booted-reference.kpimg https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/7c6289c95bdc786119b03d150236853b7b4872ca/kpm/kpimg
+          echo '396a20777668e85d674a23dd3945815f285332b5358be0bfc97297935e2d130b  booted-reference.kpimg' | sha256sum -c -
+      - name: Compile baseline and paired runtime with Arm GNU12.2
+        run: |
+          set -o pipefail
+          mkdir evidence
+          make -C baseline-kp/kernel kpimg TARGET_COMPILE="$TARGET_COMPILE" -j2 2>&1 | tee evidence/baseline-build.log
+          make -C paired-kp/kernel kpimg TARGET_COMPILE="$TARGET_COMPILE" -j2 2>&1 | tee evidence/paired-build.log
+          make -C paired-kp/tools CC=gcc 'CPPFLAGS=-iquote ../kernel/include' -j2 2>&1 | tee evidence/tool-build.log
+          cp baseline-kp/kernel/kpimg evidence/baseline.kpimg
+          cp baseline-kp/kernel/kpimg.elf evidence/baseline.elf
+          cp paired-kp/kernel/kpimg paired-kp/kernel/kpimg.elf paired-kp/tools/kptools evidence/
+          cp booted-reference.kpimg paired-kpm-protocol.json evidence/
+          "$TARGET_COMPILE"gcc --version > evidence/compiler.txt
+          "$TARGET_COMPILE"readelf -h -s paired-kp/kernel/kpimg.elf > evidence/paired-elf.txt
+          git -C paired-kp diff > evidence/paired-source.patch
+          python3 chopin/tools/compare_kpm_bootstrap.py --elf baseline-kp/kernel/kpimg.elf --payload baseline-kp/kernel/kpimg --reference booted-reference.kpimg --report evidence/baseline-map-comparison.json
+          python3 chopin/tools/compare_kpm_bootstrap.py --elf paired-kp/kernel/kpimg.elf --payload paired-kp/kernel/kpimg --reference booted-reference.kpimg --report evidence/paired-map-comparison.json
+          cp toolchain-download.sha256 evidence/ 2>/dev/null || test ! -f toolchain-download.sha256
+          cd evidence
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-kpm-arm-gnu-comparison
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 14
