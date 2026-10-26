@@ -6,20 +6,36 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: write
 jobs:
   file-fixtures:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Cancel the redundant full build triggered by the postprocessor edit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          state=$(gh api repos/$GITHUB_REPOSITORY/actions/runs/40314582812 --jq '.status + " " + .head_sha')
+          if [ "$state" = 'in_progress eecc28814edcf0d6269c00d34d6ed84b61cfef08' ] || [ "$state" = 'queued eecc28814edcf0d6269c00d34d6ed84b61cfef08' ]; then
+            gh run cancel 40314582812 --repo "$GITHUB_REPOSITORY"
+          fi
       - run: |
           sudo timeout 180 apt-get update -qq
-          sudo timeout 180 apt-get install -y --no-install-recommends busybox-static
+          sudo timeout 180 apt-get install -y --no-install-recommends busybox-static qemu-user
+          git init ak3-fixture
+          git -C ak3-fixture remote add origin https://github.com/osm0sis/AnyKernel3.git
+          git -C ak3-fixture fetch --depth=1 origin 020dfeccf9d7e962a48400fc94d3e451df92eead
+          git -C ak3-fixture checkout --detach FETCH_HEAD
       - run: sudo python3 chopin/tools/installer/minimal/test_io.py
+      - run: sudo python3 chopin/tools/installer/minimal/test_entry_and_tools.py ak3-fixture/tools/magiskboot
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: chopin-minimal-installer-fixtures
-          path: minimal-installer-fixtures.json
+          path: |
+            minimal-installer-fixtures.json
+            minimal-entry-tools-fixtures.json
           if-no-files-found: error
           retention-days: 14
