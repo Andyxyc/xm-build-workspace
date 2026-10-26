@@ -2,7 +2,7 @@ name: Chopin read-only app profile diagnosis tool
 on:
   push:
     branches: [chopin-feature-kernel-20261025]
-    paths: ['.github/workflows/chopin-profile-readonly.yml', 'chopin/tools/profile_readonly.c']
+    paths: ['.github/workflows/chopin-profile-readonly.yml', 'chopin/tools/profile_readonly.c', 'chopin/tools/threadflags_readonly.c']
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,6 +23,15 @@ jobs:
           aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -Isukisu chopin/tools/profile_readonly.c -o evidence/profile_readonly
           aarch64-linux-gnu-readelf -h evidence/profile_readonly > evidence/ELF-header.txt
           cp chopin/tools/profile_readonly.c evidence/
+          git init kp
+          git -C kp remote add origin https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch.git
+          git -C kp fetch --depth=1 origin a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0
+          git -C kp checkout --detach FETCH_HEAD
+          flags="-Ikp/kernel/include -Ikp/kernel/patch/include -Ikp/kernel/linux/include -Ikp/kernel/linux/arch/arm64/include -Ikp/kernel/linux/tools/arch/arm64/include"
+          aarch64-linux-gnu-gcc -nostdinc -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -mgeneral-regs-only $flags -O2 -c chopin/tools/threadflags_readonly.c -o evidence/threadflags_readonly.o
+          aarch64-linux-gnu-ld -r evidence/threadflags_readonly.o -o evidence/threadflags_readonly.kpm
+          cp chopin/tools/threadflags_readonly.c evidence/
+          aarch64-linux-gnu-readelf -r -s evidence/threadflags_readonly.kpm > evidence/KPM-relocations.txt
           cd evidence
           sha256sum * > SHA256SUMS
       - uses: actions/upload-artifact@v4
