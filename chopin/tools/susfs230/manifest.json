@@ -1,0 +1,163 @@
+{
+  "source": "souta-lab/agate-bakasu-susfs@9f3ab3fb",
+  "scope": "experimental native SUSFS2.3 filesystem objects; not bootable or releasable",
+  "patches": [
+    {
+      "file": "fs/exec.c",
+      "stock_sha256": "9e0a0f61fde132dd1bbcdde36185904455a7a3e752ed0021b093af896cf4a76f",
+      "patched_sha256": "3434e2ad36a062ac2ba11836589a38b3fcc3f88754f964a9373388663b5a87ce",
+      "patch": "fs_exec.c.patch",
+      "patch_sha256": "ecc593d2fbc4fc1a5d53de88f87674eb3438f105f809ffa339e4657af2ec0925"
+    },
+    {
+      "file": "fs/internal.h",
+      "stock_sha256": "bab08112ac82bee64854e56afb63545c88cae18b62d968f0b69b7922bdb76e04",
+      "patched_sha256": "67fc7bbe2c469f904af40f0545f95d37c26597d92cfb7caaa76243a88f574e34",
+      "patch": "fs_internal.h.patch",
+      "patch_sha256": "556fa3ee820af9c92efb3723efcf999b02fd15b61e9dbf7ff8af5b63c3d5309f"
+    },
+    {
+      "file": "fs/Makefile",
+      "stock_sha256": "c0babae39b816794b1c69756804c44df3f181948a2544653588eb1854e089290",
+      "patched_sha256": "149524b94cc209c08e6c0d4347ec7752c7ce38d08f129f66b589207828edd1c3",
+      "patch": "fs_Makefile.patch",
+      "patch_sha256": "483a8a73e772e7e753164b5612d30f6468b99e7650ce176155a0cb1e4a5a4505"
+    },
+    {
+      "file": "fs/namei.c",
+      "stock_sha256": "6270865578b6e2a7ae9be1f158f094fd9d785fa8eb94b125a7d9fb54cf933bde",
+      "patched_sha256": "a57abf79f4f693d4c0fbee69b33749b59dcd09cce11370d47b59fc6f5920c44f",
+      "patch": "fs_namei.c.patch",
+      "patch_sha256": "14f7edc9ac638feb64991591ae9beef17036f0f1bedd46eae747e72a595dbd11"
+    },
+    {
+      "file": "fs/namespace.c",
+      "stock_sha256": "ae13d29b24d55be3067e8e6043608d1681728dee47b33708639c4689e4bb83a1",
+      "patched_sha256": "183806ecada82e7e3eff4a0fd25a3f7d2de15885a9b80ca84c2358c95ee19f05",
+      "patch": "fs_namespace.c.patch",
+      "patch_sha256": "028c159af38ea46aa76fc576e6d335d17b9d7ac4c09084f7b5b36e41430ae39c"
+    },
+    {
+      "file": "fs/notify/fdinfo.c",
+      "stock_sha256": "0ea0df1cc611a4947d26d2a49543df5573e841e539cfd8c2e97c6efe195eba40",
+      "patched_sha256": "9e9a997d359dbf4886d561e8bd2c8c814168209e8302bd2404d704a5bb22e996",
+      "patch": "fs_notify_fdinfo.c.patch",
+      "patch_sha256": "f446b7cf3a2232d8a44992d822f2a95625d1e430806541c27f59ea399098b092"
+    },
+    {
+      "file": "fs/open.c",
+      "stock_sha256": "86c5f1065a816d0ad8ba85c76a535311aaff420c056c653db524d7dfd18a4e92",
+      "patched_sha256": "64b0817cd4a7ee0f5c65895c84e78d300605b65b8c6798f048ba43a988c9416c",
+      "patch": "fs_open.c.patch",
+      "patch_sha256": "703ca878f8515c99058ae7f3b51934d50ef783c6aad7ce6a318c70ed28ec39c9"
+    },
+    {
+      "file": "fs/pnode.h",
+      "stock_sha256": "ec1cc69915a1fe6a54e9d98b4f2481ae182fb4e145bf73ad33dc9f8c295996a2",
+      "patched_sha256": "28cf97bdbac193ea3f0ea39de3bd67de301953160ed30945a5ae48097f787fcc",
+      "patch": "fs_pnode.h.patch",
+      "patch_sha256": "02d287d628185a9855c618cb5e99a0973e2f857b2c18561ada045bc7a2269ab4"
+    },
+    {
+      "file": "fs/proc/base.c",
+      "stock_sha256": "4263a7ad9e3a32c3a35b26805c040295f75c2218430c294190aa7d460fa080c4",
+      "patched_sha256": "03ff83e7f97381e04454770805709f50bbcd5b3af8ec2c047f87a0522b6e6a65",
+      "patch": "fs_proc_base.c.patch",
+      "patch_sha256": "571476506d334b8c59e10f6fbba6ede5812b08358df9728ba633e87718775981"
+    },
+    {
+      "file": "fs/proc/cmdline.c",
+      "stock_sha256": "c1a9373d8a3ce1f0a7267222c8d18f1354ab838d4f3d7db1c6acb6b852216aaf",
+      "patched_sha256": "fb50f5d6bebd9c422ad14738c3bb2f92d9c94589fbb44876ca7af845ad8336f0",
+      "patch": "fs_proc_cmdline.c.patch",
+      "patch_sha256": "b12fd978f800ebc31df646a979b1e360760340884e91f8582c86f0df95b4fae2"
+    },
+    {
+      "file": "fs/proc/fd.c",
+      "stock_sha256": "6d8e5cb32f42a267be3a9f34cab01659bd773323e1023f4bad562a50bd5fa927",
+      "patched_sha256": "d33984650bced10d35f66e6d280995cc6db2649383486bf3ab8484a1fc631b4a",
+      "patch": "fs_proc_fd.c.patch",
+      "patch_sha256": "456155c14bc18d11b34e25b2332ac5ef0c40b61f3025f8eeb682cbfd408b8f17"
+    },
+    {
+      "file": "fs/proc/task_mmu.c",
+      "stock_sha256": "c8c4bff4dacc074c4d9adab734b6f3bbfc16630bc4bfb9249e30b13f112805b8",
+      "patched_sha256": "1712094ab04b074798900966c9e14a3e5f1afb1c1d0050bd9a22c3d952c53f64",
+      "patch": "fs_proc_task_mmu.c.patch",
+      "patch_sha256": "1048c6f34b0c19d8eb43989d89a9a47ec6aefb817d4bf94e6d01bdb7008df4cb"
+    },
+    {
+      "file": "fs/proc_namespace.c",
+      "stock_sha256": "ccd38518b1eb8bbb75ff70d52c089b8ae42d886327e7c8faeddd094c70d00afe",
+      "patched_sha256": "6691bf5fc1bc43280e60f841e1abe73e7c6f83d9010b96001d2816ce67697b08",
+      "patch": "fs_proc_namespace.c.patch",
+      "patch_sha256": "45a8c73fddac5c3536c93944f7b621fa7b9f593d14fb7d3e831395452992dcfe"
+    },
+    {
+      "file": "fs/readdir.c",
+      "stock_sha256": "fa1ddf77d25206211dcbf91676c1d0a7b6e1b0dc52937dd38b8fad82032c3deb",
+      "patched_sha256": "8bf2ae28faf8c5d6722798dc122dde2b95886f5b3ed94555c9d1f0d1f94f4c8f",
+      "patch": "fs_readdir.c.patch",
+      "patch_sha256": "fbf71c2bd172b0c70de5a216afccdf5f6931990de2907f1cf354d3658ef9e610"
+    },
+    {
+      "file": "fs/stat.c",
+      "stock_sha256": "12170d9b3de439759f5e8772bb87a076d6548b947231344f2cbb1de358af28dd",
+      "patched_sha256": "c2f10c1e55ac891d94782535b9168545d036c6622f227e9ecd6527058c3d72dc",
+      "patch": "fs_stat.c.patch",
+      "patch_sha256": "45b7d687ee3ef4d1441989d8be52e1f020351aa5f5aec84ec52fdeeee6dee7d5"
+    },
+    {
+      "file": "fs/statfs.c",
+      "stock_sha256": "147f50d86006162de1a79cb4b03937a43d965c569e18f96c710ff8cb092de8ca",
+      "patched_sha256": "29d95c8e7acbb6429601f3514228caa33508e4b9949d4403432a9f69c74bdf16",
+      "patch": "fs_statfs.c.patch",
+      "patch_sha256": "79ff53a1ae48c77225bf5dcdb2076c5df5c93bbaf3ff248f53cdeede4412df3e"
+    },
+    {
+      "file": "kernel/kallsyms.c",
+      "stock_sha256": "6a671c1bc76e88e917325a1e534cc223cf2075079ef489288edafd1894f40eaa",
+      "patched_sha256": "82f9b60f960cedeb5cc77f577e9e15bfe4ff463c89490b9f4b78ec0372e0f592",
+      "patch": "kernel_kallsyms.c.patch",
+      "patch_sha256": "a3d17837b0ef0e485c2bfb70d80432764d2d935b4ee3ec6daec8b63249d3806f"
+    },
+    {
+      "file": "kernel/sys.c",
+      "stock_sha256": "c2ee0f06422b634a12077f1c59e3f9a8a302aaa2add3cd45aa77912eacc3df85",
+      "patched_sha256": "8e4f9f859372b45e949bc4b84cece31290ba0abeeb517d04b7314c6cb2eca32a",
+      "patch": "kernel_sys.c.patch",
+      "patch_sha256": "00efd2c23ee090c41e44baa0354ca8df400c1feb364f3c36e27ae0e8eb467d52"
+    },
+    {
+      "file": "mm/memory.c",
+      "stock_sha256": "f3f3a2aa164bd7621caff5ac3f6a11ce18f0bd2d136fb1e12853f6cc687ce64a",
+      "patched_sha256": "1c6830ef15684fcf0520891a423e9e8fb1f10f5a9be7ac0fe43166288c6cc7b8",
+      "patch": "mm_memory.c.patch",
+      "patch_sha256": "eb35146377762c5ddb2faac2ca346941329039c6f4e5fe2f76c12d8172512e1a"
+    },
+    {
+      "file": "security/selinux/avc.c",
+      "stock_sha256": "128166bde201cc80bdc2d1d0fcdc15e5413f08a75b1e435eb15c309e35c9f3ee",
+      "patched_sha256": "4905caf3ff35a02cd3500faf9a5c3825b4a5508b731082fbd6bf0ff49c63f978",
+      "patch": "security_selinux_avc.c.patch",
+      "patch_sha256": "8ebb0b896766781f5cda0b36ad5d69c8625cd1fe1ce2bfc25c2c844bd6a97b86"
+    }
+  ],
+  "remote_sources": [
+    {
+      "file": "fs/susfs.c",
+      "sha256": "2e07db1e5205ca36dd47c74b59d95f5a2746b6076ba9245c61349c18f5b341f4",
+      "url": "https://raw.githubusercontent.com/souta-lab/agate-bakasu-susfs/9f3ab3fbd2b0cef34aeb441f2216d8e83e09776e/fs/susfs.c"
+    },
+    {
+      "file": "include/linux/susfs.h",
+      "sha256": "28a6cbbfe4e3b7bf97dcc89b9c7e235b7b49f571473f9cc24134bfa91eb52b3a",
+      "url": "https://raw.githubusercontent.com/souta-lab/agate-bakasu-susfs/9f3ab3fbd2b0cef34aeb441f2216d8e83e09776e/include/linux/susfs.h"
+    },
+    {
+      "file": "include/linux/susfs_def.h",
+      "sha256": "e3ed27fa1a4cc6022946987c8698ffce526f0b373eed13054890b8632e580b8e",
+      "url": "https://raw.githubusercontent.com/souta-lab/agate-bakasu-susfs/9f3ab3fbd2b0cef34aeb441f2216d8e83e09776e/include/linux/susfs_def.h"
+    }
+  ]
+}

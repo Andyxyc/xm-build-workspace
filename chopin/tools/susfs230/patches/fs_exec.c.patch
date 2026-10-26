@@ -1,0 +1,10 @@
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -63,4 +63,7 @@
+ #include <linux/compat.h>
+ #include <linux/vmalloc.h>
++#ifdef CONFIG_KSU_SUSFS
++#include <linux/susfs_def.h>
++#endif
+ 
+ #include <linux/uaccess.h>

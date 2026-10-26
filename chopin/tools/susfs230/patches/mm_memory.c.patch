@@ -1,0 +1,30 @@
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -65,4 +65,7 @@
+ #include <linux/gfp.h>
+ #include <linux/migrate.h>
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++#include <linux/susfs_def.h>
++#endif
+ #include <linux/string.h>
+ #include <linux/dma-debug.h>
+@@ -4958,4 +4961,9 @@
+ 
+ 	down_read(&mm->mmap_sem);
++
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++	vma = find_vma(mm, addr);
++#endif
++
+ 	/* ignore errors, just check how much was successfully transferred */
+ 	while (len) {
+@@ -4963,4 +4971,9 @@
+ 		void *maddr;
+ 		struct page *page = NULL;
++
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++		if (vma && vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
++			break;
++#endif
+ 
+ 		ret = get_user_pages_remote(tsk, mm, addr, 1,

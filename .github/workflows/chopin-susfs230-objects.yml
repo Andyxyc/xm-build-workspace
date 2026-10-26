@@ -1,0 +1,119 @@
+name: Chopin SUSFS2.3 experimental filesystem objects
+
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/susfs230/**', '.github/workflows/chopin-susfs230-objects.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  chopin-kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace
+      CONFIG_ENV: config/chopin.env
+      KBUILD_BUILD_USER: xiaomo
+      KBUILD_BUILD_HOST: chopin-builder
+      BASELINE_REFERENCE_RUN: ""
+      CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
+      CCACHE_MAXSIZE: 512M
+    steps:
+      - name: Checkout isolated chopin branch
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          sudo timeout 180 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+          sudo timeout 240 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+            bc bison flex make build-essential git git-lfs python3 python-is-python3 \
+            curl wget unzip zip cpio device-tree-compiler libssl-dev libelf-dev \
+            libncurses-dev zlib1g-dev lz4 zstd ccache rsync ca-certificates \
+            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross
+          mkdir -p "$WORKSPACE"
+          mkdir -p build-logs release-evidence
+
+      - name: Restore bounded compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: kernel_workspace/.ccache
+          key: chopin-clang13-0647a49-v1-${{ github.run_id }}
+          restore-keys: chopin-clang13-0647a49-v1-
+
+      - name: Fetch existing non-GKI build framework (pinned)
+        run: |
+          git clone --depth=1 https://github.com/Owen0225/sukisu-Ultra-4.14.-.git builder
+          git -C builder fetch origin 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          git -C builder checkout --detach 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          test "$(git -C builder rev-parse HEAD)" = 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          mkdir -p builder/config
+          cp chopin/target.env builder/config/chopin.env
+          echo "Builder: $(git -C builder rev-parse HEAD)"
+
+      - name: Resolve build profile
+        working-directory: builder
+        run: bash scripts/config.sh
+
+      - name: Prepare compiler and cross-toolchain
+        working-directory: builder
+        run: bash scripts/toolchain.sh
+
+      - name: Fetch matching chopin vendor source
+        working-directory: builder
+        run: |
+          bash scripts/source.sh
+          git -C "$WORKSPACE/android-kernel" fetch origin 0647a49c9557faa92b90c4ae188587787226be9e
+          git -C "$WORKSPACE/android-kernel" checkout --detach 0647a49c9557faa92b90c4ae188587787226be9e
+          actual="$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
+          echo "Vendor kernel SHA: $actual"
+          test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
+          python3 ../chopin/port_cpu_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/port_anon_vma_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/restore_module_validation.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/module-validation-restoration.json" "$GITHUB_WORKSPACE/release-evidence/"
+          python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
+
+      - name: Download the previous verified r4 baseline evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: chopin-sukisu-susfs-kpm-raw-build-candidate
+          run-id: 40176463381
+          github-token: ${{ github.token }}
+          path: r4-reference
+
+      - name: Verify and reuse exact r4 baseline bytes
+        run: |
+          python3 chopin/tools/reuse_r4_baseline.py
+          python3 chopin/verify_image_entry.py release-evidence/Image.vendor-baseline --report release-evidence/vendor-baseline-entry.json
+          python3 chopin/verify_module_loader.py --image release-evidence/Image.vendor-baseline --system-map release-evidence/vendor-baseline.System.map --config release-evidence/vendor-baseline.config --report release-evidence/vendor-baseline-module-loader.json
+
+      - name: Integrate latest verified SukiSU builtin
+        working-directory: builder
+        run: |
+          bash scripts/kernelsu.sh
+          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin 6397fcb5d96e8f4953c71e02c73f8c6800541bff
+          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach 6397fcb5d96e8f4953c71e02c73f8c6800541bff
+          actual="$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
+          echo "SukiSU builtin SHA: $actual"
+          test "$actual" = "6397fcb5d96e8f4953c71e02c73f8c6800541bff"
+
+      - name: Apply exact SUSFS2.3 filesystem trial
+        run: python3 chopin/tools/susfs230/apply.py "$WORKSPACE/android-kernel"
+      - name: Resolve experimental defconfig
+        working-directory: builder
+        run: bash scripts/build.sh defconfig
+      - name: Compile real filesystem objects only
+        run: python3 chopin/tools/susfs230/compile.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-susfs230-object-diagnostics
+          path: susfs230-object-diagnostics/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

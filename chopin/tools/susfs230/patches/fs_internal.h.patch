@@ -1,0 +1,9 @@
+--- a/fs/internal.h
++++ b/fs/internal.h
+@@ -56,4 +56,6 @@
+ extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
+ 			   const char *, unsigned int, struct path *);
++extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
++			   struct path *path, struct path *root);
+ 
+ /*

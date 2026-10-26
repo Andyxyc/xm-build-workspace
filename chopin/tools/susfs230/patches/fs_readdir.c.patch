@@ -1,0 +1,167 @@
+--- a/fs/readdir.c
++++ b/fs/readdir.c
+@@ -23,4 +23,9 @@
+ 
+ #include <linux/uaccess.h>
++
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++#include <linux/susfs_def.h>
++extern bool susfs_is_inode_sus_path(struct inode *inode);
++#endif
+ 
+ int iterate_dir(struct file *file, struct dir_context *ctx)
+@@ -122,4 +127,7 @@
+ 	struct old_linux_dirent __user * dirent;
+ 	int result;
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	struct super_block *sb;
++#endif
+ };
+ 
+@@ -139,4 +147,14 @@
+ 		return -EOVERFLOW;
+ 	}
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	{
++		struct inode *inode = ilookup(buf->sb, ino);
++		if (inode) {
++			bool hidden = susfs_is_inode_sus_path(inode);
++			iput(inode);
++			if (hidden) return 0;
++		}
++	}
++#endif
+ 	buf->result++;
+ 	dirent = buf->dirent;
+@@ -170,4 +188,7 @@
+ 		return -EBADF;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	buf.sb = file_inode(f.file)->i_sb;
++#endif
+ 	error = iterate_dir(f.file, &buf.ctx);
+ 	if (buf.result)
+@@ -197,4 +218,7 @@
+ 	int count;
+ 	int error;
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	struct super_block *sb;
++#endif
+ };
+ 
+@@ -220,4 +244,14 @@
+ 		return -EOVERFLOW;
+ 	}
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	{
++		struct inode *inode = ilookup(buf->sb, ino);
++		if (inode) {
++			bool hidden = susfs_is_inode_sus_path(inode);
++			iput(inode);
++			if (hidden) return 0;
++		}
++	}
++#endif
+ 	dirent = buf->previous;
+ 	if (dirent) {
+@@ -267,4 +301,7 @@
+ 		return -EBADF;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	buf.sb = file_inode(f.file)->i_sb;
++#endif
+ 	error = iterate_dir(f.file, &buf.ctx);
+ 	if (error >= 0)
+@@ -287,4 +324,7 @@
+ 	int count;
+ 	int error;
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	struct super_block *sb;
++#endif
+ };
+ 
+@@ -304,4 +344,14 @@
+ 	if (reclen > buf->count)
+ 		return -EINVAL;
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	{
++		struct inode *inode = ilookup(buf->sb, ino);
++		if (inode) {
++			bool hidden = susfs_is_inode_sus_path(inode);
++			iput(inode);
++			if (hidden) return 0;
++		}
++	}
++#endif
+ 	dirent = buf->previous;
+ 	if (dirent) {
+@@ -353,4 +403,7 @@
+ 		return -EBADF;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	buf.sb = file_inode(f.file)->i_sb;
++#endif
+ 	error = iterate_dir(f.file, &buf.ctx);
+ 	if (error >= 0)
+@@ -380,4 +433,7 @@
+ 	struct compat_old_linux_dirent __user *dirent;
+ 	int result;
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	struct super_block *sb;
++#endif
+ };
+ 
+@@ -398,4 +454,14 @@
+ 		return -EOVERFLOW;
+ 	}
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	{
++		struct inode *inode = ilookup(buf->sb, ino);
++		if (inode) {
++			bool hidden = susfs_is_inode_sus_path(inode);
++			iput(inode);
++			if (hidden) return 0;
++		}
++	}
++#endif
+ 	buf->result++;
+ 	dirent = buf->dirent;
+@@ -429,4 +495,7 @@
+ 		return -EBADF;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	buf.sb = file_inode(f.file)->i_sb;
++#endif
+ 	error = iterate_dir(f.file, &buf.ctx);
+ 	if (buf.result)
+@@ -450,4 +519,7 @@
+ 	int count;
+ 	int error;
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	struct super_block *sb;
++#endif
+ };
+ 
+@@ -470,4 +542,14 @@
+ 		return -EOVERFLOW;
+ 	}
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	{
++		struct inode *inode = ilookup(buf->sb, ino);
++		if (inode) {
++			bool hidden = susfs_is_inode_sus_path(inode);
++			iput(inode);
++			if (hidden) return 0;
++		}
++	}
++#endif
+ 	dirent = buf->previous;
+ 	if (dirent) {
+@@ -517,4 +599,7 @@
+ 		return -EBADF;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++	buf.sb = file_inode(f.file)->i_sb;
++#endif
+ 	error = iterate_dir(f.file, &buf.ctx);
+ 	if (error >= 0)

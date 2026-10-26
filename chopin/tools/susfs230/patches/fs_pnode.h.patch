@@ -1,0 +1,10 @@
+--- a/fs/pnode.h
++++ b/fs/pnode.h
+@@ -30,4 +30,7 @@
+ #define CL_UNPRIVILEGED		0x40
+ #define CL_COPY_MNT_NS_FILE	0x80
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++#define CL_COPY_MNT_NS		BIT(25)
++#endif
+ 
+ #define CL_COPY_ALL		(CL_COPY_UNBINDABLE | CL_COPY_MNT_NS_FILE)
