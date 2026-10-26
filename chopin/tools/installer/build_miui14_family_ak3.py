@@ -27,7 +27,7 @@ for start,size in [(8,4),(16,4),(44,4),(576,32),(1648,4)]:h[start:start+size]=by
 files['expected/family-header.sha256']=(sha(h)+'\n').encode()
 policy=dict(model='chopin',equivalent='Redmi Note 10 Pro 5G / POCO X3 GT',android_sdk=33,miui='14',rom_incremental_binding=None,account_binding=False,serial_binding=False,device_uuid_binding=False,uid_binding=False,active_slots=['a','b'],driver_policy='All ten independently audited modules must match; reject additional or changed drivers',ramdisk_policy='Preserve current clean ramdisk; restore its own embedded Magisk backup if present; reject incomplete backup',dtb_policy='Preserve current DTB and verify identical bytes after repack',boot_header_policy='Preserve current boot header; family layout allows different OS patch stamp and DTB length',kernel_sha256=abi['image_sha256'],source_commit=a.source_commit,hardware_validated=False)
 files['COMPATIBILITY.json']=(json.dumps(policy,indent=2)+'\n').encode()
-files['module.prop']=b'id=xiaomo_chopin_ak3\n'+('name=小莫\nversion=r9 CI41085\nversionCode=6\nauthor=小莫\ndescription=Chopin MIUI14 Android13 compatible driver family. Guarded AnyKernel3 installer receipt.\n').encode()
+files['module.prop']=b'id=xiaomo_chopin_ak3\n'+('name=小莫\nversion=r9a CI41085\nversionCode=6\nauthor=小莫\ndescription=Chopin MIUI14 Android13 compatible driver family. Guarded AnyKernel3 installer receipt.\n').encode()
 files['SOURCE.txt']+=('MIUI14 family installer: https://github.com/Andyxyc/xm-build-workspace/tree/'+a.source_commit+'/chopin/tools/installer\nNo device identity or account binding. Hardware acceptance on each firmware remains separate.\n').encode()
 assert len(files)==30
 files['payload.sha256']=''.join(sha(b)+'  '+n+'\n' for n,b in sorted(files.items())).encode()

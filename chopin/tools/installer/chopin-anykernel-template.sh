@@ -51,6 +51,7 @@ chopin_stock_ramdisk;
 cp "$AKHOME/stock-dtb.bin" "$SPLITIMG/dtb" || abort "Stock DTB copy failed";
 [ "$(sha256sum "$SPLITIMG/dtb" | cut -d' ' -f1)" = d6aa88bad3591b62473a2b753ccd19dc371dbb30bd8e1efa487c651fdefd27fc ] || abort "Stock DTB mismatch";
 
+chopin_storage_failure_guard;
 chopin_previous_attempt;
 if [ "$CHOPIN_ALREADY_INSTALLED" = 1 ]; then
   ui_print "Already installed. Full boot readback matches.";

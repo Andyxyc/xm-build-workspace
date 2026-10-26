@@ -46,6 +46,7 @@ fi;
 CHOPIN_DETAIL_LOG=$(mktemp "$backup_dir/install${SLOT}.log.XXXXXXXX") || abort "Cannot create installation log";
 cat "$AKHOME/install-detail.log" >> "$CHOPIN_DETAIL_LOG";
 
+chopin_storage_failure_guard;
 chopin_previous_attempt;
 if [ "$CHOPIN_ALREADY_INSTALLED" = 1 ]; then
   ui_print "Already installed. Full boot readback matches.";

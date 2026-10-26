@@ -103,3 +103,20 @@ chopin_previous_attempt() {
   fi;
   abort "An unfinished write attempt exists. Inspect its backup and log before another write";
 }
+
+# Changing the candidate ZIP does not repair a failed Android block write.
+# Recovery is a different, manually selected installation environment.
+chopin_storage_failure_guard() {
+  local previous phase previous_backup;
+  [ "${BOOTMODE:-false}" = true ] || return 0;
+  for previous in "$backup_dir"/attempt${SLOT}-*.txt; do
+    [ -e "$previous" ] || continue;
+    [ -f "$previous" ] && [ ! -L "$previous" ] || abort "Unsafe installation journal";
+    phase=$(sed -n 's/^phase=//p' "$previous" | tail -n 1);
+    [ "$phase" = write_or_flush_failed ] || continue;
+    previous_backup=$(sed -n 's/^backup_sha256=//p' "$previous" | tail -n 1);
+    [ "$previous_backup" = "$CHOPIN_BACKUP_SHA" ] || continue;
+    ui_print "A boot write already failed on this unchanged Android boot." "Journal: $previous";
+    abort "Do not retry with another ZIP. Keep the backup and use the verified unlocked Fastboot path";
+  done;
+}

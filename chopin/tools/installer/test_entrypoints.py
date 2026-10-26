@@ -99,6 +99,13 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
   q=run(root,script);assert q.returncode==want,(mode,q.stdout,q.stderr)
   assert not (root/'dev').exists() and not (root/'write-calls').exists()
   results.append({'case':'early-journal-'+mode,'exit':q.returncode,'scope':'REAL_JOURNAL_CLASSIFIER_NO_IMAGE_NO_DEVICE'})
+ for mode,want in [('new',0),('failed-android',99),('failed-recovery',0),('changed-boot',0)]:
+  root=parent/('storage-'+mode);prepare(root)
+  if mode!='new':(root/'data/adb/chopin-kernel-backups/attempt_a-old-kernel.txt').write_text('phase=prepared\nbackup_sha256='+('c'*64)+'\nphase=write_or_flush_failed\n')
+  script='export PATH=/bin AKHOME=/stage\nBOOTMODE='+('false' if mode=='failed-recovery' else 'true')+'\nbackup_dir=/data/adb/chopin-kernel-backups\nSLOT=_a\nCHOPIN_BACKUP_SHA='+('d'*64 if mode=='changed-boot' else 'c'*64)+'\nabort() { printf "%s\\n" "$*" >&2; exit 99; }\nui_print() { :; }\n. /ak3-preflight.sh\nchopin_storage_failure_guard\n'
+  q=run(root,script);assert q.returncode==want,(mode,q.stdout,q.stderr)
+  assert not (root/'dev').exists() and not (root/'write-calls').exists()
+  results.append({'case':'storage-failure-guard-'+mode,'exit':q.returncode,'scope':'REAL_JOURNAL_STATE_NO_IMAGE_NO_DEVICE'})
 report={'status':'PASS_MANAGER_ADAPTER_SOCKET_OUTPUT_AND_DUPLICATE_ATTEMPT_FIXTURES','partition_writes':0,'real_device_test':False,'cases':results,'source_sha256':{n:hashlib.sha256((here/n).read_bytes()).hexdigest() for n in ['customize.sh','installer_transport.py','ak3-preflight.sh']}}
 report['family_mode']=family_mode
 if family_mode:

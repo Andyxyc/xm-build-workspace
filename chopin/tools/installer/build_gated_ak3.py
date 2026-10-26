@@ -62,7 +62,7 @@ updater.write_bytes(backend)
 (stage/'tools/ak3-update-binary.sh').write_bytes(backend)
 (stage/'customize.sh').write_bytes((root/'customize.sh').read_bytes())
 (stage/'tools/stock-ramdisk-source.sh').write_bytes((root/'stock-ramdisk-source.sh').read_bytes())
-(stage/'module.prop').write_text('id=xiaomo_chopin_ak3\nname=小莫\nversion=r9 CI41085\nversionCode=6\nauthor=小莫\ndescription=AnyKernel3 guarded kernel installer receipt; no boot service or mount payload.\n',encoding='utf-8',newline='\n')
+(stage/'module.prop').write_text('id=xiaomo_chopin_ak3\nname=小莫\nversion=r9a CI41085\nversionCode=6\nauthor=小莫\ndescription=AnyKernel3 guarded kernel installer receipt; no boot service or mount payload.\n',encoding='utf-8',newline='\n')
 marker=stage/'META-INF/com/google/android/updater-script'
 marker.write_text('#MAGISK\n'+marker.read_text(encoding="utf-8"),encoding='utf-8',newline='\n')
 # Insert a verified callback immediately before the sole active-boot write.
