@@ -1,0 +1,26 @@
+name: Chopin unprivileged acceptance and AppZygote probe
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-acceptance-probe.yml', 'chopin/tools/acceptance-probe/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 chopin/tools/acceptance-probe/build.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-unprivileged-acceptance-probe
+          path: |
+            acceptance-evidence/Chopin-Acceptance-Probe.apk
+            acceptance-evidence/signature.txt
+            acceptance-evidence/badging.txt
+            acceptance-evidence/build-record.json
+          if-no-files-found: error
+          retention-days: 14
