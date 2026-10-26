@@ -9,7 +9,7 @@ from installer_transport import output_adapter
 from installer_write import guarded_writer
 import sys
 if not __debug__:raise SystemExit('Safety gates require normal Python mode; -O is forbidden')
-p=argparse.ArgumentParser();p.add_argument('--slim',action='store_true');p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--licenses',type=Path,required=True);p.add_argument('--installer-commit',required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--slim',action='store_true');p.add_argument('--candidate',type=Path,required=True);p.add_argument('--gate',type=Path,required=True);p.add_argument('--stock-boot',type=Path,required=True);p.add_argument('--ak3-source',type=Path,required=True);p.add_argument('--licenses',type=Path,required=True);p.add_argument('--installer-commit',required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--native-gate',type=Path);a=p.parse_args()
 assert re.fullmatch('[0-9a-f]{40}',a.installer_commit)
 root=Path(__file__).resolve().parent
 digest=lambda b:hashlib.sha256(b).hexdigest()
@@ -37,6 +37,13 @@ assert port['manager_ci_commit']=='536c173c885bfc68ca33410dbc5c10f6270f4a09'
 native=port.get('susfs_version')=='2.3.0'
 revision='r10' if native else 'r9a'
 if native:
+    assert a.native_gate is not None,'Independent native Image proof required'
+    proof=json.loads(a.native_gate.read_text(encoding='utf-8'))
+    assert proof['status']=='PASS_INDEPENDENT_NATIVE_IMAGE_CHECKS_ONLY' and proof['image_sha256']==digest(image)
+    assert proof['native_current_uapi_checked'] and all(row['exit']==0 for row in proof['checks'])
+    assert len(proof['checks'])==13,'All independent native checks including complete signer list are required'
+    assert digest((ev/'susfs-native.h').read_bytes())=='3cf4f09b441ecec87c7ae875f18ebe83e80a31769da9e3b8883e99b00c7c906e','Latest native UAPI header required'
+    assert digest((ev/'susfs-native-def.h').read_bytes())=='c04eccda48e3057b05186e9e2dcd608d230992024e833f4988dbc2957ab7465a'
     assert port['susfs_core_upstream']=='5419f4ee97cc8bf7ca67a9ff207f39653d7784f4'
     assert port['priority_uid_filter_supported'] and port['personal_manager_signature_added'] is False
     assert '#define SUSFS_VERSION "v2.3.0"' in (ev/'susfs-native.h').read_text(encoding='utf-8')
