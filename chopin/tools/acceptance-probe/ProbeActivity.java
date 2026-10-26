@@ -39,7 +39,14 @@ public final class ProbeActivity extends Activity {
    report.put("cpuinfo",Observation.read("/proc/cpuinfo",16384));report.put("selinux",Observation.selinux());
    if(mode.equals("map")){
     File f=new File(getFilesDir(),"map-probe.txt");try(FileInputStream in=new FileInputStream(f)){mapped=in.getChannel().map(FileChannel.MapMode.READ_ONLY,0,f.length());report.put("mapped_first_byte",mapped.get(0)&255);}
-    String maps=Observation.read("/proc/self/maps",262144);report.put("map_path_visible",maps.contains(f.getAbsolutePath()));
+    String maps=Observation.read("/proc/self/maps",2097152);
+    if(maps.length()>=2097152)throw new IOException("Maps observation truncated");
+    long inode=Os.stat(f.getAbsolutePath()).st_ino;boolean found=false;
+    for(String line:maps.split("\n")){
+     String[] columns=line.trim().split("\\s+",6);
+     if(columns.length==6 && columns[4].equals(Long.toString(inode)) && columns[5].endsWith("/"+getPackageName()+"/files/map-probe.txt"))found=true;
+    }
+    report.put("maps_bytes",maps.length());report.put("map_path_visible",found);
    }
    report.put("self_priority",new JSONObject(NativeProbe.priority(android.os.Process.myUid())));
    String socket=getIntent().getStringExtra("socket_path");
