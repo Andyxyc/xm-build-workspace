@@ -1,6 +1,6 @@
 """Bounded official-ROM boot/export comparison. Never a flash or hardware claim."""
 from pathlib import Path
-import bz2,collections,gzip,hashlib,io,json,lzma,re,struct,urllib.request,zipfile
+import bz2,collections,faulthandler,gzip,hashlib,io,json,lzma,re,signal,struct,time,urllib.request,zipfile
 class RemoteZip(io.RawIOBase):
  def __init__(self,url):
   self.url=url;self.pos=0;self.total=None;self.downloaded=0;self.cache_start=0;self.cache=b''
@@ -27,8 +27,13 @@ class RemoteZip(io.RawIOBase):
     amount=min(max(n,1024*1024),8*1024*1024,self.total-self.pos);assert self.downloaded+amount<=96*1024*1024,'Per-ROM byte budget reached'
     with self.request(self.pos,self.pos+amount-1) as r:
      assert r.headers.get('Content-Range')==f'bytes {self.pos}-{self.pos+amount-1}/{self.total}'
-     data=r.read(amount+1);assert len(data)==amount
+     chunks=[];received=0;deadline=time.monotonic()+30
+     while received<amount:
+      if time.monotonic()>deadline:raise TimeoutError('CDN range body exceeded30seconds')
+      chunk=r.read1(min(256*1024,amount-received));assert chunk,'Truncated range body';chunks.append(chunk);received+=len(chunk)
+     data=b''.join(chunks);assert len(data)==amount
     self.cache_start=self.pos;self.cache=data;self.downloaded+=len(data);offset=0
+    print(json.dumps({'range_start':self.pos,'range_bytes':amount,'downloaded_bytes':self.downloaded}),flush=True)
    amount=min(n,len(self.cache)-offset);result.append(self.cache[offset:offset+amount]);self.pos+=amount;n-=amount
   return b''.join(result)
 def protobuf(blob):
@@ -125,10 +130,15 @@ assert len(expected)>10000
 out=Path('rom-analysis');out.mkdir(exist_ok=True);results=[]
 for item in json.loads(Path('chopin/tools/rom_abi_targets.json').read_text()):
  row={'firmware':item,'status':'IN_PROGRESS','hardware_tested':False,'flashed':False,'full_zip_md5_verified':False,'max_network_bytes':96*1024*1024};results.append(row)
+ def save():
+  (out/'results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
+ def timeout(signum,frame):raise TimeoutError('Per-ROM90second bounded probe expired at '+row.get('stage','unknown'))
+ signal.signal(signal.SIGALRM,timeout);signal.alarm(90);faulthandler.dump_traceback_later(60,repeat=False);row['stage']='open_remote_zip';save()
  try:
   remote=RemoteZip(item['link']);row['full_rom_bytes']=remote.total
   with zipfile.ZipFile(remote) as z:
    names=z.namelist();matches=[n for n in names if n=='boot.img' or n.endswith('/boot.img')];row['image_container_names']=[n for n in names if any(x in n.lower() for x in ['boot.img','payload.bin','vendor.new.dat','super.img'])][:20]
+   row['stage']='read_boot_partition';save()
    if len(matches)==1:
     info=z.getinfo(matches[0]);assert info.file_size==134217728;boot=z.read(matches[0]);row['boot_zip_member_crc_verified']=True
    else:
@@ -136,10 +146,11 @@ for item in json.loads(Path('chopin/tools/rom_abi_targets.json').read_text()):
    row['boot_sha256']=hashlib.sha256(boot).hexdigest();assert len(boot)==134217728 and boot[:8]==b'ANDROID!'
    size=struct.unpack_from('<I',boot,8)[0];page=struct.unpack_from('<I',boot,36)[0];assert page in [2048,4096]
    image=gzip.decompress(boot[page:page+size]);assert image[56:60]==b'ARMd';row['image_sha256']=hashlib.sha256(image).hexdigest()
-   banner=re.search(rb'Linux version [^\0\n]{1,400}',image);assert banner;row['kernel_banner']=banner[0].decode(errors='replace')
+   banner=re.search(rb'Linux version [^\0\n]{1,400}',image);assert banner;row['kernel_banner']=banner[0].decode(errors='replace');row['stage']='recover_export_symbols';save();print(json.dumps({'stage':row['stage'],'firmware':item['version'],'boot_sha256':row['boot_sha256'],'downloaded':remote.downloaded}),flush=True)
    row['export_comparison']=exported(image,expected);row['status']='PASS_BOUNDED_BOOT_CRC_AND_EXPORT_COMPARISON_ONLY'
   row['actual_network_bytes']=remote.downloaded
  except Exception as error:row['status']='BLOCKED_OR_DIFFERENT_LAYOUT_NO_COMPATIBILITY_CLAIM';row['error']=repr(error)
+ finally:signal.alarm(0);faulthandler.cancel_dump_traceback_later()
  (out/'results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
  print(json.dumps({k:v for k,v in row.items() if k not in ['export_comparison','firmware']},ensure_ascii=False),flush=True)
 summary={'scope':'Offline public firmware only; CRC differences are evidence, not proof of hardware compatibility. No raw OEM boot images are published.','candidate_kernel_source':'b79c0dec13c639c5f07754c399b345ae1ee256dd','parser_commit':'29eac31a38db48b51c0dc6aae3be0162237601eb','reference_symvers_sha256':hashlib.sha256(symvers.read_bytes()).hexdigest(),'results':results}
