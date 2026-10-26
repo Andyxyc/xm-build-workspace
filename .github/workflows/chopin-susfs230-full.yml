@@ -110,6 +110,7 @@ jobs:
           path_umount_apply
           sukisu_414_compat_apply
           python3 ../chopin/tools/susfs230/native_ksu.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_ci41087.py "$WORKSPACE/android-kernel"
           echo "EXTRA_DEFCONFIG=${EXTRA_DEFCONFIG//CONFIG_KSU_SUSFS_SUS_MAP=n/CONFIG_KSU_SUSFS_SUS_MAP=y}" >> "$GITHUB_ENV"
           python3 ../chopin/tools/check_kpm_version_copy.py
           python3 ../chopin/tools/check_adb_root_path.py "$WORKSPACE/android-kernel/KernelSU/kernel/feature/adb_root.c"
@@ -156,27 +157,28 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$WORKSPACE/paired-kpm"
-          GH_TOKEN="${{ github.token }}" gh run download 40245093779 --repo "$GITHUB_REPOSITORY" --name chopin-paired-kpm-414 --dir "$WORKSPACE/paired-kpm"
+          GH_TOKEN="${{ github.token }}" gh run download 40313338098 --repo "$GITHUB_REPOSITORY" --name chopin-kpm-arm-gnu-comparison --dir "$WORKSPACE/paired-kpm"
           python3 - <<'PYVERIFY'
           from pathlib import Path
           import hashlib,os
-          p=Path(os.environ['WORKSPACE'])/'paired-kpm/paired-evidence'
-          for n,h in [('kpimg','1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4'),('kptools','69defafa8e2e9f7b435823f1290cb981cdb62cee35b1d2f22f05b8ddb7d91ba6')]:
+          p=Path(os.environ['WORKSPACE'])/'paired-kpm'
+          for n,h in [('kpimg','554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425'),('kptools','69defafa8e2e9f7b435823f1290cb981cdb62cee35b1d2f22f05b8ddb7d91ba6')]:
               assert hashlib.sha256((p/n).read_bytes()).hexdigest()==h,n
           PYVERIFY
-          chmod 755 "$WORKSPACE/paired-kpm/paired-evidence/kptools"
-          cp "$WORKSPACE/paired-kpm/paired-evidence/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
-          cp "$WORKSPACE/paired-kpm/paired-evidence/paired-kpm-protocol.json" "$GITHUB_WORKSPACE/release-evidence/"
-          cp "$WORKSPACE/paired-kpm/paired-evidence/4.14-endpoint.patch" "$GITHUB_WORKSPACE/release-evidence/"
-          printf '%s\n' 'a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 + 129d14a49c7b1daa1a68c5c6d493c534e9a84d20' > "$GITHUB_WORKSPACE/release-evidence/paired-kpm-source.txt"
+          chmod 755 "$WORKSPACE/paired-kpm/kptools"
+          cp "$WORKSPACE/paired-kpm/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
+          cp "$WORKSPACE/paired-kpm/paired-kpm-protocol.json" "$GITHUB_WORKSPACE/release-evidence/"
+          cp "$WORKSPACE/paired-kpm/paired-source.patch" "$GITHUB_WORKSPACE/release-evidence/"
+          printf '%s\n' 'a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 + 4bdf8eaed26aac9ee60f1d96c58327891cdb719d; upstream Arm GNU12.2; actual r11 boot and KPM lifecycle verified' > "$GITHUB_WORKSPACE/release-evidence/paired-kpm-source.txt"
           python3 ../chopin/test_image_entry.py
           cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"
           cp "$WORKSPACE/Image.before-kpm" "$GITHUB_WORKSPACE/release-evidence/Image.sukisu-susfs-before-kpm"
           python3 ../chopin/verify_image_entry.py "$WORKSPACE/Image.before-kpm" --report "$GITHUB_WORKSPACE/release-evidence/before-kpm-entry.json"
           python3 ../chopin/apply_verified_kpm.py \
-            --tool "$WORKSPACE/paired-kpm/paired-evidence/kptools" \
+            --tool "$WORKSPACE/paired-kpm/kptools" \
             --before "$WORKSPACE/Image.before-kpm" \
-            --kpimg "$WORKSPACE/paired-kpm/paired-evidence/kpimg" \
+            --kpimg "$WORKSPACE/paired-kpm/kpimg" \
+            --payload-sha256 554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425 \
             --system-map "$WORKSPACE/android-kernel/out/System.map" \
             --output "$WORKSPACE/Image.kpm-verified" \
             --report "$GITHUB_WORKSPACE/release-evidence/kpm-entry-gate.json" \
