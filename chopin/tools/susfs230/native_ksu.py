@@ -7,6 +7,7 @@ from pathlib import Path
 import json,runpy,subprocess,sys
 root=Path(sys.argv[1]).resolve();here=Path(__file__).resolve().parent
 ports=here.parents[1];ksu=root/'KernelSU/kernel'
+subprocess.run([sys.executable,str(here/'fix_kstat_ctime.py'),str(root)],check=True)
 def edit(path,old,new):
     p=root/path;s=p.read_text();assert s.count(old)==1,(path,old[:80],s.count(old))
     p.write_text(s.replace(old,new,1))

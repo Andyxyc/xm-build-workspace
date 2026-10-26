@@ -195,6 +195,7 @@ jobs:
 
       - name: Save native SUSFS2.3 UAPI and exact source manifest
         run: |
+          cp "$WORKSPACE/android-kernel/kstat-flags-source-fix.json" release-evidence/
           cp "$WORKSPACE/android-kernel/include/linux/susfs.h" release-evidence/susfs-native.h
           cp "$WORKSPACE/android-kernel/include/linux/susfs_def.h" release-evidence/susfs-native-def.h
           cp "$WORKSPACE/android-kernel/fs/susfs.c" release-evidence/susfs-native-core.c
