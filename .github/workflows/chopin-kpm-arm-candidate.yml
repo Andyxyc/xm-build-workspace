@@ -1,0 +1,67 @@
+name: Chopin Arm GNU KPM candidate from booted native Image
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-kpm-arm-candidate.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  reprocess:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: chopin-sukisu-susfs-kpm-raw-build-candidate
+          run-id: 40277077677
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: native
+      - uses: actions/download-artifact@v4
+        with:
+          name: chopin-kpm-arm-gnu-comparison
+          run-id: 40313338098
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: arm-kp
+      - name: Bind retained native kernel and source-built Arm GNU payload
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,shutil
+          sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+          e=Path('native/release-evidence');k=Path('arm-kp')
+          assert sha(e/'Image.sukisu-susfs-before-kpm')=='3ba8748471c98305277d146b124b413c60248a83c045a15c6eb43157ded2b6bf'
+          assert Path('native/build-logs/root-build-complete.txt').read_text().strip()=='d57256cbd03b83326c3005d6a7ae806807983e25'
+          assert sha(k/'kpimg')=='554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425'
+          r=json.loads((k/'paired-map-comparison.json').read_text())
+          assert r['map_bytes_equal_reference'] and r['changed_bytes']==0 and not r['external_direct_branches']
+          assert r['payload_sha256']==sha(k/'kpimg')
+          assert r['reference_sha256']=='396a20777668e85d674a23dd3945815f285332b5358be0bfc97297935e2d130b'
+          Path('candidate').mkdir();shutil.copyfile(k/'kpimg',Path('candidate/kpimg.pinned'))
+          PY
+      - name: Apply complete KPM and independently resolve every linked symbol
+        run: |
+          chmod 700 arm-kp/kptools
+          python3 chopin/apply_verified_kpm.py \
+            --tool arm-kp/kptools \
+            --before native/release-evidence/Image.sukisu-susfs-before-kpm \
+            --kpimg candidate/kpimg.pinned \
+            --payload-sha256 554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425 \
+            --system-map native/release-evidence/System.map \
+            --output candidate/Image \
+            --report candidate/kpm-entry-gate.json \
+            --log candidate/kpm-postprocess.log
+          cp arm-kp/paired-map-comparison.json arm-kp/paired-kpm-protocol.json arm-kp/compiler.txt candidate/
+          cp arm-kp/kpimg.elf arm-kp/kptools candidate/
+          printf '%s\n' "$GITHUB_SHA" > candidate/kpm-reprocess-source-commit.txt
+          cd candidate
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-native230-armgnu-kpm-candidate
+          path: candidate/**
+          if-no-files-found: error
+          retention-days: 14

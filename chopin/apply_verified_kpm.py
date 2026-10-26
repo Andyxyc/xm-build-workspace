@@ -4,10 +4,12 @@ import argparse,hashlib,json,re,secrets,subprocess
 from verify_image_entry import inspect,inspect_kpm
 from verify_kpm_resolver import verify as verify_resolver
 if not __debug__:raise SystemExit('Normal Python mode is required')
-p=argparse.ArgumentParser();p.add_argument('--tool',type=Path,required=True);p.add_argument('--before',type=Path,required=True);p.add_argument('--kpimg',type=Path,required=True);p.add_argument('--system-map',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--report',type=Path,required=True);p.add_argument('--log',type=Path,required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--tool',type=Path,required=True);p.add_argument('--before',type=Path,required=True);p.add_argument('--kpimg',type=Path,required=True);p.add_argument('--system-map',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--report',type=Path,required=True);p.add_argument('--log',type=Path,required=True)
+p.add_argument('--payload-sha256',default='1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4',choices=['1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4','554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425'])
+a=p.parse_args()
 assert not a.output.exists() and not a.report.exists() and not a.log.exists(),'Preserve earlier results'
 before=a.before.read_bytes();kp=a.kpimg.read_bytes();inspect(before)
-assert hashlib.sha256(kp).hexdigest()=='1d9a0d6772b14197313b4184e290ea7f627a340349430f58efe7600609cde7a4'
+assert hashlib.sha256(kp).hexdigest()==a.payload_sha256
 assert kp[:8]==b'KP1158\0\0' and kp[8:12]==bytes.fromhex('00090d00') and len(kp)==294144
 # An unretained random root key is hashed in the payload. Never store a direct
 # superkey or print it in argv/logs. SukiSU's authorized KPM API is independent.
