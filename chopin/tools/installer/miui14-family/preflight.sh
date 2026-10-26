@@ -74,6 +74,34 @@ chopin_write_boot() {
     printf 'phase=write_and_flush_completed\n' >> "$CHOPIN_ATTEMPT_MARKER" || abort "Cannot preserve write result";
   else
     printf 'phase=write_or_flush_failed\n' >> "$CHOPIN_ATTEMPT_MARKER" || abort "Cannot preserve write failure";
+    if [ -n "$CHOPIN_DETAIL_LOG" ] && [ -f "$CHOPIN_DETAIL_LOG" ] && [ ! -L "$CHOPIN_DETAIL_LOG" ]; then
+      { printf '\nBoot write failed; read-only storage diagnostics:\n'; blockdev --getro "$BLOCK"; dmesg | grep -i -E 'write protect|Sense Key|Add. Sense|I/O error' | tail -n 24; } >> "$CHOPIN_DETAIL_LOG" 2>&1;
+    fi;
     abort "Boot write or flush failed; keep the backup and use the verified Fastboot path";
   fi;
+}
+
+# Diagnose the preserved journal before unpacking/repacking another image.
+# A verified completed install may be re-selected without another block write.
+chopin_previous_attempt() {
+  local payload marker phase completed;
+  payload=$(cat "$AKHOME/expected/kernel.sha256");
+  [ ${#payload} = 64 ] || abort "Invalid candidate identity";
+  case "$payload" in *[!0-9a-f]*) abort "Invalid candidate digest";; esac;
+  marker="$backup_dir/attempt${SLOT}-${payload}.txt";
+  CHOPIN_ALREADY_INSTALLED=0;
+  [ ! -e "$marker" ] && [ ! -L "$marker" ] && return 0;
+  [ -f "$marker" ] && [ ! -L "$marker" ] || abort "Unsafe previous installation journal";
+  phase=$(sed -n 's/^phase=//p' "$marker" | tail -n 1);
+  if [ "$phase" = full_partition_readback_verified ]; then
+    completed=$(sed -n 's/^readback_sha256=//p' "$marker" | tail -n 1);
+    [ ${#completed} = 64 ] && [ "$completed" = "$CHOPIN_BACKUP_SHA" ] && [ "$(chopin_sha "$BLOCK")" = "$completed" ] || abort "Previously installed boot has changed; inspect its backup first";
+    CHOPIN_ALREADY_INSTALLED=1;
+    return 0;
+  fi;
+  ui_print "Previous install: $phase" "Journal: $marker";
+  if [ "$phase" = write_or_flush_failed ]; then
+    abort "Previous boot write returned an I/O error. Keep the backup and log; use the unlocked Fastboot path after diagnosis";
+  fi;
+  abort "An unfinished write attempt exists. Inspect its backup and log before another write";
 }

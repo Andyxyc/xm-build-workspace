@@ -15,7 +15,7 @@ family_mode="--family" in sys.argv
 def prepare(root,rom='V14.0.8.0.TKPCNXM'):
  for name in ['bin','system/bin','tmp','data/adb/modules_update/xiaomo_chopin_ak3','data/adb/chopin-kernel-backups','stage/expected']:(root/name).mkdir(parents=True,exist_ok=True)
  shutil.copyfile(busybox,root/'bin/busybox');(root/'bin/busybox').chmod(0o755)
- for n in ['sh','cat','cut','mkdir','mktemp','unzip','sha256sum','touch','printf','sync','dd','wc']:(root/'bin'/n).symlink_to('/bin/busybox')
+ for n in ['sh','cat','cut','mkdir','mktemp','unzip','sha256sum','touch','printf','sync','dd','wc','sed','tail']:(root/'bin'/n).symlink_to('/bin/busybox')
  (root/'system/bin/sh').symlink_to('/bin/busybox')
  miui='WRONG' if rom=='WRONG-ROM' else 'V140'
  getprop='#!/bin/sh\ncase "$1" in ro.product.device) echo chopin;; ro.build.version.sdk) echo 33;; ro.miui.ui.version.name) echo '+miui+';; ro.build.version.incremental) echo '+rom+';; esac\n'
@@ -90,6 +90,15 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
  markers=list((root/'data/adb/chopin-kernel-backups').glob('attempt*'));assert len(markers)==1
  assert markers[0].read_text().startswith('phase=prepared\n') and not (root/'dev').exists()
  results.append({'case':'duplicate-kernel-attempt-refused','exit':99,'scope':'REAL_JOURNAL_FUNCTION_NO_DEVICE'})
+ # Test the real early-journal classifier; no image or device is present.
+ for mode,want in [('new',0),('failed',99),('unfinished',99),('completed',0),('completed-changed',99)]:
+  root=parent/('early-'+mode);prepare(root);(root/'stage/expected/kernel.sha256').write_text('b'*64+'\n')
+  marker=root/('data/adb/chopin-kernel-backups/attempt_a-'+('b'*64)+'.txt')
+  if mode!='new':marker.write_text('phase='+('write_or_flush_failed' if mode=='failed' else 'prepared' if mode=='unfinished' else 'full_partition_readback_verified')+'\nreadback_sha256='+('c'*64)+'\n')
+  script='export PATH=/bin AKHOME=/stage\nbackup_dir=/data/adb/chopin-kernel-backups\nBLOCK=/dev/block/by-name/boot_a\nSLOT=_a\nCHOPIN_BACKUP_SHA='+('d'*64 if mode=='completed-changed' else 'c'*64)+'\nabort() { printf "%s\\n" "$*" >&2; exit 99; }\nui_print() { :; }\n. /ak3-preflight.sh\nchopin_sha() { echo '+('c'*64)+'; }\nchopin_previous_attempt\n[ "$CHOPIN_ALREADY_INSTALLED" = '+('1' if mode=='completed' else '0')+' ]\n'
+  q=run(root,script);assert q.returncode==want,(mode,q.stdout,q.stderr)
+  assert not (root/'dev').exists() and not (root/'write-calls').exists()
+  results.append({'case':'early-journal-'+mode,'exit':q.returncode,'scope':'REAL_JOURNAL_CLASSIFIER_NO_IMAGE_NO_DEVICE'})
 report={'status':'PASS_MANAGER_ADAPTER_SOCKET_OUTPUT_AND_DUPLICATE_ATTEMPT_FIXTURES','partition_writes':0,'real_device_test':False,'cases':results,'source_sha256':{n:hashlib.sha256((here/n).read_bytes()).hexdigest() for n in ['customize.sh','installer_transport.py','ak3-preflight.sh']}}
 report['family_mode']=family_mode
 if family_mode:

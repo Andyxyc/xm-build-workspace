@@ -46,6 +46,12 @@ fi;
 CHOPIN_DETAIL_LOG=$(mktemp "$backup_dir/install${SLOT}.log.XXXXXXXX") || abort "Cannot create installation log";
 cat "$AKHOME/install-detail.log" >> "$CHOPIN_DETAIL_LOG";
 
+chopin_previous_attempt;
+if [ "$CHOPIN_ALREADY_INSTALLED" = 1 ]; then
+  ui_print "Already installed. Full boot readback matches.";
+  exit 0;
+fi;
+
 ui_print "Preparing boot image...";
 chopin_family_header "$BOOTIMG" "$AKHOME/current-header";
 chopin_family_ramdisk "$SPLITIMG/ramdisk.cpio" 2>> "$CHOPIN_DETAIL_LOG";
