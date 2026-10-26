@@ -1,0 +1,29 @@
+name: Chopin finite raw audit observer
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-audit-readonly.yml', 'chopin/tools/audit_readonly.c']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit-reader:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build read-only ARM64 observer
+        run: |
+          sudo timeout 180 apt-get -o Acquire::Retries=2 update -qq
+          sudo timeout 180 apt-get -o Acquire::Retries=2 install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          mkdir artifact
+          aarch64-linux-gnu-gcc -std=gnu11 -O2 -Wall -Wextra -static chopin/tools/audit_readonly.c -o artifact/chopin-audit-readonly
+          cp chopin/tools/audit_readonly.c artifact/
+          printf '%s\n' "$GITHUB_SHA" > artifact/source-commit.txt
+          sha256sum artifact/chopin-audit-readonly artifact/audit_readonly.c > artifact/sha256.txt
+          file artifact/chopin-audit-readonly
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopin-audit-readonly
+          path: artifact/*
+          retention-days: 14
