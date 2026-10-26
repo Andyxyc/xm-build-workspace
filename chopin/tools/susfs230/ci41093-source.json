@@ -1,0 +1,17 @@
+{
+  "main_commit": "d8fec9b62c961764667dd4c2cc380215280f4995",
+  "official_manager_ci": 41093,
+  "builtin_commit": "6397fcb5d96e8f4953c71e02c73f8c6800541bff",
+  "uapi_version": 6,
+  "unchanged_upstream_files": {
+    "uapi/extension.h": "9412300a0b02b0d51efd5632dd000ae07f940ccbac94cb774fa9a641350bc90a",
+    "kernel/extension/extension.c": "63c03d65a6adc1e5571b3cc65d68bace0aa8437e5143ac5bc1ead25a34938f8f",
+    "kernel/extension/version_spoof.c": "6d006a62bfebd694a79521ca9c6b24c2f07c3ce05a55309d8a4f88d43656036f",
+    "kernel/extension/version_spoof.h": "3f28ac2d136680fe502de6fc4b3dd8b6dcf321907a51094c5ccea69c3a2ca6ed",
+    "kernel/policy/allowlist.c": "d96be1842c450c6684e93062ef5c5f78ff5adfdd5c36072b27f74b21d89a5dde",
+    "kernel/supercall/dispatch.c": "930a6f107c6bcd968fe7a7eb879c4b85e45ccd4f0ac7979292864abf09deac32"
+  },
+  "since_previous_ci": "Official CI41087 to41093 changes manager installation/KPM/permissions only; pinned kernel/UAPI blobs unchanged; builtin unchanged",
+  "official_build_manager_run": 40352513452,
+  "latest_main_observed": "2ec445ffcb803614ee41ce111b6bad28c67f3347"
+}
