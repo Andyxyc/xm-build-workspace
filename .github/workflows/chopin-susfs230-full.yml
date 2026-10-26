@@ -3,7 +3,7 @@ name: Chopin native SUSFS2.3 full kernel candidate
 on:
   push:
     branches: [chopin-feature-kernel-20261025]
-    paths: ['.github/workflows/chopin-susfs230-full.yml', 'chopin/tools/susfs230/native_ksu.py', 'chopin/tools/susfs230/verify_links.py', 'chopin/tools/susfs230/verify_config.py']
+    paths: ['.github/workflows/chopin-susfs230-full.yml', 'chopin/tools/susfs230/**']
   workflow_dispatch:
 
 permissions:
