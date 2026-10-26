@@ -7,7 +7,8 @@ env=os.environ.copy();env['PATH']=env['CLANG_PATH']+':'+env['PATH'];env.pop('DIS
 args=['make','-j2','O=out','ARCH=arm64','CC=clang']
 for k in ['CUSTOM_CMDS','EXTRA_CMDS','GCC_64','GCC_32']:args+=shlex.split(env.get(k,''))
 here=Path(__file__).resolve().parent;manifest=json.loads((here/'manifest.json').read_text())
-targets=['chopin_user_defconfig','init/version.o','fs/susfs.o']+[r['file'][:-2]+'.o' for r in manifest['patches'] if r['file'].endswith('.c')]
+targets=['chopin_user_defconfig','init/version.o','security/selinux/flask.h','fs/susfs.o']+[r['file'][:-2]+'.o' for r in manifest['patches'] if r['file'].endswith('.c')]
+targets+=['kernel/reboot.o','security/selinux/selinuxfs.o','security/selinux/hooks.o','arch/arm64/kernel/cpuinfo.o','drivers/kernelsu/ksu_main.o']
 rows=[]
 for target in targets:
     path=out/(target.replace('/','_')+'.log')

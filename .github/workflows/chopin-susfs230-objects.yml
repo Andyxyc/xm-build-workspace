@@ -104,6 +104,13 @@ jobs:
 
       - name: Apply exact SUSFS2.3 filesystem trial
         run: python3 chopin/tools/susfs230/apply.py "$WORKSPACE/android-kernel"
+      - name: Connect native SukiSU driver and 4.14 compatibility
+        working-directory: builder
+        run: |
+          source scripts/patches.sh
+          path_umount_apply
+          sukisu_414_compat_apply
+          python3 ../chopin/tools/susfs230/native_ksu.py "$WORKSPACE/android-kernel"
       - name: Resolve experimental defconfig
         working-directory: builder
         run: |
