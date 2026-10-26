@@ -111,6 +111,7 @@ jobs:
           path_umount_apply
           sukisu_414_compat_apply
           python3 ../chopin/tools/susfs230/native_ksu.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_ci41095.py "$WORKSPACE/android-kernel"
       - name: Resolve experimental defconfig
         working-directory: builder
         run: |

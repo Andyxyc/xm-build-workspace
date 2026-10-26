@@ -1,0 +1,21 @@
+{
+  "main_commit": "96ceb4a42c50e27199a094264f62cfbafee77fa0",
+  "official_manager_ci": 41095,
+  "builtin_commit": "6397fcb5d96e8f4953c71e02c73f8c6800541bff",
+  "uapi_version": 6,
+  "upstream_files": {
+    "uapi/extension.h": "296b80db6177fa77058a6ea3d03e9d558fcde5e70a4ab643cd1ca409346e7589",
+    "kernel/extension/extension.c": "63c03d65a6adc1e5571b3cc65d68bace0aa8437e5143ac5bc1ead25a34938f8f",
+    "kernel/extension/version_spoof.c": "6d006a62bfebd694a79521ca9c6b24c2f07c3ce05a55309d8a4f88d43656036f",
+    "kernel/extension/version_spoof.h": "3f28ac2d136680fe502de6fc4b3dd8b6dcf321907a51094c5ccea69c3a2ca6ed",
+    "kernel/policy/allowlist.c": "d96be1842c450c6684e93062ef5c5f78ff5adfdd5c36072b27f74b21d89a5dde",
+    "kernel/supercall/dispatch.c": "930a6f107c6bcd968fe7a7eb879c4b85e45ccd4f0ac7979292864abf09deac32"
+  },
+  "official_kpm_sha256": "8d6cc9e631dbc43bd4c367683c7356f3f38bd16d09632cd08163eb7cc938f587",
+  "official_bridge_sha256": "4f88f813aa4058eddb139546d8f6f60bd90324726b4cc31bbd8d3269587d91ca",
+  "official_build_manager_run": 40390221573,
+  "compatibility": "Official userspace explicitly falls back from event-load EOPNOTSUPP to ordinary LOAD. Preserve the actually boot-tested ABI1 runtime; do not claim ABI2 event loading.",
+  "paired_kpm_bridge_abi": 1,
+  "event_aware_load_supported": false,
+  "ordinary_kpm_load_fallback_supported": true
+}
