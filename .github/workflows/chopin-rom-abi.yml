@@ -1,0 +1,39 @@
+name: Chopin MIUI14 other firmware boot ABI evidence
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-rom-abi.yml', 'chopin/tools/rom_abi_probe.py', 'chopin/tools/rom_abi_targets.json']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  firmware-abi:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: chopin-sukisu-susfs-kpm-raw-build-candidate
+          run-id: 40396562328
+          github-token: ${{ github.token }}
+          path: current-reference
+      - name: Prepare exact previously used symbol parser
+        run: |
+          git clone https://github.com/marin-m/vmlinux-to-elf.git parser
+          git -C parser checkout --detach 29eac31a38db48b51c0dc6aae3be0162237601eb
+          test "$(git -C parser rev-parse HEAD)" = 29eac31a38db48b51c0dc6aae3be0162237601eb
+          python -m pip install ./parser
+      - name: Read bounded official ROM members and compare real export CRCs
+        run: python chopin/tools/rom_abi_probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-rom-abi-evidence-only
+          path: rom-analysis/*.json
+          if-no-files-found: error
+          retention-days: 14

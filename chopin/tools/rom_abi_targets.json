@@ -1,0 +1,24 @@
+[
+  {
+    "android": "13.0",
+    "branch": "Stable Beta",
+    "codename": "chopin",
+    "date": "2023-01-13",
+    "link": "https://bigota.d.miui.com/V14.0.2.0.TKPCNXM/miui_CHOPIN_V14.0.2.0.TKPCNXM_a1309370ef_13.0.zip",
+    "method": "Recovery",
+    "name": "Redmi Note 10 Pro 5G China",
+    "size": "4.2 GB",
+    "version": "V14.0.2.0.TKPCNXM"
+  },
+  {
+    "android": "13.0",
+    "branch": "Stable",
+    "codename": "chopin_global",
+    "date": "2024-06-06",
+    "link": "https://bigota.d.miui.com/V14.0.6.0.TKPMIXM/miui_CHOPINGlobal_V14.0.6.0.TKPMIXM_d809eee4ce_13.0.zip",
+    "method": "Recovery",
+    "name": "POCO X3 GT Global",
+    "size": "4.1 GB",
+    "version": "V14.0.6.0.TKPMIXM"
+  }
+]
