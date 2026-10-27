@@ -5,14 +5,67 @@ chopin_sha() {
   printf '%s\n' "${value%% *}";
 }
 
+chopin_persistent_path() {
+  local path source point kind options rest selected selected_kind selected_options;
+  [ -d "$1" ] || return 1;
+  [ -r /proc/mounts ] || return 1;
+  path=$(readlink -f "$1") || return 1;
+  case "$path" in /tmp|/tmp/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/sideload|/sideload/*|/postinstall/tmp|/postinstall/tmp/*) return 1;; esac;
+  # The deepest mount wins; an unmounted /data is only part of the recovery RAM disk.
+  while read -r source point kind options rest; do
+    point=$(printf '%b' "$point");
+    case "$path/" in "$point/"*|"$point") ;;
+      *) [ "$point" = / ] || continue;;
+    esac;
+    if [ -z "$selected" ] || [ "${#point}" -gt "${#selected}" ]; then
+      selected=$point; selected_kind=$kind; selected_options=$options;
+    fi;
+  done < /proc/mounts;
+  [ "$selected" != / ] || return 1;
+  case "$selected_kind" in ext4|f2fs|vfat|exfat|ntfs|ntfs3|fuse|fuseblk|sdcardfs) ;;
+    *) return 1;;
+  esac;
+  case ",$selected_options," in *,rw,*) return 0;; *) return 1;; esac;
+}
+
+chopin_backup_directory() {
+  local parent folder;
+  if chopin_persistent_path /data; then
+    folder=/data/adb/chopin-kernel-backups;
+    if [ ! -L "$folder" ] && mkdir -p "$folder" 2>/dev/null && chopin_persistent_path "$folder"; then
+      printf '%s\n' "$folder"; return 0;
+    fi;
+  fi;
+  # Decrypted internal storage, USB OTG and SD cards can hold a recovery backup.
+  [ -n "${ZIPFILE:-}" ] || return 1;
+  parent=$(dirname "$ZIPFILE") || return 1;
+  parent=$(readlink -f "$parent") || return 1;
+  chopin_persistent_path "$parent" || return 1;
+  folder=$parent/chopin-kernel-backups;
+  [ ! -L "$folder" ] && mkdir -p "$folder" 2>/dev/null && chopin_persistent_path "$folder" || return 1;
+  printf '%s\n' "$folder";
+}
+
+chopin_current_slot() {
+  local value resolved;
+  # Recovery can expose only ro.boot.slot or a cmdline value. Reject disagreement.
+  for value in $(getprop ro.boot.slot_suffix 2>/dev/null; getprop ro.boot.slot 2>/dev/null;
+    awk '{ for (i=1; i<=NF; i++) if ($i ~ /^androidboot\.slot(_suffix)?=/) { sub(/^[^=]*=/,"",$i); print $i; } }' /proc/cmdline); do
+    case "$value" in a|_a) value=_a;; b|_b) value=_b;; *) return 1;; esac;
+    [ -z "$resolved" ] || [ "$resolved" = "$value" ] || return 1;
+    resolved=$value;
+  done;
+  [ -n "$resolved" ] || return 1;
+  printf '%s\n' "$resolved";
+}
+
 chopin_backup_boot() {
   local backup_dir backup_file;
   CHOPIN_BOOT_BYTES=$(blockdev --getsize64 "$BLOCK") || abort "Cannot read boot size";
   [ "$(wc -c < "$BOOTIMG")" -eq "$CHOPIN_BOOT_BYTES" ] || abort "Boot backup is incomplete";
   CHOPIN_BACKUP_SHA=$(chopin_sha "$BOOTIMG") || abort "Cannot read boot backup";
-  backup_dir=/data/adb/chopin-kernel-backups;
   umask 077;
-  mkdir -p "$backup_dir" || abort "Cannot create boot backup directory";
+  backup_dir=$(chopin_backup_directory) || abort "A writable persistent location is required for the boot backup";
   backup_file="$backup_dir/boot${SLOT}-${CHOPIN_BACKUP_SHA}.img";
   if [ ! -e "$backup_file" ]; then
     (set -C; cat "$BOOTIMG" > "$backup_file") || abort "Cannot save boot backup";
@@ -41,7 +94,7 @@ chopin_clean_ramdisk() {
 
 chopin_preflash_verify() {
   local size pad;
-  [ "$(getprop ro.boot.slot_suffix)" = "$SLOT" ] || abort "Active slot changed";
+  [ "$(chopin_current_slot)" = "$SLOT" ] || abort "Cannot confirm the active boot slot";
   [ "$(chopin_sha "$BLOCK")" = "$CHOPIN_BACKUP_SHA" ] || abort "Boot changed during installation";
   size=$(wc -c < "$AKHOME/boot-new.img");
   [ "$size" -ge 1660 ] && [ "$size" -le "$CHOPIN_BOOT_BYTES" ] || abort "Repacked boot does not fit";

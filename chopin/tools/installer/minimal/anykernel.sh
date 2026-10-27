@@ -6,7 +6,7 @@ do.systemless=0
 do.cleanup=1
 do.cleanuponabort=0
 device.name1=chopin
-supported.versions=13
+supported.versions=13,14
 '; }
 BLOCK=/dev/block/by-name/boot;
 IS_SLOT_DEVICE=1;

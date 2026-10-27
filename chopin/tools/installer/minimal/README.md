@@ -1,9 +1,25 @@
-This installer is for chopin Android 13 across compatible firmware variants.
+This installer is for chopin Android 13/14 across compatible firmware variants.
+Android 13 MIUI14 has actual boot evidence. Android 14 acceptance remains
+pending; accepting its installer entry is not proof of driver/ROM compatibility.
 It keeps the current slot, backs up boot, preserves its own DTB/ramdisk,
 propagates write errors and checks the actual write result. It does not bind
 the package to a firmware increment, vendor-module hashes or a fixed header.
 Old failed-install records are preserved as evidence and never permanently
 block a later user-initiated installation.
+
+The recovery ZIP entry remains META-INF/com/google/android/update-binary.
+The boot backup uses /data/adb when /data is a real writable persistent mount.
+If that path is unavailable, it uses chopin-kernel-backups beside the ZIP on
+decrypted internal storage, SD card or USB OTG. An unmounted /data, tmpfs or
+the /tmp/sideload workspace is not a recoverable backup location. A sideload
+session therefore needs writable decrypted /data; otherwise use a ZIP from
+persistent storage. The installer never proceeds without a complete backup.
+
+Slot confirmation accepts matching ro.boot.slot_suffix, ro.boot.slot and
+androidboot.slot(_suffix) cmdline values. Missing sources are allowed; invalid
+or conflicting values and an actual slot change are rejected. Only the active
+A/B slot is written. Recovery fixture cases exercise these branches on ordinary
+files; they do not establish a successful physical recovery flash.
 
 If the newly prepared full boot image already equals the current full boot,
 the installer performs no partition write and says so explicitly. This does
