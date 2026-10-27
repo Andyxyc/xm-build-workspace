@@ -35,17 +35,20 @@ with tempfile.TemporaryDirectory(prefix='chopin-minimal-entry-') as tmp:
   else:assert not (d/'args').exists()
   if code:assert b'Kernel installed.' not in q.stdout
   assert not (d/'dev').exists();results.append({'case':name,'exit':q.returncode})
- for mode in ['boot','recovery','sukisu']:
+ for mode in ['boot','recovery','sukisu','kernelflasher']:
   d=root/('socket-'+mode);(d/'bin').mkdir(parents=True)
   shutil.copyfile('/bin/busybox',d/'bin/busybox');(d/'bin/busybox').chmod(0o755);(d/'bin/sh').symlink_to('/bin/busybox')
-  (d/'run.sh').write_text('export CHOPIN_UI_STDOUT='+('0' if mode=='recovery' else '1')+' OUTFD=1 POSTINSTALL='+('/fixture-sukisu' if mode=='sukisu' else '""')+'\n'+NEW_UI.decode()+'\n'+NEW_PROGRESS.decode()+'\nui_print "installer"\nshow_progress 1 2\n')
+  (d/'run.sh').write_text('export CHOPIN_UI_STDOUT='+('0' if mode in ['recovery','kernelflasher'] else '1')+' OUTFD=1 POSTINSTALL='+('/fixture-sukisu' if mode=='sukisu' else '""')+'\n'+NEW_UI.decode()+'\n'+NEW_PROGRESS.decode()+'\nui_print "installer"\nshow_progress 1 2\n')
   left,right=socket.socketpair()
   try:
    q=subprocess.run(['chroot',str(d),'/bin/sh','/run.sh'],stdout=right.fileno(),stderr=subprocess.PIPE,pass_fds=(right.fileno(),),timeout=10)
    right.close();left.settimeout(2);out=b''
    while chunk:=left.recv(4096):out+=chunk
-   expected=b'installer\n' if mode=='boot' else b'ui_print installer\nui_print\n' if mode=='sukisu' else b'ui_print installer\nui_print\nprogress 1 2\n'
+   expected=b'installer\n' if mode=='boot' else b'ui_print installer\n      ui_print\n' if mode=='sukisu' else b'ui_print installer\n      ui_print\nprogress 1 2\n'
    assert q.returncode==0 and out==expected,(mode,q.stderr,out)
+   if mode=='kernelflasher':
+    filtered=[line[len('ui_print')+1:] for line in out.decode().splitlines() if line.startswith('ui_print')]
+    assert filtered==['installer'] and all(len(line)>len('ui_print') for line in out.decode().splitlines() if line.startswith('ui_print'))
   finally:left.close();right.close()
   results.append({'case':'socket-'+mode,'exit':0})
  common='. '+str(here/'boot-io.sh')+'\nabort() { echo "$*" >&2; exit 99; }\nmagiskboot() { qemu-arm '+str(tool)+' "$@"; }\n'
@@ -67,5 +70,5 @@ with tempfile.TemporaryDirectory(prefix='chopin-minimal-entry-') as tmp:
  q=subprocess.run(['qemu-arm',str(busy),'dd','if='+str(data),'of='+str(out),'conv=fsync,notrunc'],capture_output=True,timeout=10)
  assert q.returncode==0 and out.read_bytes()==data.read_bytes();results.append({'case':'actual-arm-busybox-fsync','exit':0})
  assert all(not p.is_block_device() and not p.is_char_device() for p in root.rglob('*'))
-report={'status':'PASS_MINIMAL_ENTRY_SOCKET_AND_ACTUAL_ARM_FILE_TOOLS_ONLY','cases':results,'source_sha256':{n:sha((here/n).read_bytes()) for n in ['customize.sh','boot-io.sh','anykernel.sh']},'actual_tools_sha256':{'magiskboot':sha(tool.read_bytes()),'busybox':sha(busy.read_bytes())},'device_or_real_boot_image_used':False,'hardware_verified':False}
+report={'status':'PASS_MINIMAL_ENTRY_SOCKET_AND_ACTUAL_ARM_FILE_TOOLS_ONLY','cases':results,'source_sha256':{n:sha((here/n).read_bytes()) for n in ['customize.sh','boot-io.sh','anykernel.sh']},'actual_tools_sha256':{'magiskboot':sha(tool.read_bytes()),'busybox':sha(busy.read_bytes())},'transport_source_sha256':sha((here.parent/'installer_transport.py').read_bytes()),'device_or_real_boot_image_used':False,'hardware_verified':False}
 Path('minimal-entry-tools-fixtures.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))

@@ -11,15 +11,15 @@ NEW_UI = b'''ui_print() {
     if [ "$CHOPIN_UI_STDOUT" = 1 ] && [ -z "${POSTINSTALL:-}" ]; then
       printf '%s\\n' "$1";
     else
-      printf 'ui_print %s\\nui_print\\n' "$1" >&$OUTFD;
+      printf 'ui_print %s\\n      ui_print\\n' "$1" >&$OUTFD;
     fi;
     shift;
   done;
 }'''
 BOOT_ANCHOR=b'\nDIR=/sdcard;'
-BOOT_ADAPTER=b'\n[ "$BOOTMODE" = true ] && export CHOPIN_UI_STDOUT=1;\ncase "$OUTFD" in ""|*[!0-9]*) echo "Invalid updater output descriptor" >&2; exit 1;; esac;\n'
+BOOT_ADAPTER=b'\nexport CHOPIN_UI_STDOUT=${CHOPIN_UI_STDOUT:-0};\ncase "$OUTFD" in ""|*[!0-9]*) echo "Invalid updater output descriptor" >&2; exit 1;; esac;\n'
 OLD_PROGRESS=b'show_progress() { echo "progress $1 $2" >> /proc/self/fd/$OUTFD; }'
-NEW_PROGRESS=b'show_progress() { [ "$CHOPIN_UI_STDOUT" = 1 ] || printf "progress %s %s\\n" "$1" "$2" >&$OUTFD; }'
+NEW_PROGRESS=b'show_progress() { [ "$CHOPIN_UI_STDOUT" = 1 ] || [ -n "${POSTINSTALL:-}" ] || printf "progress %s %s\\n" "$1" "$2" >&$OUTFD; }'
 OLD_UNZIP=b'unzip -o "$ZIPFILE";'
 NEW_UNZIP=b'unzip -qo "$ZIPFILE";'
 def output_adapter(core,backend):

@@ -36,3 +36,7 @@ ZIP installer. Keep KPM in follow-kernel mode for an already patched Image.
 The r10 kernel Image f280e96e failed a real boot test and was withdrawn.
 Do not package that Image with these simplified scripts. Installer success
 on ordinary files does not establish that a kernel will boot.
+
+The direct ZIP entry emits the standard recovery ui_print protocol, including
+the indented empty sentinel expected by Kernel Flasher. Only the Magisk module
+bridge explicitly requests plain output. Neither path reopens /proc/self/fd.

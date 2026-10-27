@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='chopin-entry-fixtures-') as temp:
     if not chunk:break
     received+=chunk
    assert p.returncode==0,(mode,p.stderr)
-   expected=b'XiaoMo\n' if mode=='boot' else b'ui_print XiaoMo\nui_print\n' if mode=='sukisu' else b'ui_print XiaoMo\nui_print\nprogress 1 2\n'
+   expected=b'XiaoMo\n' if mode=='boot' else b'ui_print XiaoMo\n      ui_print\n' if mode=='sukisu' else b'ui_print XiaoMo\n      ui_print\nprogress 1 2\n'
    assert received==expected,(mode,received)
   finally:left.close();right.close()
   results.append({'case':'socket-'+mode,'exit':0,'scope':'REAL_OUTPUT_FUNCTION_SOCKET_NO_DEVICE'})
