@@ -24,7 +24,7 @@ class RemoteZip(io.RawIOBase):
   while n:
    offset=self.pos-self.cache_start
    if not 0<=offset<len(self.cache):
-    amount=min(max(n,1024*1024),8*1024*1024,self.total-self.pos);assert self.downloaded+amount<=96*1024*1024,'Per-ROM byte budget reached'
+    amount=min(max(min(n,512*1024),64*1024),512*1024,self.total-self.pos);assert self.downloaded+amount<=96*1024*1024,'Per-ROM byte budget reached'
     with self.request(self.pos,self.pos+amount-1) as r:
      assert r.headers.get('Content-Range')==f'bytes {self.pos}-{self.pos+amount-1}/{self.total}'
      chunks=[];received=0;deadline=time.monotonic()+30
@@ -86,7 +86,7 @@ def payload_boot(remote,info):
  return bytes(image),{'payload_boot_partition_sha256_verified':True,'payload_operation_hashes_verified':checked,'payload_boot_operation_types':sorted(set(operations)),'full_payload_zip_crc_verified':False,'schema_blob_sha1':'6d16da40e53720078b2e4f3689dbb296eb325bee'}
 def exported(image,expected):
  from vmlinux_to_elf.core.kallsyms import KallsymsFinder
- found=KallsymsFinder(image,64);symbols={s.name:s for s in found.symbols};text=symbols['_text'];base=text.virtual_address-text.file_offset;data=found.kernel_img
+ found=KallsymsFinder(image,64);symbols={s.name:s for s in found.symbols};text=symbols['_text'];data=found.kernel_img;assert data[56:60]==b'ARMd','Raw ARM64 Image required';base=text.virtual_address
  seed_name=b'remap_pfn_range\0';names=[m.start() for m in re.finditer(re.escape(seed_name),data)]
  seeds=[]
  for off in names:
@@ -128,12 +128,15 @@ assert (reference/'build-logs/root-build-complete.txt').read_text().strip()=='b7
 expected={q[1]:int(q[0],16) for s in symvers.read_text().splitlines() if len(q:=s.split())>=3 and q[2]=='vmlinux'}
 assert len(expected)>10000
 out=Path('rom-analysis');out.mkdir(exist_ok=True);results=[]
+selfcheck=exported((reference/'kernel_workspace/android-kernel/out/arch/arm64/boot/Image').read_bytes(),expected)
+assert not selfcheck['different_export_crcs'] and not selfcheck['candidate_exports_missing_from_firmware'],'Actual candidate parser self-check failed'
+(out/'candidate_parser_selfcheck.json').write_text(json.dumps(selfcheck,indent=2))
 for item in json.loads(Path('chopin/tools/rom_abi_targets.json').read_text()):
  row={'firmware':item,'status':'IN_PROGRESS','hardware_tested':False,'flashed':False,'full_zip_md5_verified':False,'max_network_bytes':96*1024*1024};results.append(row)
  def save():
   (out/'results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
- def timeout(signum,frame):raise TimeoutError('Per-ROM90second bounded probe expired at '+row.get('stage','unknown'))
- signal.signal(signal.SIGALRM,timeout);signal.alarm(90);faulthandler.dump_traceback_later(60,repeat=False);row['stage']='open_remote_zip';save()
+ def timeout(signum,frame):raise TimeoutError('Per-ROM180second bounded probe expired at '+row.get('stage','unknown'))
+ signal.signal(signal.SIGALRM,timeout);signal.alarm(180);faulthandler.dump_traceback_later(120,repeat=False);row['stage']='open_remote_zip';save()
  try:
   remote=RemoteZip(item['link']);row['full_rom_bytes']=remote.total
   with zipfile.ZipFile(remote) as z:
