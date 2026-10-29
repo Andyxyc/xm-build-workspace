@@ -1,0 +1,22 @@
+name: Chopin Android11 official ROM one-byte range preflight
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/a11_rom_preflight.py', '.github/workflows/chopin-a11-rom-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  range:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -B chopin/tools/a11_rom_preflight.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-a11-one-byte-preflight
+          path: a11-rom-preflight/result.json
+          if-no-files-found: error
+          retention-days: 14
