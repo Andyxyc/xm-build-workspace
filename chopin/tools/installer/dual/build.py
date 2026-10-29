@@ -110,7 +110,10 @@ def main():
         for filename,digest in result['source_sha256'].items():
             assert digest==sha((minimal/filename).read_bytes()),('Stale minimal fixture',filename)
         minimal_cases+=len(result['cases'])
-    assert minimal_cases==38,'The existing 38 minimal installer cases must run against these exact common sources'
+    assert minimal_cases==64,'The original entry/I-O and new compressed-cache cases must run against these exact common sources'
+    backup_fixtures=json_file(args.fixtures/'minimal-installer-fixtures.json')
+    assert backup_fixtures['original_case_count']==25 and backup_fixtures['compressed_cache_case_count']==26
+    assert backup_fixtures['generator_sha256']==sha((minimal/'test_io.py').read_bytes())
     flow_path=args.fixtures/'dual-flow-fixtures.json';flow=json_file(flow_path)
     assert flow['status']=='PASS_THREE_ABI_SHELL_REAL_SELECTOR_ORDINARY_FILE_FLOW_ONLY'
     assert flow['profiles']==PROFILES and flow['case_count']>=43 and len(flow['cases'])==flow['case_count']

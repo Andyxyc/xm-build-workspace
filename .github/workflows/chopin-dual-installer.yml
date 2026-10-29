@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/chopin-dual-installer.yml'
       - 'chopin/tools/installer/dual/**'
+      - 'chopin/tools/installer/minimal/**'
   workflow_dispatch:
 permissions:
   contents: read
