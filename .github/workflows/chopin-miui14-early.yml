@@ -1,0 +1,274 @@
+name: Chopin early MIUI14 vendor ABI v4.3.0 CI41100 candidate
+
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['.github/workflows/chopin-miui14-early.yml', 'chopin/tools/susfs230/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  chopin-kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace
+      CONFIG_ENV: config/chopin.env
+      KBUILD_BUILD_USER: xiaomo
+      KBUILD_BUILD_HOST: chopin-builder
+      BASELINE_REFERENCE_RUN: ""
+      CCACHE_DIR: ${{ github.workspace }}/kernel_workspace/.ccache
+      CCACHE_MAXSIZE: 512M
+    steps:
+      - name: Checkout isolated chopin branch
+        uses: actions/checkout@v4
+
+      - name: Install prerequisites
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          sudo timeout 180 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+          sudo timeout 240 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+            bc bison flex make build-essential git git-lfs python3 python-is-python3 \
+            curl wget unzip zip cpio device-tree-compiler libssl-dev libelf-dev \
+            libncurses-dev zlib1g-dev lz4 zstd ccache rsync ca-certificates \
+            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libc6-dev-arm64-cross
+          mkdir -p "$WORKSPACE"
+          mkdir -p build-logs release-evidence
+
+      - name: Restore bounded compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: kernel_workspace/.ccache
+          key: chopin-clang13-0647a49-early-v1-${{ github.run_id }}
+          restore-keys: |
+            chopin-clang13-0647a49-early-v1-
+            chopin-clang13-0647a49-v1-
+
+      - name: Fetch existing non-GKI build framework (pinned)
+        run: |
+          git clone --depth=1 https://github.com/Owen0225/sukisu-Ultra-4.14.-.git builder
+          git -C builder fetch origin 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          git -C builder checkout --detach 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          test "$(git -C builder rev-parse HEAD)" = 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          mkdir -p builder/config
+          cp chopin/target.env builder/config/chopin.env
+          echo "Builder: $(git -C builder rev-parse HEAD)"
+
+      - name: Resolve build profile
+        working-directory: builder
+        run: bash scripts/config.sh
+
+      - name: Prepare compiler and cross-toolchain
+        working-directory: builder
+        run: bash scripts/toolchain.sh
+
+      - name: Fetch matching chopin vendor source
+        working-directory: builder
+        run: |
+          bash scripts/source.sh
+          git -C "$WORKSPACE/android-kernel" fetch origin 0647a49c9557faa92b90c4ae188587787226be9e
+          git -C "$WORKSPACE/android-kernel" checkout --detach 0647a49c9557faa92b90c4ae188587787226be9e
+          actual="$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
+          echo "Vendor kernel SHA: $actual"
+          test "$actual" = "0647a49c9557faa92b90c4ae188587787226be9e"
+          python3 ../chopin/port_cpu_stock.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/restore_module_validation.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/module-validation-restoration.json" "$GITHUB_WORKSPACE/release-evidence/"
+          python3 ../chopin/apply_stock_profile.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/stock-profile-application.json" "$GITHUB_WORKSPACE/release-evidence/"
+
+      - name: Retain verified early MIUI14 vendor ABI expectations
+        run: |
+          cp chopin/tools/abi_selector/expectations/miui14_0_6.json release-evidence/early-vendor-imports.json
+          printf '%s\n' 'CPU NCAPS30 implementation retained; complete original rmap degree implementation retained. No CRC override or force-load.' > release-evidence/ABI-PROFILE.txt
+
+      - name: Integrate latest verified SukiSU builtin
+        working-directory: builder
+        run: |
+          bash scripts/kernelsu.sh
+          git -C "$WORKSPACE/android-kernel/KernelSU" fetch origin 6397fcb5d96e8f4953c71e02c73f8c6800541bff
+          git -C "$WORKSPACE/android-kernel/KernelSU" checkout --detach 6397fcb5d96e8f4953c71e02c73f8c6800541bff
+          actual="$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
+          echo "SukiSU builtin SHA: $actual"
+          test "$actual" = "6397fcb5d96e8f4953c71e02c73f8c6800541bff"
+
+      - name: Port native SUSFS2.3 and the actual SukiSU driver
+        working-directory: builder
+        run: |
+          python3 ../chopin/tools/susfs230/apply.py "$WORKSPACE/android-kernel"
+          source scripts/patches.sh
+          path_umount_apply
+          sukisu_414_compat_apply
+          python3 ../chopin/tools/susfs230/native_ksu.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_ci41095.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_ci41098.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_ci41100.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/check_release41100_parsers.py --kernel-root "$WORKSPACE/android-kernel" --report "$GITHUB_WORKSPACE/release-evidence/release41100-parser-host-cases.json"
+          echo "EXTRA_DEFCONFIG=${EXTRA_DEFCONFIG//CONFIG_KSU_SUSFS_SUS_MAP=n/CONFIG_KSU_SUSFS_SUS_MAP=y}" >> "$GITHUB_ENV"
+          python3 ../chopin/tools/check_kpm_version_copy.py
+          python3 ../chopin/tools/check_adb_root_path.py "$WORKSPACE/android-kernel/KernelSU/kernel/feature/adb_root.c"
+          python3 ../chopin/tools/check_su_visibility.py "$WORKSPACE/android-kernel/KernelSU/kernel/feature/sucompat.c"
+          python3 ../chopin/verify_sid_bootstrap.py "$WORKSPACE/android-kernel/KernelSU/kernel/selinux/rules.c" --report "$GITHUB_WORKSPACE/release-evidence/sid-bootstrap-source-check.json"
+
+      - name: Build source tree using chopin defconfig
+        working-directory: builder
+        run: |
+          set -o pipefail
+          bash scripts/build.sh defconfig
+          /usr/bin/time -v bash scripts/build.sh compile 2>&1 | tee "$GITHUB_WORKSPACE/build-logs/ported-kernel.log"
+          echo "$GITHUB_SHA" > "$GITHUB_WORKSPACE/build-logs/root-build-complete.txt"
+
+      - name: Verify exact original kernel display identity
+        run: |
+          python3 chopin/verify_stock_identity.py "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/android-kernel/out/include/generated/utsrelease.h" "$WORKSPACE/android-kernel/out/include/generated/compile.h"
+          cp chopin/stock-identity.json release-evidence/stock-identity.json
+          cp "$WORKSPACE/android-kernel/out/include/generated/compile.h" release-evidence/compile.h
+
+      - name: Check vendor camera and root features
+        run: |
+          python3 chopin/tools/susfs230/verify_config.py "$WORKSPACE/android-kernel/out/.config" miui14-early
+          python3 chopin/verify_module_loader.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --config "$WORKSPACE/android-kernel/out/.config" --report "$GITHUB_WORKSPACE/release-evidence/ported-module-loader.json"
+          python3 chopin/tools/verify_vendor_imports.py "$WORKSPACE/android-kernel/out/Module.symvers" chopin/tools/abi_selector/expectations/miui14_0_6.json release-evidence/early-vendor-import-validation.json
+          test -f "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
+          printf "SukiSU builtin + SUSFS + KPM config exists; this does not verify camera on device.\n"
+
+      - name: Check genuine linked feature paths before KPM postprocessing
+        run: |
+          python3 chopin/tools/susfs230/verify_links.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --report release-evidence/feature-linked-paths.json
+          python3 chopin/tools/verify_kpm_bridge_link.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --report release-evidence/kpm-bridge-linked-paths.json
+
+      - name: Apply KPM to compiled arm64 Image
+        working-directory: builder
+        run: |
+          set -o pipefail
+          mkdir -p "$WORKSPACE/paired-kpm"
+          GH_TOKEN="${{ github.token }}" gh run download 40313338098 --repo "$GITHUB_REPOSITORY" --name chopin-kpm-arm-gnu-comparison --dir "$WORKSPACE/paired-kpm"
+          python3 - <<'PYVERIFY'
+          from pathlib import Path
+          import hashlib,os
+          p=Path(os.environ['WORKSPACE'])/'paired-kpm'
+          for n,h in [('kpimg','554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425'),('kptools','69defafa8e2e9f7b435823f1290cb981cdb62cee35b1d2f22f05b8ddb7d91ba6')]:
+              assert hashlib.sha256((p/n).read_bytes()).hexdigest()==h,n
+          PYVERIFY
+          chmod 755 "$WORKSPACE/paired-kpm/kptools"
+          cp "$WORKSPACE/paired-kpm/kpimg" "$GITHUB_WORKSPACE/release-evidence/kpimg.pinned"
+          cp "$WORKSPACE/paired-kpm/paired-kpm-protocol.json" "$GITHUB_WORKSPACE/release-evidence/"
+          cp "$WORKSPACE/paired-kpm/paired-source.patch" "$GITHUB_WORKSPACE/release-evidence/"
+          printf '%s\n' 'a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0 + 4bdf8eaed26aac9ee60f1d96c58327891cdb719d; upstream Arm GNU12.2; actual r11 boot and KPM lifecycle verified' > "$GITHUB_WORKSPACE/release-evidence/paired-kpm-source.txt"
+          python3 ../chopin/test_image_entry.py
+          cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" "$WORKSPACE/Image.before-kpm"
+          cp "$WORKSPACE/Image.before-kpm" "$GITHUB_WORKSPACE/release-evidence/Image.sukisu-susfs-before-kpm"
+          python3 ../chopin/verify_image_entry.py "$WORKSPACE/Image.before-kpm" --report "$GITHUB_WORKSPACE/release-evidence/before-kpm-entry.json"
+          python3 ../chopin/apply_verified_kpm.py \
+            --tool "$WORKSPACE/paired-kpm/kptools" \
+            --before "$WORKSPACE/Image.before-kpm" \
+            --kpimg "$WORKSPACE/paired-kpm/kpimg" \
+            --payload-sha256 554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425 \
+            --system-map "$WORKSPACE/android-kernel/out/System.map" \
+            --output "$WORKSPACE/Image.kpm-verified" \
+            --report "$GITHUB_WORKSPACE/release-evidence/kpm-entry-gate.json" \
+            --log "$GITHUB_WORKSPACE/build-logs/kpm-postprocess.log"
+          mv "$WORKSPACE/Image.kpm-verified" "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
+          ! cmp -s "$WORKSPACE/Image.before-kpm" "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
+          sha256sum "$WORKSPACE/Image.before-kpm" > "$GITHUB_WORKSPACE/release-evidence/Image.before-kpm.sha256"
+          sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
+          git -C "$WORKSPACE/android-kernel" status --short | head -80
+
+      - name: Independently bind the native credential hook to the real LSM table
+        run: |
+          python3 chopin/tools/susfs230/verify_hook_binding.py --image "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" --system-map "$WORKSPACE/android-kernel/out/System.map" --log build-logs/kpm-postprocess.log --report release-evidence/native-lsm-hook-binding.json
+
+      - name: Save native SUSFS2.3 UAPI and exact source manifest
+        run: |
+          cp "$WORKSPACE/android-kernel/kstat-flags-source-fix.json" release-evidence/
+          cp "$WORKSPACE/android-kernel/include/linux/susfs.h" release-evidence/susfs-native.h
+          cp "$WORKSPACE/android-kernel/include/linux/susfs_def.h" release-evidence/susfs-native-def.h
+          cp "$WORKSPACE/android-kernel/fs/susfs.c" release-evidence/susfs-native-core.c
+          cp chopin/tools/susfs230/manifest.json release-evidence/susfs-native-source-manifest.json
+          cp chopin/tools/susfs230/upstream-sync.json release-evidence/susfs-native-upstream-sync.json
+
+      - name: Save evidence of source and kernel version
+        run: |
+          mkdir -p release-evidence
+          cp "$WORKSPACE/android-kernel/out/.config" release-evidence/chopin-built.config
+          cp "$WORKSPACE/android-kernel/out/include/generated/utsrelease.h" release-evidence/utsrelease.h
+          cp "$WORKSPACE/android-kernel/out/Module.symvers" release-evidence/ported.Module.symvers
+          cp "$WORKSPACE/android-kernel/out/System.map" release-evidence/System.map
+          mkdir -p release-evidence/abi-types
+          for f in arch/arm64/kernel/cpufeature.symtypes mm/mmap.symtypes mm/memory.symtypes net/core/chopin_vendor_refcnt_trace.symtypes; do
+            test ! -f "$WORKSPACE/android-kernel/out/$f" || cp "$WORKSPACE/android-kernel/out/$f" release-evidence/abi-types/
+          done
+          git -C "$WORKSPACE/android-kernel" diff --binary > release-evidence/vendor-changes.patch
+          cp "$WORKSPACE/android-kernel/chopin-ci-port.json" release-evidence/chopin-ci-port.json
+          git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > release-evidence/SukiSU-changes.patch
+          for f in chopin_avc_audit_display.c chopin_selinux_query_snapshot.c; do
+            cp "$WORKSPACE/android-kernel/KernelSU/kernel/$f" release-evidence/
+          done
+          "$WORKSPACE/clang/bin/clang" --version > release-evidence/clang-version.txt
+          git -C "$WORKSPACE/clang" rev-parse HEAD > release-evidence/clang-commit.txt
+          {
+            echo "status=compiled_only; NOT FLASHABLE; NO HARDWARE OR CAMERA VALIDATION"
+            echo "vendor=$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)"
+            echo "sukisu=$(git -C "$WORKSPACE/android-kernel/KernelSU" rev-parse HEAD)"
+            echo "susfs=2.3.0; native upstream5419f4ee97cc8bf7ca67a9ff207f39653d7784f4; 4.14 reference9f3ab3fbd2b0cef34aeb441f2216d8e83e09776e; exact file manifest attached"
+            sha256sum "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image"
+          } > release-evidence/BUILD-STATUS.txt
+
+      - name: Upload compiled raw Image candidate (not a flash ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-early-t-ci41100-raw-candidate
+          path: |
+            kernel_workspace/android-kernel/out/arch/arm64/boot/Image
+            release-evidence/*
+            build-logs/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Save bounded compiler cache including useful failed-build objects
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: kernel_workspace/.ccache
+          key: chopin-clang13-0647a49-early-v1-${{ github.run_id }}
+
+      - name: Collect diagnostic configuration and patches even after a failure
+        if: always()
+        run: |
+          mkdir -p build-logs/diagnostics
+          for f in .config include/generated/utsrelease.h Module.symvers; do
+            if test -f "$WORKSPACE/android-kernel/out/$f"; then
+              cp "$WORKSPACE/android-kernel/out/$f" "build-logs/diagnostics/$(basename "$f")"
+            fi
+          done
+          if test -d "$WORKSPACE/android-kernel/.git"; then
+            git -C "$WORKSPACE/android-kernel" diff --binary > build-logs/diagnostics/vendor.patch
+          fi
+          if test -d "$WORKSPACE/android-kernel/KernelSU/.git"; then
+            git -C "$WORKSPACE/android-kernel/KernelSU" diff --binary > build-logs/diagnostics/SukiSU.patch
+          fi
+          if test -f build-logs/root-build-complete.txt && grep -qx "$GITHUB_SHA" build-logs/root-build-complete.txt; then
+            cp "$WORKSPACE/android-kernel/out/arch/arm64/boot/Image" build-logs/diagnostics/Image-compiled-not-flash-validated
+            cp "$WORKSPACE/android-kernel/out/System.map" build-logs/diagnostics/System.map
+          fi
+
+      - name: Upload complete diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-early-t-ci41100-diagnostics
+          path: |
+            susfs-hunk-diagnostics.txt
+            kernel_workspace/android-kernel/out/.config
+            kernel_workspace/android-kernel/out/.tmp_versions
+            kernel_workspace/android-kernel/out/include/generated/utsrelease.h
+            build-logs/**
+            release-evidence/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

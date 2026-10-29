@@ -1,0 +1,62 @@
+{
+  "main_commit": "e67b14e6bbbbd3e67f24df658a01d3e73a64159c",
+  "official_release_tag": "v4.3.0",
+  "official_release_commit": "e67b14e6bbbbd3e67f24df658a01d3e73a64159c",
+  "official_manager_ci": 41100,
+  "official_manager_version": "v4.3.0",
+  "official_manager_variant": "official_release_spoofed",
+  "official_manager_apk_sha256": "a8d2ee6b0e8302a440dc9d3cae515689675d3c90e9a302c1ef16a1612aeaab4a",
+  "normal_release_apk_sha256_reference_only": "a928eb57ad34b105233f92dcd55e54dd883482e417970276329a7d0f0979e212",
+  "selected_apk_package_and_certificate": "Observed values recorded for artifact identity only; never a fixed package-name restriction",
+  "builtin_commit": "6397fcb5d96e8f4953c71e02c73f8c6800541bff",
+  "base_ci": 41098,
+  "base_main_commit": "29f8b18d08dae3be66c0c3cd364536827df0a378",
+  "kernel_su_uapi_version": 6,
+  "uapi_version": 6,
+  "extension_api_version": 2,
+  "paired_kpm_bridge_abi": 1,
+  "event_aware_kpm_load_supported": false,
+  "event_aware_load_supported": false,
+  "ordinary_kpm_load_fallback_supported": true,
+  "upstream_files": {
+    "builtin6397/kernel/feature/selinux_hide.c": "6536bfe90b7e91b1363b403b8f94cf74c951f0c0a7c058555dda236b6dab92c8",
+    "kernel/extension/extension.c": "ea04da5fb2c62a09839d6c638c9e57dee0b0331171aef8f90cdc41bc0e01717d",
+    "kernel/extension/extension.h": "c9dc7ab6a61b59cdf21c1caa9742a7ddefa9f51d48063c3f6ba698bf83d264aa",
+    "kernel/feature/selinux_hide.c": "b7a6d74a64d49a11552a10595f284d2340d36d55defcf49f0ccdc9f5896c9ee2",
+    "kernel/Kbuild": "abb10308667c47bdf0dbd4ca85658e409ecaacacde02be53269484727762d0d2",
+    "kernel/supercall/dispatch.c": "58ef4108c4ef367e11bd85dce6a1d7307294b04fecd1548f44f7d4794d62d2e1",
+    "native414/services.c": "fc32c3d07426d22f8b0b33a74b42e3f090aa3fff92b0cb481e46f78fe0b9a8bf",
+    "uapi/extension.h": "1422db4f671fde6f81b44175caa7fee5561844682ef6480ae1e6eee32014dff0",
+    "userspace/ksud/src/extension.rs": "f182b8814424b5ceffb9067963a171420168ed4b7d73753747cb3bfcb7a536e8"
+  },
+  "expected_before_sha256": {
+    "KernelSU/kernel/Makefile": "1d434d97ee0c4e5b854ef8daa6d424f0aea3276b458b94441bb850d35a052828",
+    "KernelSU/kernel/feature/selinux_hide.c": "6536bfe90b7e91b1363b403b8f94cf74c951f0c0a7c058555dda236b6dab92c8",
+    "KernelSU/kernel/ksu_main.c": "3437161e4efb2599a088db2ba2ec2a76cf9b44222b654b0fdc181e80a8f10a23",
+    "KernelSU/kernel/chopin_selinux_query_snapshot.c": "bfb48bf36912e6173079229176d55819265bedf78f7a1ae70d96c2b0b06e46e5",
+    "KernelSU/kernel/extension/kpm/bridge.h": "a95c61ba01cf6f738044abd624794a0b4e784d4d89310cd8272c6c6ecc2bf90f",
+    "security/selinux/ss/services.c": "fc32c3d07426d22f8b0b33a74b42e3f090aa3fff92b0cb481e46f78fe0b9a8bf",
+    "KernelSU/kernel/extension/extension.c": "ef2d2bc6171199d250eb9bfe0e27e1caa06248d5f526b18cb3145551a209a8ad",
+    "KernelSU/kernel/extension/extension.h": "c9dc7ab6a61b59cdf21c1caa9742a7ddefa9f51d48063c3f6ba698bf83d264aa",
+    "KernelSU/kernel/supercall/dispatch.c": "d7713de5338e6e93800065db2208d0355f0bac24f99115387aea690d6bea0ee4",
+    "KernelSU/kernel/include/uapi/extension.h": "1422db4f671fde6f81b44175caa7fee5561844682ef6480ae1e6eee32014dff0"
+  },
+  "old_parser_function_sha256": {
+    "string_to_context_struct": "80e0af82e549ea5c9a60b78393d678a8444e75c073960b452b502b2d6e427715",
+    "security_context_to_sid_with_policy": "1950772d699b07e27a69032140edf35cd52797d1df78f6ef5afa9778aa4f5961"
+  },
+  "new_parser_function_sha256": {
+    "string_to_context_struct": "1438ffaa1715a8e414961348614f487e17d2b452ebbd1604ae2a96de66a2daa1",
+    "security_context_to_sid_with_policy": "4aba31f1004cd0bdd3532fb5403eba15671e4cce38e7834eb31e30d5b17f5e30"
+  },
+  "patched_builtin_selinux_hide_sha256": "9c4f0c150b44fcb8a261cb38764ee444deb86cafaf98a7fbf7a3203c2f75d88c",
+  "actual_414_selinux_backend": "state-based original-policy query snapshot; upstream dual-policy parser is not compiled at4.14",
+  "upstream_parser_fix_backported_as_guarded_source": true,
+  "active_414_parser_and_snapshot_intentionally_unchanged": true,
+  "whole_latest_builtin_replacement_claimed": false,
+  "official_manager_actual_package_name_observed": "pewhkk.neduyw.pgwdfo",
+  "official_manager_actual_certificate_sha256": "947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef",
+  "official_manager_package_and_certificate_observation_source": "Main agent actual official release-spoofed APK binary verification",
+  "random_package_name_is_kernel_trust_binding": false,
+  "kernel_trust_certificate_table_modified": false
+}

@@ -13,7 +13,7 @@ chopin_select_kernel_abi() {
   done;
   [ "$#" -gt 0 ] || abort "Mount vendor before selecting the kernel";
   if profile=$("$selector" "$@" 2>"$AKHOME/abi-detail.log"); then
-    case "$profile" in legacy|t) ;; *) abort "Invalid kernel ABI selection";; esac;
+    case "$profile" in legacy|early|t) ;; *) abort "Invalid kernel ABI selection";; esac;
   else
     cat "$AKHOME/abi-detail.log" >> "$CHOPIN_DETAIL_LOG";
     abort "Vendor kernel ABI is not supported by this package";

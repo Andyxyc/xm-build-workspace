@@ -1,9 +1,6 @@
 name: Chopin SUSFS2.3 experimental filesystem objects
 
 on:
-  push:
-    branches: [chopin-feature-kernel-20261025]
-    paths: ['chopin/tools/susfs230/**', '.github/workflows/chopin-susfs230-objects.yml']
   workflow_dispatch:
 
 permissions:

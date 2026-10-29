@@ -8,6 +8,10 @@ import argparse,hashlib,json,os,struct,subprocess,tempfile
 
 LEGACY={'cpu_hwcaps':0xbe9f1a32,'cpu_hwcap_keys':0x77af701b,'remap_pfn_range':0xf79cd398,'find_vma':0x30e3495c}
 T={'cpu_hwcaps':0xf2352f28,'cpu_hwcap_keys':0x37c71621,'remap_pfn_range':0x5cf0b028,'find_vma':0x40a015a7}
+# Observed in all ten modules of MIUI14.0.6.0.TKPCNXM, pinned dump commit
+# 9714227175010692d8374082ae98075abf18107c. These are CRC constants only;
+# fixtures remain generated ELF files, never copies of vendor module bytes.
+EARLY={'cpu_hwcaps':T['cpu_hwcaps'],'cpu_hwcap_keys':T['cpu_hwcap_keys'],'remap_pfn_range':LEGACY['remap_pfn_range'],'find_vma':LEGACY['find_vma']}
 def record(name,crc):
     name=name.encode() if isinstance(name,str) else name
     assert len(name)<56
@@ -139,8 +143,43 @@ with tempfile.TemporaryDirectory(prefix='chopin-abi-selector-') as tmp:
     long_peer=record('a'*55,1)
     test('maximum-valid-symbol-name', [add('long-peer',elf(records(LEGACY)+long_peer))],0,'legacy\n')
     test('trailing-invalid-input-does-not-print-success', [legacy,root/'absent.ko'],3)
+    # Keep the previous 60 real-C file cases above unchanged. New cases below
+    # cover the independently observed third combination and its boundaries.
+    early=add('early-miui14-0-6',elf(records(EARLY)))
+    test('early-miui14-0-6-real-four-anchors', [early],0,'early\n')
+    test('early-three-required', [add('early-three',elf(records({k:v for k,v in EARLY.items() if k!='find_vma'})))],0,'early\n')
+    test('early-shifted-sections', [add('early-shifted',elf(records(EARLY),data_offset=8195,extra_gap=271))],0,'early\n')
+    early_cpu=add('early-cpu-only',elf(records({k:EARLY[k] for k in ['cpu_hwcaps','cpu_hwcap_keys']})))
+    early_mm=add('early-mm-only',elf(records({k:EARLY[k] for k in ['remap_pfn_range','find_vma']})))
+    test('early-anchors-across-files', [early_cpu,early_mm],0,'early\n')
+    test('early-memory-first-across-files', [early_mm,early_cpu],0,'early\n')
+    test('early-peer-does-not-select-family', [early,peer],0,'early\n')
+    test('early-repeated-consistent-anchor', [early,early_cpu],0,'early\n')
+    test('early-raw-decoy-records-ignored', [add('early-decoy',elf(records(EARLY),noise=records(T)))],0,'early\n')
+    test('early-record-entsize64', [add('early-record-size',elf(records(EARLY),versions_entsize=64))],0,'early\n')
+    unsupported={k:(T[k] if k in ['remap_pfn_range','find_vma'] else LEGACY[k]) for k in LEGACY}
+    test('unobserved-old-cpu-new-mm-rejected', [add('unsupported-combination',elf(records(unsupported)))],7)
+    test('unobserved-combination-without-optional-find-rejected', [add('unsupported-three',elf(records({k:v for k,v in unsupported.items() if k!='find_vma'})))],7)
+    conflict=dict(EARLY);conflict['cpu_hwcaps']=LEGACY['cpu_hwcaps']
+    test('early-cpu-pair-conflict', [add('early-bad-cpu-pair',elf(records(conflict)))],7)
+    conflict=dict(EARLY);conflict['find_vma']=T['find_vma']
+    test('early-mm-pair-conflict', [add('early-bad-mm-pair',elf(records(conflict)))],7)
+    conflict=dict(EARLY);conflict['remap_pfn_range']=T['remap_pfn_range']
+    test('t-remap-old-find-conflict', [add('early-bad-remap',elf(records(conflict)))],7)
+    test('same-cpu-symbol-conflict-across-files', [early,add('legacy-one-cpu',elf(records({'cpu_hwcaps':LEGACY['cpu_hwcaps']})))],7)
+    test('same-mm-symbol-conflict-across-files', [early,add('t-one-mm',elf(records({'remap_pfn_range':T['remap_pfn_range']})))],7)
+    test('same-cpu-symbol-conflict-within-file', [add('cpu-duplicate-conflict',elf(records(EARLY)+record('cpu_hwcaps',LEGACY['cpu_hwcaps'])))],7)
+    test('same-mm-symbol-conflict-within-file', [add('mm-duplicate-conflict',elf(records(EARLY)+record('remap_pfn_range',T['remap_pfn_range'])))],7)
+    test('early-t-same-cpu-different-mm-rejected', [early,modern],7)
+    test('early-legacy-same-mm-different-cpu-rejected', [early,legacy],7)
+    test('early-missing-remap', [early_cpu],8)
+    test('early-missing-cpu-pair', [early_mm],8)
+    test('early-followed-by-malformed-still-rejected', [early,add('early-bad-elf',b'NOPE'+bytes(128))],4)
+    test('early-followed-by-unknown-still-rejected', [early,add('early-unknown-mm',elf(records({'remap_pfn_range':0x12345678})))],6)
+    test('early-followed-by-missing-file-no-success-output', [early,root/'absent.ko'],3)
     assert all(not path.is_block_device() for path in root.iterdir())
-report={'status':'PASS_REAL_COMPILED_SELECTOR_SYNTHETIC_ELF_FILE_CASES_ONLY','cases':cases,'case_count':len(cases),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(Path(__file__).with_name('chopin_abi_select.c').read_bytes()).hexdigest(),'runner':a.runner,'real_vendor_binaries_used':False,'phone_or_block_device_read':False,'hardware_compatibility_verified':False}
+assert len(cases)==85,'Keep the original 60 cases plus the 25 third-family cases'
+report={'status':'PASS_REAL_COMPILED_SELECTOR_SYNTHETIC_ELF_FILE_CASES_ONLY','cases':cases,'case_count':len(cases),'legacy_case_count':60,'third_family_case_count':25,'profiles':['legacy','early','t'],'supported_profiles':['legacy','early','t'],'early_anchor_source_commit':'9714227175010692d8374082ae98075abf18107c','generator_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(Path(__file__).with_name('chopin_abi_select.c').read_bytes()).hexdigest(),'runner':a.runner,'real_vendor_binaries_used':False,'phone_or_block_device_read':False,'hardware_compatibility_verified':False}
 a.report.parent.mkdir(parents=True,exist_ok=True)
 a.report.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print(json.dumps({'status':report['status'],'case_count':len(cases),'report':str(a.report),'runner':a.runner},ensure_ascii=False))

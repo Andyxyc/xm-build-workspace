@@ -1,0 +1,92 @@
+name: Chopin three ABI installer file flow tests
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths:
+      - '.github/workflows/chopin-dual-installer.yml'
+      - 'chopin/tools/installer/dual/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  dual-file-flow:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare bounded file-test tools
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          sudo timeout 180 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update -qq
+          sudo timeout 240 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross busybox-static qemu-user qemu-user-static python3
+          git init ak3-fixture
+          git -C ak3-fixture remote add origin https://github.com/osm0sis/AnyKernel3.git
+          git -C ak3-fixture fetch --depth=1 origin 020dfeccf9d7e962a48400fc94d3e451df92eead
+          git -C ak3-fixture checkout --detach FETCH_HEAD
+          mkdir -p dual-fixtures selector-evidence
+          printf '%s\n' '${{ github.sha }}' > selector-evidence/source-commit.txt
+      - name: Compile real host selector and run all three ABI file cases
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -Wconversion -O1 -g \
+            -fsanitize=undefined -fno-sanitize-recover=all \
+            chopin/tools/abi_selector/chopin_abi_select.c \
+            -o selector-evidence/chopin-abi-select-host
+          python3 chopin/tools/abi_selector/host-test.py \
+            --binary selector-evidence/chopin-abi-select-host \
+            --report selector-evidence/host-file-tests.json
+      - name: Compile real static AArch64 selector and run the same file cases
+        run: |
+          aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror -Wconversion \
+            -static -Os -Wl,--build-id=none \
+            chopin/tools/abi_selector/chopin_abi_select.c \
+            -o selector-evidence/chopin-abi-select
+          python3 chopin/tools/abi_selector/host-test.py \
+            --runner qemu-aarch64 \
+            --binary selector-evidence/chopin-abi-select \
+            --report selector-evidence/aarch64-file-tests.json
+          file selector-evidence/chopin-abi-select > selector-evidence/binary-format.txt
+          sha256sum chopin/tools/abi_selector/chopin_abi_select.c \
+            chopin/tools/abi_selector/host-test.py \
+            selector-evidence/chopin-abi-select-host \
+            selector-evidence/chopin-abi-select > selector-evidence/SHA256SUMS.txt
+      - name: Run the existing minimal I/O cases unchanged
+        run: sudo python3 chopin/tools/installer/minimal/test_io.py
+      - name: Run the existing module entry, output and ARM tool cases unchanged
+        run: sudo python3 chopin/tools/installer/minimal/test_entry_and_tools.py ak3-fixture/tools/magiskboot
+      - name: Run real AArch64 selector and Shell selection/write flow
+        run: |
+          sudo python3 chopin/tools/installer/dual/test_flow.py \
+            --base-repo . \
+            --selector-evidence selector-evidence \
+            --qemu /usr/bin/qemu-aarch64-static \
+            --report dual-fixtures/dual-flow-fixtures.json
+      - name: Bind common regression reports and source bytes
+        if: always()
+        run: |
+          if [ -f minimal-installer-fixtures.json ]; then cp minimal-installer-fixtures.json dual-fixtures/; fi
+          if [ -f minimal-entry-tools-fixtures.json ]; then cp minimal-entry-tools-fixtures.json dual-fixtures/; fi
+          printf '%s\n' '${{ github.sha }}' > dual-fixtures/source-commit.txt
+          sha256sum chopin/tools/installer/dual/*.py chopin/tools/installer/dual/*.sh \
+            chopin/tools/installer/minimal/anykernel.sh \
+            chopin/tools/installer/minimal/boot-io.sh \
+            chopin/tools/installer/minimal/customize.sh \
+            chopin/tools/abi_selector/chopin_abi_select.c \
+            chopin/tools/abi_selector/host-test.py \
+            selector-evidence/chopin-abi-select > dual-fixtures/source-and-selector.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-three-abi-selector-file-evidence
+          path: selector-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-dual-abi-installer-file-fixtures
+          path: dual-fixtures/
+          if-no-files-found: error
+          retention-days: 14

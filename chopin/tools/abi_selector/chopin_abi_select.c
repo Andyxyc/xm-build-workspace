@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Identify one of two evidenced chopin vendor ABI families from real
+ * Identify one of three evidenced chopin vendor ABI combinations from real
  * AArch64 ELF module __versions records. No device operations or privilege
  * changes. Unknown signatures are errors, never a guessed compatibility.
  */
@@ -48,7 +48,7 @@ static const struct anchor anchors[] = {
     { "find_vma", UINT32_C(0x30e3495c), UINT32_C(0x40a015a7) }
 };
 struct evidence {
-    unsigned family;
+    unsigned family[4];
     unsigned seen;
 };
 
@@ -73,6 +73,21 @@ static int fail(int code, const char *message)
 {
     fprintf(stderr, "ABI selection: %s\n", message);
     return code;
+}
+static int observe_anchor(struct evidence *evidence, size_t index, unsigned family)
+{
+    unsigned mask = 1u << index;
+    if ((evidence->seen & mask) && evidence->family[index] != family)
+        return fail(RESULT_MIXED, "conflicting CRC for the same ABI anchor");
+    evidence->family[index] = family;
+    evidence->seen |= mask;
+    if ((evidence->seen & 3u) == 3u &&
+        evidence->family[0] != evidence->family[1])
+        return fail(RESULT_MIXED, "conflicting CPU ABI anchors");
+    if ((evidence->seen & 12u) == 12u &&
+        evidence->family[2] != evidence->family[3])
+        return fail(RESULT_MIXED, "conflicting memory ABI anchors");
+    return RESULT_OK;
 }
 static int symbol_name(const unsigned char *p, size_t bytes)
 {
@@ -169,6 +184,7 @@ static int parse_module(const unsigned char *data, size_t length,
             return fail(RESULT_VERSIONS, "invalid symbol or CRC in __versions record");
         for (n = 0; n < sizeof(anchors) / sizeof(anchors[0]); ++n) {
             unsigned family;
+            int result;
             if (strcmp((const char *)name, anchors[n].name))
                 continue;
             if ((uint32_t)crc == anchors[n].legacy_crc)
@@ -180,10 +196,9 @@ static int parse_module(const unsigned char *data, size_t length,
                         anchors[n].name, (uint32_t)crc);
                 return RESULT_UNKNOWN;
             }
-            evidence->family |= family;
-            evidence->seen |= 1u << n;
-            if (evidence->family == (FAMILY_LEGACY | FAMILY_T))
-                return fail(RESULT_MIXED, "conflicting vendor ABI families");
+            result = observe_anchor(evidence, n, family);
+            if (result)
+                return result;
         }
     }
     return RESULT_OK;
@@ -233,12 +248,12 @@ static int read_module(const char *path, struct evidence *evidence)
 
 int main(int argc, char **argv)
 {
-    struct evidence evidence = { 0, 0 };
+    struct evidence evidence = { { 0, 0, 0, 0 }, 0 };
     int i;
     if (argc == 2 && !strcmp(argv[1], "--help")) {
         puts("Usage: chopin-abi-select MODULE.ko [MODULE.ko ...]");
-        puts("Success: stdout is legacy or t. Errors are on stderr.");
-        puts("Exit codes: 2 usage; 3 file; 4 ELF; 5 versions; 6 unknown; 7 mixed; 8 incomplete.");
+        puts("Success: stdout is legacy, early or t. Errors are on stderr.");
+        puts("Exit codes: 2 usage; 3 file; 4 ELF; 5 versions; 6 unknown; 7 conflict/unsupported combination; 8 incomplete.");
         return RESULT_OK;
     }
     if (argc < 2 || argc > INPUT_LIMIT + 1)
@@ -250,11 +265,13 @@ int main(int argc, char **argv)
     }
     if ((evidence.seen & REQUIRED_ANCHORS) != REQUIRED_ANCHORS)
         return fail(RESULT_INCOMPLETE, "cpu_hwcaps, cpu_hwcap_keys and remap_pfn_range are required");
-    if (evidence.family == FAMILY_LEGACY)
+    if (evidence.family[0] == FAMILY_LEGACY && evidence.family[2] == FAMILY_LEGACY)
         puts("legacy");
-    else if (evidence.family == FAMILY_T)
+    else if (evidence.family[0] == FAMILY_T && evidence.family[2] == FAMILY_LEGACY)
+        puts("early");
+    else if (evidence.family[0] == FAMILY_T && evidence.family[2] == FAMILY_T)
         puts("t");
     else
-        return fail(RESULT_INCOMPLETE, "no supported vendor ABI evidence");
+        return fail(RESULT_MIXED, "unsupported CPU and memory ABI combination");
     return RESULT_OK;
 }
