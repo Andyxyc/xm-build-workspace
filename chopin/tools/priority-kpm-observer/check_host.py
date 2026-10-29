@@ -26,8 +26,9 @@ def main():
     flags = ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-UNDEBUG",
              "-fsanitize=undefined,address", "-fno-omit-frame-pointer",
              "-I"+str(here/"tests/include"),
-             "-I"+str(a.kp_dir.resolve()/"kernel/include"),
-             "-I"+str(a.kp_dir.resolve()/"kernel/patch/include")]
+             # Keep KP's freestanding stddef/string headers behind host libc.
+             "-idirafter", str(a.kp_dir.resolve()/"kernel/include"),
+             "-idirafter", str(a.kp_dir.resolve()/"kernel/patch/include")]
     cmd = [a.cc, *flags, str(here/"tests/fixture.c"), "-o", str(binary)]
     result = {"status": "FAIL", "scope": "host memory only", "compile_command": cmd,
               "source_sha256": {n: hashlib.sha256((here/n).read_bytes()).hexdigest()
