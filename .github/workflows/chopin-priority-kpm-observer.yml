@@ -1,0 +1,48 @@
+name: Chopin exact-r18 read-only priority observer
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths:
+      - '.github/workflows/chopin-priority-kpm-observer.yml'
+      - 'chopin/tools/priority-kpm-observer/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  observer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned public headers and exact Arm GNU archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init kp
+          git -C kp remote add origin https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch.git
+          git -C kp fetch --depth=1 origin a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0
+          git -C kp checkout --detach FETCH_HEAD
+          test "$(git -C kp rev-parse HEAD)" = a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0
+          curl --fail --location --retry 2 --max-time 180 -o toolchain.tar.xz https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu/12.2.rel1/binrel/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf.tar.xz
+          echo '62d66e0ad7bd7f2a183d236ee301a5c73c737c886c7944aa4f39415aab528daf  toolchain.tar.xz' | sha256sum -c -
+          tar -Jxf toolchain.tar.xz
+          mkdir evidence
+          sha256sum toolchain.tar.xz > evidence/toolchain-download.sha256
+      - name: Execute real C memory fixtures, then compile ARM64 KPM
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 chopin/tools/priority-kpm-observer/check_host.py --kp-dir kp --output evidence
+          python3 chopin/tools/priority-kpm-observer/check_controller.py --output evidence/controller-cases.json
+          python3 chopin/tools/priority-kpm-observer/build.py --kp-dir kp --prefix "$GITHUB_WORKSPACE/arm-gnu-toolchain-12.2.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-" --output evidence
+          cp -a chopin/tools/priority-kpm-observer evidence/source
+          find evidence -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-priority-r18-readonly-review-only
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 14

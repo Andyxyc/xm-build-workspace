@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "profile": "r18-legacy-ci41100-readonly",
+  "source_commit": "16c713d934ab7cfed5c4798497c48bab7e9db025",
+  "image_sha256": "6702e417fc0f731923be2f35e55ba96ffe0644e1a67275d7e5ebd09e91a865f1",
+  "image_size": 35646848,
+  "system_map_sha256": "ce36ceb6ccddd4f63f4ea371a4ec850c0f297e7366b073cae8c4e4449ecb8bcd",
+  "paired_kpimg_sha256": "554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425",
+  "pinned_kp_headers_commit": "a3965c6e137e46b2c94a69eeb5a7e4696a3abbb0",
+  "identity_scope": "exact file binding plus selective runtime anchors; not runtime full-image hashing",
+  "protocol_base": "0x50520100",
+  "symbols": [
+    {
+      "name": "_text",
+      "offset": 0,
+      "type": "T"
+    },
+    {
+      "name": "__bss_start",
+      "offset": 35350528,
+      "type": "D"
+    },
+    {
+      "name": "__bss_stop",
+      "offset": 68619808,
+      "type": "B"
+    },
+    {
+      "name": "_end",
+      "offset": 68648960,
+      "type": "B"
+    },
+    {
+      "name": "priority_uid_filter_bitmap",
+      "offset": 37817456,
+      "type": "b"
+    },
+    {
+      "name": "susfs_priority_app_strings",
+      "offset": 37817464,
+      "type": "b"
+    },
+    {
+      "name": "susfs_priority_app_strings_running",
+      "offset": 37817472,
+      "type": "b"
+    },
+    {
+      "name": "susfs_set_priority_uid_filter.is_uid_filter_set_before",
+      "offset": 37817448,
+      "type": "b"
+    },
+    {
+      "name": "susfs_set_priority_uid_filter",
+      "offset": 2581064,
+      "type": "T"
+    },
+    {
+      "name": "susfs_priority_app_strings_worker",
+      "offset": 2582532,
+      "type": "t"
+    },
+    {
+      "name": "susfs_is_priority_uid_filtered",
+      "offset": 2582864,
+      "type": "T"
+    },
+    {
+      "name": "ksu_track_throne_tw_func",
+      "offset": 13987724,
+      "type": "t"
+    },
+    {
+      "name": "sukisu_kpm_bridge",
+      "offset": 13936868,
+      "type": "T"
+    },
+    {
+      "name": "SyS_getpriority",
+      "offset": 322124,
+      "type": "T"
+    },
+    {
+      "name": "ksu_kpm_bridge_trampoline",
+      "offset": 13938580,
+      "type": "T"
+    }
+  ],
+  "runtime_anchor_review": {
+    "all_outside_init_memory": true,
+    "arm64_alternative_records_checked": 22810,
+    "alternative_overlap": [],
+    "known_runtime_hook_excluded_from_byte_fingerprints": [
+      "ksu_kpm_bridge_trampoline"
+    ]
+  },
+  "slots": [
+    {
+      "name": "priority_uid_filter_bitmap",
+      "width": 8
+    },
+    {
+      "name": "susfs_priority_app_strings",
+      "width": 8
+    },
+    {
+      "name": "susfs_priority_app_strings_running",
+      "width": 4
+    },
+    {
+      "name": "susfs_set_priority_uid_filter.is_uid_filter_set_before",
+      "width": 1
+    }
+  ],
+  "anchors": [
+    {
+      "name": "susfs_set_priority_uid_filter",
+      "offset": 2581064,
+      "bytes_hex": "ff4301d1fd7b01a9f85f02a9f65703a9f44f04a9fd430091a8e800f0086545f9"
+    },
+    {
+      "name": "susfs_priority_app_strings_worker",
+      "offset": 2582532,
+      "bytes_hex": "fd7bbca9f70b00f9f65702a9f44f03a9fd03009143ffff97e00500b4f30300aa"
+    },
+    {
+      "name": "susfs_is_priority_uid_filtered",
+      "offset": 2582864,
+      "bytes_hex": "a9588b52087c0553894fa1720ad49052087da99b2a00a07208fd67d308810a1b"
+    },
+    {
+      "name": "ksu_track_throne_tw_func",
+      "offset": 13987724,
+      "bytes_hex": "fd7bbfa9fd0300913c02d297084138d50811413988001037e0031f2af2c9ff97"
+    },
+    {
+      "name": "sukisu_kpm_bridge",
+      "offset": 13936868,
+      "bytes_hex": "fd7bbba9fc6701a9f85f02a9f65703a9f44f04a9fd030091ff0309d1089200f0"
+    },
+    {
+      "name": "SyS_getpriority",
+      "offset": 322124,
+      "bytes_hex": "fd7bbaa9fb0b00f9fa6702a9f85f03a9f65704a9f44f05a9fd030091f30300aa"
+    }
+  ],
+  "generated_header_sha256": "56345c286ff86bd5008ab7d531ae0cc6ee0883c62dd2cbf49f5e88c1ba4efb11"
+}

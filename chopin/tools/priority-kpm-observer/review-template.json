@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "operator_reviewed_exact_boot_and_module_load": false,
+  "image_sha256": "6702e417fc0f731923be2f35e55ba96ffe0644e1a67275d7e5ebd09e91a865f1",
+  "paired_kpimg_sha256": "554aa43ff1594ea516eb9d74581565aea07e29665ffaf702a3c87d556a7a2425",
+  "source_commit": "16c713d934ab7cfed5c4798497c48bab7e9db025",
+  "module_name": "chopin-priority-ro-r18",
+  "loaded_module_sha256": null,
+  "boot_a_sha256": null,
+  "boot_a_size": 134217728,
+  "boot_id": null,
+  "device": "chopin",
+  "slot_suffix": "_a",
+  "sdk": "31"
+}
