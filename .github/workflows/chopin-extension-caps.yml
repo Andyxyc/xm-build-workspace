@@ -1,0 +1,97 @@
+name: Chopin actual CI41098 extension host cases
+
+on:
+  push:
+    branches:
+      - chopin-feature-kernel-20261025
+    paths:
+      - .github/workflows/chopin-extension-caps.yml
+      - chopin/tools/check_extension_caps.py
+      - chopin/tools/prepare_extension_fixture.py
+      - chopin/tools/susfs230/update_ci41098.py
+      - chopin/tools/susfs230/ci41098-source.json
+      - chopin/tools/susfs230/upstream-ci41098/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  cancel-this-commit-obsolete-builds:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, 'run actual extension host cases')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Cancel only the two redundant legacy runs from the previous source commit
+        run: |
+          python3 - <<'PYPRUNE'
+          import json,os,urllib.request
+          repo=os.environ['GITHUB_REPOSITORY']
+          expected='9dca8868c754f5426660477064bade5a4dffd5ff'
+          for run_id in [40821728408,40821728442]:
+              url=f'https://api.github.com/repos/{repo}/actions/runs/{run_id}'
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}
+              with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=20) as response:
+                  run=json.load(response)
+              assert run['head_sha']==expected and run['event']=='push'
+              assert run['path'] in ['.github/workflows/chopin-feature-kernel.yml','.github/workflows/chopin-susfs230-objects.yml']
+              if run['status']=='completed':
+                  print(f'{run_id}: already completed')
+                  continue
+              req=urllib.request.Request(url+'/cancel',headers=headers,data=b'',method='POST')
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  assert response.status==202
+              print(f'{run_id}: cancellation requested')
+          PYPRUNE
+  actual-extension-host-cases:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download actual successful b79 source patch and metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: chopin-sukisu-susfs-kpm-raw-build-candidate
+          run-id: 40396562328
+          github-token: ${{ github.token }}
+          path: r14-reference
+
+      - name: Reconstruct the exact four source files on fixed builtin
+        run: |
+          python3 chopin/tools/prepare_extension_fixture.py \
+            --reference r14-reference --kernel-root extension-fixture \
+            --pin chopin/tools/susfs230/ci41098-source.json \
+            --report release-evidence/extension-source-fixture.json
+          python3 chopin/tools/susfs230/update_ci41098.py extension-fixture
+
+      - name: Compile and execute actual registry UAPI and dispatcher host cases
+        run: |
+          python3 chopin/tools/check_extension_caps.py \
+            --kernel-root extension-fixture \
+            --report release-evidence/extension-caps-tests.json
+
+      - name: Retain exact generated C source on failure
+        if: failure()
+        run: |
+          test ! -f extension-fixture/KernelSU/kernel/extension/extension.c || \
+            python3 chopin/tools/check_extension_caps.py \
+              --kernel-root extension-fixture --prepare-only extension-debug \
+              --report release-evidence/extension-caps-prepared-only.json
+
+      - name: Upload source-bound host results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-ci41098-extension-host-cases
+          path: |
+            release-evidence/*.json
+            extension-debug/*.c
+          if-no-files-found: warn
+          retention-days: 14
