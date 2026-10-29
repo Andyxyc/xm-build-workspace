@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.chopin.acceptanceprobe4" android:versionCode="4" android:versionName="4-priority-observer">
+  <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="32" />
+  <queries>
+    <package android:name="cn.chopin.acceptanceprobe2" />
+    <package android:name="cn.chopin.acceptanceprobe3" />
+  </queries>
+  <application android:label="Chopin 优先级观察" android:debuggable="true" android:allowBackup="false" android:extractNativeLibs="true" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <activity android:name="cn.chopin.priorityprobe.PriorityActivity" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

@@ -1,0 +1,22 @@
+name: Chopin ordinary app priority observer
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/priority-observer/**', '.github/workflows/chopin-priority-observer.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with the existing Android SDK and NDK
+        run: python3 -B chopin/tools/priority-observer/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chopin-priority-observer-app4
+          path: priority-observer-out/*
+          if-no-files-found: error
+          retention-days: 14
