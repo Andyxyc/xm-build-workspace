@@ -106,13 +106,19 @@ with tempfile.TemporaryDirectory(prefix="chopin-priority-build-") as temporary:
     apk = out / "Chopin-Priority-Observer-App4.apk"
     run([tools / "apksigner", "sign", "--ks", key, "--ks-key-alias", "probe", "--ks-pass", "pass:android",
          "--v2-signing-enabled", "true", "--v3-signing-enabled", "true", "--out", apk, aligned])
-    signature = run([tools / "apksigner", "verify", "--verbose", "--print-certs", apk], capture=True).stdout
+    signature = run([tools / "apksigner", "verify", "--min-sdk-version", "29", "--max-sdk-version", "35",
+                     "--verbose", "--print-certs", apk], capture=True).stdout
+    # ApkVerifier skips v2 on API >=28 once it finds v3. Check v2 separately.
+    signature_v2 = run([tools / "apksigner", "verify", "--min-sdk-version", "24", "--max-sdk-version", "27",
+                        "--verbose", "--print-certs", apk], capture=True).stdout
     permissions = run([tools / "aapt2", "dump", "permissions", apk], capture=True).stdout
     badging = run([tools / "aapt2", "dump", "badging", apk], capture=True).stdout
     (out / "signature.txt").write_text(signature)
+    (out / "signature-v2-api24-27.txt").write_text(signature_v2)
     (out / "permissions.txt").write_text(permissions)
     (out / "badging.txt").write_text(badging)
-    assert "Verified using v2 scheme (APK Signature Scheme v2): true" in signature, signature
+    assert "Verified using v3 scheme (APK Signature Scheme v3): true" in signature, signature
+    assert "Verified using v2 scheme (APK Signature Scheme v2): true" in signature_v2, signature_v2
     assert "uses-permission:" not in permissions and "package: name='cn.chopin.acceptanceprobe4'" in badging
 record = dict(status="PASS_CLOUD_BUILD_SIGNATURE_PERMISSION_AND_OFFLINE_FIXTURES_ONLY", source_commit=commit,
     source_sha256={path.name:sha(path) for path in sorted(root.iterdir()) if path.is_file()},
@@ -124,5 +130,7 @@ record = dict(status="PASS_CLOUD_BUILD_SIGNATURE_PERMISSION_AND_OFFLINE_FIXTURES
     network_permission=False, apk_runtime_executed=False, real_android_pm_verified=False,
     real_arm64_svc_executed=False, priority_filter_effect_verified=False,
     private_signing_key_uploaded=False, signature_note="Ephemeral test key; a later build may need uninstalling only App4")
+record["signature_checks"] = {"v3_platform_range": [29, 35], "v2_platform_range": [24, 27],
+    "app_manifest_min_sdk": 29, "older_platform_installability_claimed": False}
 (out / "build-record.json").write_text(json.dumps(record, indent=2)+"\n")
 print(json.dumps(record, indent=2))
