@@ -104,15 +104,16 @@ with tempfile.TemporaryDirectory(prefix="chopin-priority-build-") as temporary:
          "-alias", "probe", "-keyalg", "RSA", "-keysize", "2048", "-validity", "3650",
          "-dname", "CN=Chopin Priority Observer Test Fixture"], capture=True)
     apk = out / "Chopin-Priority-Observer-App4.apk"
-    run([tools / "apksigner", "sign", "--ks", key, "--ks-key-alias", "probe", "--ks-pass", "pass:android", "--out", apk, aligned])
+    run([tools / "apksigner", "sign", "--ks", key, "--ks-key-alias", "probe", "--ks-pass", "pass:android",
+         "--v2-signing-enabled", "true", "--v3-signing-enabled", "true", "--out", apk, aligned])
     signature = run([tools / "apksigner", "verify", "--verbose", "--print-certs", apk], capture=True).stdout
     permissions = run([tools / "aapt2", "dump", "permissions", apk], capture=True).stdout
     badging = run([tools / "aapt2", "dump", "badging", apk], capture=True).stdout
-    assert "Verified using v2 scheme (APK Signature Scheme v2): true" in signature
-    assert "uses-permission:" not in permissions and "package: name='cn.chopin.acceptanceprobe4'" in badging
     (out / "signature.txt").write_text(signature)
     (out / "permissions.txt").write_text(permissions)
     (out / "badging.txt").write_text(badging)
+    assert "Verified using v2 scheme (APK Signature Scheme v2): true" in signature, signature
+    assert "uses-permission:" not in permissions and "package: name='cn.chopin.acceptanceprobe4'" in badging
 record = dict(status="PASS_CLOUD_BUILD_SIGNATURE_PERMISSION_AND_OFFLINE_FIXTURES_ONLY", source_commit=commit,
     source_sha256={path.name:sha(path) for path in sorted(root.iterdir()) if path.is_file()},
     apk_sha256=sha(apk), native_sha256=sha(native), native_bytes=native.stat().st_size,
