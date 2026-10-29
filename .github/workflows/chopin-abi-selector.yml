@@ -1,0 +1,51 @@
+name: Chopin real vendor ABI selector file tests
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths:
+      - '.github/workflows/chopin-abi-selector.yml'
+      - 'chopin/tools/abi_selector/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  selector-file-tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bounded host and AArch64 test tools
+        run: |
+          sudo timeout 180 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update -qq
+          sudo timeout 240 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user python3
+      - name: Compile real host selector with undefined-behavior checks
+        run: |
+          mkdir -p selector-evidence
+          gcc -std=c11 -Wall -Wextra -Werror -Wconversion -O1 -g \
+            -fsanitize=undefined -fno-sanitize-recover=all \
+            chopin/tools/abi_selector/chopin_abi_select.c \
+            -o selector-evidence/chopin-abi-select-host
+          python3 chopin/tools/abi_selector/host-test.py \
+            --binary selector-evidence/chopin-abi-select-host \
+            --report selector-evidence/host-file-tests.json
+      - name: Compile static AArch64 selector and run the same file cases
+        run: |
+          aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror -Wconversion \
+            -static -Os -Wl,--build-id=none \
+            chopin/tools/abi_selector/chopin_abi_select.c \
+            -o selector-evidence/chopin-abi-select
+          python3 chopin/tools/abi_selector/host-test.py \
+            --runner qemu-aarch64 \
+            --binary selector-evidence/chopin-abi-select \
+            --report selector-evidence/aarch64-file-tests.json
+          sha256sum chopin/tools/abi_selector/chopin_abi_select.c \
+            chopin/tools/abi_selector/host-test.py \
+            selector-evidence/chopin-abi-select > selector-evidence/SHA256SUMS.txt
+          file selector-evidence/chopin-abi-select > selector-evidence/binary-format.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-abi-selector-file-evidence
+          path: selector-evidence/
+          if-no-files-found: error
+          retention-days: 14
