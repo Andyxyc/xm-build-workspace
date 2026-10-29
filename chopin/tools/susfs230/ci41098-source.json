@@ -1,0 +1,28 @@
+{
+  "main_commit": "29f8b18d08dae3be66c0c3cd364536827df0a378",
+  "official_manager_ci": 41098,
+  "builtin_commit": "6397fcb5d96e8f4953c71e02c73f8c6800541bff",
+  "base_ci": 41095,
+  "base_main_commit": "96ceb4a42c50e27199a094264f62cfbafee77fa0",
+  "kernel_su_uapi_version": 6,
+  "extension_api_version": 2,
+  "paired_kpm_bridge_abi": 1,
+  "event_aware_kpm_load_supported": false,
+  "official_manager_apk_sha256": "9e08fd1ac0069756ba4ec80a97491251b6c2a67ce84cddaa7fe6403c9e56f411",
+  "official_manager_run": 40669847561,
+  "upstream_files": {
+    "kernel/extension/extension.c": "ea04da5fb2c62a09839d6c638c9e57dee0b0331171aef8f90cdc41bc0e01717d",
+    "kernel/extension/extension.h": "c9dc7ab6a61b59cdf21c1caa9742a7ddefa9f51d48063c3f6ba698bf83d264aa",
+    "kernel/supercall/dispatch.c": "58ef4108c4ef367e11bd85dce6a1d7307294b04fecd1548f44f7d4794d62d2e1",
+    "uapi/extension.h": "1422db4f671fde6f81b44175caa7fee5561844682ef6480ae1e6eee32014dff0"
+  },
+  "expected_before_sha256": {
+    "kernel/extension/extension.c": "ccc34750c6c760433c7c26ff2ee4f1e7e31666fc76251c03c951d9cf89657237",
+    "kernel/extension/extension.h": "fa2f9332c816c1a4e964dd762145673b4678766ba04c45da39dcf3453968d882",
+    "kernel/supercall/dispatch.c": "77a078d80a17d9f787333630206862419e9a746c7fb9ece151a2e757c09edf24",
+    "kernel/include/uapi/extension.h": "296b80db6177fa77058a6ea3d03e9d558fcde5e70a4ab643cd1ca409346e7589"
+  },
+  "uapi_version": 6,
+  "event_aware_load_supported": false,
+  "ordinary_kpm_load_fallback_supported": true
+}

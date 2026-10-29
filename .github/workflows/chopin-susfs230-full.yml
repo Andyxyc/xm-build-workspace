@@ -1,4 +1,4 @@
-name: Chopin native SUSFS2.3 full kernel CI41095 candidate
+name: Chopin MIUI14 A13 native SUSFS2.3 CI41098 candidate
 
 on:
   push:
@@ -114,6 +114,7 @@ jobs:
           sukisu_414_compat_apply
           python3 ../chopin/tools/susfs230/native_ksu.py "$WORKSPACE/android-kernel"
           python3 ../chopin/tools/susfs230/update_ci41095.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_ci41098.py "$WORKSPACE/android-kernel"
           echo "EXTRA_DEFCONFIG=${EXTRA_DEFCONFIG//CONFIG_KSU_SUSFS_SUS_MAP=n/CONFIG_KSU_SUSFS_SUS_MAP=y}" >> "$GITHUB_ENV"
           python3 ../chopin/tools/check_kpm_version_copy.py
           python3 ../chopin/tools/check_adb_root_path.py "$WORKSPACE/android-kernel/KernelSU/kernel/feature/adb_root.c"
