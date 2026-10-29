@@ -108,6 +108,8 @@ jobs:
           python3 ../chopin/tools/susfs230/update_ci41095.py "$WORKSPACE/android-kernel"
           python3 ../chopin/tools/susfs230/update_ci41098.py "$WORKSPACE/android-kernel"
           python3 ../chopin/tools/susfs230/update_ci41100.py "$WORKSPACE/android-kernel"
+          python3 ../chopin/tools/susfs230/update_susfs_eb95.py "$WORKSPACE/android-kernel"
+          cp "$WORKSPACE/android-kernel/susfs-priority-filter-eb95.json" "$GITHUB_WORKSPACE/release-evidence/"
           python3 ../chopin/tools/check_release41100_parsers.py --kernel-root "$WORKSPACE/android-kernel" --report "$GITHUB_WORKSPACE/release-evidence/release41100-parser-host-cases.json"
           echo "EXTRA_DEFCONFIG=${EXTRA_DEFCONFIG//CONFIG_KSU_SUSFS_SUS_MAP=n/CONFIG_KSU_SUSFS_SUS_MAP=y}" >> "$GITHUB_ENV"
           python3 ../chopin/tools/check_kpm_version_copy.py

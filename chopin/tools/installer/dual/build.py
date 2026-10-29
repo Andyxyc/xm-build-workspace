@@ -33,7 +33,9 @@ def manager_metadata(path,proof):
     return {'version_code':version,'manager_commit':commit,'release_tag':current.get('release_tag'),
             'version_name':current.get('version_name'),'uapi_version':record['uapi_version'],
             'extension_api_version':record['extension_api_version'],'kpm_bridge_abi':record['kpm_bridge_abi'],
-            'manifest_sha256':sha(path.read_bytes())}
+            'manifest_sha256':sha(path.read_bytes()),
+            'susfs_core_upstream':record.get('susfs_core_upstream'),
+            'susfs_priority_uid_filter_native414_null_guard':record.get('susfs_priority_uid_filter_native414_null_guard',False)}
 
 def main():
     parser=argparse.ArgumentParser()
@@ -157,6 +159,10 @@ def main():
         for name in ['legacy','early']:
             source_note+=name+' ABI kernel: https://github.com/Andyxyc/xm-build-workspace/tree/'+profiles[name]['kernel_commit']+'\n'
         source_note+='Selection uses vendor ABI, not a fixed Android/MIUI version.\n'
+        susfs_refs={info['manager']['susfs_core_upstream'] for info in profiles.values()}
+        assert len(susfs_refs)==1 and all(info['manager']['susfs_priority_uid_filter_native414_null_guard'] for info in profiles.values())
+        source_note+='SUSFS priority filter upstream: https://gitlab.com/simonpunk/susfs4ksu/-/tree/'+next(iter(susfs_refs))+'\n'
+        source_note+='Native 4.14 NULL-safe RCU free adaptation is included.\n'
         files['SOURCE.txt']+=source_note.encode()
         expected_images=['Image','images/early/Image','images/legacy/Image']
         assert sorted(name for name in files if name=='Image' or name.endswith('/Image'))==expected_images

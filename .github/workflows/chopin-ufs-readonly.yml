@@ -1,8 +1,12 @@
-name: Chopin read-only UFS diagnostic
+name: Chopin read-only UFS query and parser tests
 on:
   push:
     branches: [chopin-feature-kernel-20261025]
-    paths: ['chopin/tools/ufs_readonly.c', '.github/workflows/chopin-ufs-readonly.yml']
+    paths:
+      - 'chopin/tools/ufs_readonly.c'
+      - 'chopin/tools/ufs_readonly_fixture.c'
+      - 'chopin/tools/test_ufs_readonly.py'
+      - '.github/workflows/chopin-ufs-readonly.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,19 +16,36 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install cross compiler
+      - name: Prepare bounded cloud compiler and software interpreter
         run: |
-          sudo timeout 180 apt-get update -qq
-          sudo timeout 180 apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
-      - name: Build restricted read-only probe
+          sudo timeout 180 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update -qq
+          sudo timeout 240 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user python3
+      - name: Build production read-only probe and isolated memory transport
         run: |
           mkdir diagnostic
-          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror chopin/tools/ufs_readonly.c -o diagnostic/ufs-readonly
-          cp chopin/tools/ufs_readonly.c diagnostic/
+          aarch64-linux-gnu-gcc -D_GNU_SOURCE -std=c11 -static -O2 -Wall -Wextra -Werror -Wconversion \
+            chopin/tools/ufs_readonly.c -o diagnostic/ufs-readonly
+          gcc -D_GNU_SOURCE -std=c11 -O1 -g -Wall -Wextra -Werror -Wconversion \
+            -fsanitize=undefined -fno-sanitize-recover=all \
+            chopin/tools/ufs_readonly_fixture.c -o diagnostic/ufs-readonly-fixture-host
+          aarch64-linux-gnu-gcc -D_GNU_SOURCE -std=c11 -static -O2 -Wall -Wextra -Werror -Wconversion \
+            chopin/tools/ufs_readonly_fixture.c -o diagnostic/ufs-readonly-fixture-arm64
           aarch64-linux-gnu-readelf -h diagnostic/ufs-readonly > diagnostic/elf-header.txt
+      - name: Exercise actual probe main without any device or real ioctl
+        run: |
+          python3 chopin/tools/test_ufs_readonly.py \
+            --binary diagnostic/ufs-readonly --harness diagnostic/ufs-readonly-fixture-host \
+            --report diagnostic/host-readonly-fixtures.json
+          python3 chopin/tools/test_ufs_readonly.py \
+            --binary diagnostic/ufs-readonly --harness diagnostic/ufs-readonly-fixture-arm64 \
+            --runner qemu-aarch64 --report diagnostic/arm64-readonly-fixtures.json
+          cp chopin/tools/ufs_readonly.c chopin/tools/ufs_readonly_fixture.c chopin/tools/test_ufs_readonly.py diagnostic/
+          printf '%s\n' '${{ github.sha }}' > diagnostic/source-commit.txt
           sha256sum diagnostic/* > diagnostic/files.sha256
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: chopin-ufs-readonly
           path: diagnostic/*
           if-no-files-found: error
+          retention-days: 14

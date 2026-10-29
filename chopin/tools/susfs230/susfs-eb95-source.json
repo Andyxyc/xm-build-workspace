@@ -1,0 +1,44 @@
+{
+  "official_repository": "https://gitlab.com/simonpunk/susfs4ksu",
+  "official_commit": "eb95da080c76724c4962d0c62e9af3be37d9d439",
+  "official_parent": "5419f4ee97cc8bf7ca67a9ff207f39653d7784f4",
+  "official_branch_checked": "gki-android12-5.10",
+  "upstream_version_unchanged": "2.3.0",
+  "builtin_commit": "6397fcb5d96e8f4953c71e02c73f8c6800541bff",
+  "scope": "Exact two RCU grace-period insertions and existing task-work callback relocation, adapted to native 4.14 source; no full upstream 5.10 replacement. Inline fallback unchanged as upstream. Native 4.14 kfree_rcu lacks a NULL check: guard old_bitmap before both frees.",
+  "before_sha256": {
+    "fs/susfs.c": "91e8fda826074c45736faf84e95c9fc3077619a28de759f28bf811159bdbeb95",
+    "KernelSU/kernel/manager/pkg_observer.c": "9d15a9d34cbf7c1afde5b3fc2fb2ddf5a695655aa1e64f2bbe543d54174ea4cb"
+  },
+  "after_sha256": {
+    "fs/susfs.c": "94d7fdacd6c798a2121f26553fd06c0e818cf9a7be2e117e801b4f467ffae89a",
+    "KernelSU/kernel/manager/pkg_observer.c": "7dc3b2d9c346cfa70fb41182dfef94b22bdd0bdcb0d720975f0d94f747fb1a5f"
+  },
+  "upstream_source_sha256": {
+    "10_enable_susfs_for_ksu.patch": "904edfb25b069ab6cd9286f819aac9ea59842db086fd7899f20d7f5e8781debe",
+    "commit.json": "152b069d15cec915a926c5569d004fde16a71bb8688486dee92a7ac097f76435",
+    "diff.json": "81b0233379bd47a69834a4adedc1a6a07c457955bb54d50cc71b93847eccc77a",
+    "susfs.c": "b8080d0fe99b1c3f76d091c7537fbf0e1a32400f8d4193b362d59c694923a185"
+  },
+  "expected_runtime_metadata": {
+    "version_code": 41100,
+    "uapi_version": 6,
+    "extension_api_version": 2,
+    "kpm_bridge_abi": 1,
+    "version_spoof_default_mask": 0,
+    "kpm_event_aware_load_supported": false
+  },
+  "functions_with_added_grace_period": [
+    "susfs_set_priority_uid_filter",
+    "susfs_priority_app_strings_worker"
+  ],
+  "existing_deferred_callback": "ksu_track_throne_tw_func",
+  "do_not_introduce_nonexistent_functions": true,
+  "native_414_null_guard_added": true,
+  "native_414_null_guard_reason": "Initial bitmap is NULL; original 4.14 kfree_rcu passes a NULL rcu_head to __call_rcu, which writes head->func.",
+  "vendor_rcu_evidence_commit": "0647a49c9557faa92b90c4ae188587787226be9e",
+  "vendor_rcu_evidence_sha256": {
+    "include/linux/rcupdate.h": "66e6b42df79c5cf97edfd1646504e8c4846eb03e64552d22287d6ad4d4e58270",
+    "kernel/rcu/tree.c": "d531cca5ee8c7c759a99aae5b19b3e3461b95e96fdbbdb0bf65de2288cd7909f"
+  }
+}
