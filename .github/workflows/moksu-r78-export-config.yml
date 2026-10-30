@@ -1,0 +1,28 @@
+name: moksu R7.8 reproducible build configuration
+on:
+  push:
+    branches: [moksu-ksu32709-r78-20261030]
+    paths: ['.github/workflows/moksu-r78-export-config.yml']
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Export public configuration and patches without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          git archive --format=tar HEAD | gzip -n > out/moksu-R7.8-build-config.tar.gz
+          git rev-parse HEAD > out/build-config-commit.txt
+          sha256sum out/moksu-R7.8-build-config.tar.gz > out/build-config-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r78-build-config
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
