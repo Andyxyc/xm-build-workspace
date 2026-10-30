@@ -1,0 +1,30 @@
+name: moksu R7.8 official APK verification tools
+on:
+  push:
+    branches: [moksu-core-ci-r78-20261030]
+    paths: ['.github/workflows/moksu-r78-verification-tools.yml']
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Export Android build-tools 37.0.0 verification binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'build-tools;37.0.0'
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          mkdir -p out/lib out/lib64
+          cp "$BT/aapt" "$BT/zipalign" out/
+          cp "$BT/lib/apksigner.jar" out/lib/
+          cp -a "$BT/lib64/." out/lib64/
+          cp "$BT/source.properties" out/
+          (cd out && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with: {name: moksu-r78-verification-tools, path: out/, retention-days: 7, if-no-files-found: error}
