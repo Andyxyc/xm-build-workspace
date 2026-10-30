@@ -1,0 +1,53 @@
+name: Chopin bounded A11 vendor module intake
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths: ['chopin/tools/a11-vendor-intake/**', '.github/workflows/chopin-a11-vendor-intake.yml']
+  workflow_dispatch:
+    inputs:
+      run_official_probe:
+        description: Read bounded module ranges from the fixed official A11 OTA
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+jobs:
+  fixtures:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install only the three pinned pure Python wheels
+        run: python3 -m pip install --no-deps --no-compile --require-hashes -r chopin/tools/a11-vendor-intake/requirements.lock
+      - name: Check transport, payload and ELF rejection cases
+        run: |
+          mkdir -p a11-vendor-fixture-evidence
+          python3 -B chopin/tools/a11-vendor-intake/test_vendor_reader.py --helper chopin/tools/rom_abi_probe.py --report a11-vendor-fixture-evidence/unit.json
+      - name: Read fixed modules from a generated ext4 file inside a synthetic payload
+        run: python3 -B chopin/tools/a11-vendor-intake/ext4_fixture.py --helper chopin/tools/rom_abi_probe.py --report a11-vendor-fixture-evidence/ext4.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-a11-vendor-reader-synthetic-fixtures
+          path: a11-vendor-fixture-evidence/*.json
+          if-no-files-found: error
+          retention-days: 14
+  official-readonly:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_official_probe)
+    needs: fixtures
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the fixed pure Python wheel set
+        run: python3 -m pip install --no-deps --no-compile --require-hashes -r chopin/tools/a11-vendor-intake/requirements.lock
+      - name: Read only the fixed module paths and publish derived import records
+        run: python3 -B chopin/tools/a11-vendor-intake/intake.py --helper chopin/tools/rom_abi_probe.py --out a11-vendor-derived-evidence --module wlan_drv_gen4m.ko --module conninfra.ko --module met.ko
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-a11-vendor-derived-imports-only
+          path: a11-vendor-derived-evidence/*.json
+          if-no-files-found: error
+          retention-days: 14
