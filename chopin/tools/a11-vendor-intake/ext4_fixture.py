@@ -6,6 +6,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import sys
+from unittest.mock import patch
 from pathlib import Path
 import test_vendor_reader as fixture
 from vendor_reader import module_manifests, reviewed_definitions
@@ -26,6 +28,8 @@ def main():
         for name in ("conninfra.ko","met.ko"):
             data=fixture.module_bytes();(modules/name).write_bytes(data)
             expected[name]=hashlib.sha256(data).hexdigest()
+        (modules/"r_only_fixture.ko").write_bytes(b"inventory metadata only; not an ELF module")
+        (modules/"subdirectory").mkdir()
         image=work/"fixture.img"
         with image.open("xb")as stream:stream.truncate(32*1024*1024)
         if image.is_block_device()or image.is_symlink():raise ValueError("Fixture target must be an ordinary temporary file")
@@ -43,6 +47,29 @@ def main():
         assert all(row["imports"]=={"module_layout":"2d3d4373"}for row in parsed)
         assert 0<len(reader.proof)<len(rows),"Fixture unexpectedly read the whole generated partition"
         checked=len(reader.proof)
+        snapshots=[]
+        inventory_reader=fixture.partition_from(payload)
+        with_inventory,_=module_manifests(inventory_reader,["conninfra.ko","met.ko"],on_inventory=snapshots.append)
+        assert with_inventory==parsed and len(snapshots)==1 and snapshots[0]["complete"]
+        inventory={entry["name"]:entry for entry in snapshots[0]["entries"]}
+        assert inventory["r_only_fixture.ko"]=={"name":"r_only_fixture.ko","size":len(b"inventory metadata only; not an ELF module"),"type":"regular"}
+        assert inventory["subdirectory"]["type"]=="directory"
+        # Exercise the real CLI's failure report with a fake HTTP transport, never a live URL.
+        import intake
+        from vendor_reader import remote_class
+        def synthetic_remote(base):
+            parent=remote_class(base)
+            class Reader(parent):
+                def __init__(self,url):super().__init__(url,fixture.FakeHTTP(payload))
+            return Reader
+        missing_out=work/"missing-report"
+        argv=["intake.py","--helper",str(args.helper),"--out",str(missing_out),"--inventory","--module","connfem.ko"]
+        with patch.object(intake,"remote_class",synthetic_remote),patch.object(sys,"argv",argv):
+            code=intake.main()
+        failed=json.loads((missing_out/"module-imports.json").read_text())
+        assert code==2 and failed["status"]=="BLOCKED_BOUNDED_INTAKE_NO_COMPATIBILITY_CLAIM"
+        assert failed["directory_inventory"]["complete"] and failed["directory_inventory"]["entries"]==snapshots[0]["entries"]
+        assert failed["modules_not_completed"]==["connfem.ko"] and not failed["modules"]
         # A symlink is not followed to another path, even inside this generated image.
         (modules/"met.ko").unlink();(modules/"met.ko").symlink_to("conninfra.ko")
         other=work/"symlink.img"
@@ -54,17 +81,23 @@ def main():
             symlink_rows.append((6 if not any(block)else 1,block,[(offset//4096,len(block)//4096)]))
         symlink_reader=fixture.partition_from(fixture.payload_zip(symlink_rows,len(raw)))
         rejected=False
-        try:module_manifests(symlink_reader,["met.ko"])
+        symlink_inventory=[]
+        try:module_manifests(symlink_reader,["met.ko"],on_inventory=symlink_inventory.append)
         except ValueError:rejected=True
         assert rejected,"Module symlink was followed"
+        assert symlink_inventory[0]["complete"]
+        assert next(entry for entry in symlink_inventory[0]["entries"]if entry["name"]=="met.ko")["type"]=="symlink"
         report={"status":"PASS_GENERATED_EXT4_AND_SYNTHETIC_PAYLOAD_ONLY","regular_file_fixture_bytes":len(data),
                 "requested_modules":parsed,"filesystem":filesystem,"payload_operations_total":len(rows),
                 "payload_operations_read":checked,"unrequested_operations_not_downloaded":True,
                 "module_symlink_rejected":True,"mke2fs_command_template":"mke2fs -q -t ext4 -F -b 4096 -d TEMP_TREE TEMP_REGULAR_FILE",
+                "directory_inventory":snapshots[0],"default_import_result_unchanged_with_inventory":True,
+                "real_CLI_missing_selected_module_report_preserved_inventory":True,
+                "missing_selected_module_returned_BLOCKED_and_exit2":True,"CLI_transport_was_synthetic_only":True,
                 "mke2fs_stderr":result.stderr,"ROM_accessed":False,"OEM_files_used":False,"phone_accessed":False,
                 "raw_fixture_or_module_uploaded":False,
                 "source_sha256":{name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                 for name in ("ext4_fixture.py","vendor_reader.py","test_vendor_reader.py")}}
+                                 for name in ("ext4_fixture.py","vendor_reader.py","test_vendor_reader.py","intake.py")}}
     with args.report.open("x")as stream:json.dump(report,stream,indent=2);stream.write("\n")
     print(json.dumps(report,indent=2))
 

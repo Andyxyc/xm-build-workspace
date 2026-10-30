@@ -7,6 +7,7 @@ import concurrent.futures
 import hashlib
 import io
 import lzma
+import logging
 import re
 import stat
 import struct
@@ -365,7 +366,56 @@ def parse_module(name, data):
             "vermagic": vermagic[0], "imports": dict(sorted(imports.items())), "peer_exports": dict(sorted(exports.items()))}
 
 
-def module_manifests(partition, selected, on_module=None):
+def module_directory_inventory(directory, on_inventory=None):
+    """Read entry names and inode metadata, never member contents or link targets."""
+    snapshot = {"path": "/lib/modules", "entries": [], "complete": False,
+                "recursive": False, "member_file_data_read": False, "symlink_targets_read": False,
+                "max_entries": 4096, "max_directory_bytes": 2 * 1024 * 1024}
+    types = {stat.S_IFREG: "regular", stat.S_IFDIR: "directory", stat.S_IFLNK: "symlink",
+             stat.S_IFBLK: "block", stat.S_IFCHR: "character", stat.S_IFIFO: "fifo", stat.S_IFSOCK: "socket"}
+    warnings = []
+    class ParserWarnings(logging.Handler):
+        def emit(self, record):
+            if len(warnings) < 8:
+                warnings.append(record.getMessage()[:512])
+    logger = logging.getLogger("dissect.extfs.extfs")
+    handler = ParserWarnings(level=logging.WARNING)
+    logger.addHandler(handler)
+    try:
+        require(directory.filetype == stat.S_IFDIR and 0 <= directory.size <= 2 * 1024 * 1024,
+                "Fixed module directory is unavailable, a symlink or oversized")
+        seen = set()
+        for index, node in enumerate(directory.iterdir()):
+            require(index < 4096, "Directory inventory entry limit reached")
+            name = node.filename
+            if name in (".", ".."):
+                continue
+            require(isinstance(name, str) and name and len(name.encode("utf-8", "surrogateescape")) <= 255
+                    and not any(value in name for value in ("/", "\\", "\0")) and name not in seen,
+                    "Invalid or duplicate directory inventory name")
+            size = node.size
+            require(isinstance(size, int) and size >= 0, "Invalid directory inventory size")
+            seen.add(name)
+            snapshot["entries"].append({"name": name, "size": size, "type": types.get(node.filetype, "unknown")})
+        # The mature reader can log a malformed entry and return early. Do not label that complete.
+        require(not warnings, "ExtFS reported a directory parser warning")
+        snapshot["entries"].sort(key=lambda item: item["name"])
+        snapshot["complete"] = True
+    except Exception as error:
+        snapshot["error"] = type(error).__name__ + ": " + str(error)
+        if warnings:
+            snapshot["parser_warnings"] = warnings
+        if on_inventory is not None:
+            on_inventory(snapshot)
+        raise
+    finally:
+        logger.removeHandler(handler)
+    if on_inventory is not None:
+        on_inventory(snapshot)
+    return snapshot
+
+
+def module_manifests(partition, selected, on_module=None, on_inventory=None):
     from dissect.extfs.extfs import ExtFS
     require(selected and len(set(selected)) == len(selected) and all(name in MODULES for name in selected),
             "Module paths must come from the fixed allowlist")
@@ -385,6 +435,8 @@ def module_manifests(partition, selected, on_module=None):
         raise ValueError("Requested module path is missing: " + name)
 
     directory = child(child(fs.root, "lib"), "modules")
+    if on_inventory is not None:
+        module_directory_inventory(directory, on_inventory)
     rows, total = [], 0
     for name in selected:
         node = child(directory, name)

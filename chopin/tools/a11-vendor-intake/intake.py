@@ -23,6 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--helper", type=Path, required=True, help="Pinned rom_abi_probe.py")
     parser.add_argument("--out", type=Path, required=True, help="New derived-evidence directory")
+    parser.add_argument("--inventory", action="store_true", help="Save bounded /lib/modules name/size/type metadata before selected files")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--module", choices=MODULES, action="append")
     selection.add_argument("--all-modules", action="store_true")
@@ -98,7 +99,11 @@ def main():
             def module_received(row):
                 report["modules"].append(row)
                 save("derived_module_" + row["file"])
-            report["modules"], report["filesystem"] = module_manifests(partition, selected, module_received)
+            def inventory_received(snapshot):
+                report["directory_inventory"] = snapshot
+                save("derived_directory_inventory")
+            report["modules"], report["filesystem"] = module_manifests(
+                partition, selected, module_received, inventory_received if args.inventory else None)
         # Derived import values are the output, never OEM file contents.
         values = [row["imports"].get("module_layout") for row in report["modules"]]
         report["reference_module_layout"] = "2d3d4373"

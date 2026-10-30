@@ -1,5 +1,52 @@
 # Bounded A11 vendor module intake
 
+## Optional directory inventory
+
+Add --inventory to the existing intake command to save metadata for the same
+fixed /lib/modules directory before selected module files are opened. The
+default command and module allowlist are unchanged. This is not a recursive
+filesystem search.
+
+Each entry records only name, size and type. The existing 4096-entry and
+2 MiB directory limits remain, with the same payload-operation SHA and
+network/read budgets. Member files and symlink targets are not opened for
+the inventory. Whole payload operations still have to be fetched and checked
+when their blocks contain requested metadata; this does not claim that an
+operation contains no adjacent file bytes.
+
+An optional on_inventory callback receives the snapshot before the selected
+file loop. The CLI writes it to directory_inventory immediately, so a later
+missing selected file still returns BLOCKED/exit 2 with that snapshot retained.
+Invalid entries, parser warnings or an exceeded limit retain an incomplete
+snapshot and fail. An incomplete snapshot must not be treated as a complete
+module list. Normal directory enumeration is not independent ext4 checksum
+verification.
+
+The already completed official run covered wlan_drv_gen4m.ko, conninfra.ko
+and met.ko. It did not establish the complete Android11 module family. Do not
+use the older ten-name A12 list as an assertion that those files exist in R.
+The next proposed read is --module wmt_chrdev_wifi.ko --inventory. That name
+is already in the fixed allowlist and may supply unresolved wlan peer
+exports; its presence and export table have not been verified. The command
+will first save the directory inventory and still fail if that candidate is
+absent. It does not reopen the three completed module files, although shared
+payload operations can overlap at the transport layer.
+First obtain the real inventory and confirm its payload manifest SHA matches
+the prior run. Then review the exact regular .ko basenames within the file
+size limit, minus the three completed names. Add only those observed names
+to an explicitly reviewed allowlist and request them by --module. Keep
+directories, symlinks, oversized files, compressed/unknown formats and missing
+names separate; none silently become successful reads. A new batch still
+needs full operation-SHA and ELF checks. Do not enlarge the budget or switch
+to a full vendor download when a batch fails.
+
+The new test_inventory.py covers metadata-only traversal, limits, partial
+failure preservation and the unchanged default selected-file path using fake
+inodes. The extended cloud ext4 fixture also checks a real CLI failure with
+synthetic HTTP: connfem.ko is deliberately absent, so the command must return
+exit 2/BLOCKED while keeping its complete directory inventory. No live ROM
+URL is opened by that fixture. The v2 real-ext4 fixture has not yet run.
+
 This tool reads selected module files from the fixed official chopin
 V12.5.7.0.RKPMIXM OTA. It never downloads a full ROM/vendor image, mounts a
 filesystem, loads a module or accesses a phone. Only derived module hashes,
@@ -106,3 +153,5 @@ verified by a partial read. New import records are evidence for a fourth ABI
 family, not proof that any kernel, Android11 ROM or physical driver works.
 
 Root review: the scoped push runs the official read after fixtures succeed. The first fixed intake is wlan_drv_gen4m.ko, conninfra.ko, met.ko, in that order. No claim covers unselected files.
+
+Root reviewed follow-up: scoped push runs official intake after fixtures, selecting only wmt_chrdev_wifi.ko plus bounded directory metadata. Prior successful wlan/conninfra/met input is retained; this run does not reread those modules. Missing file remains a failure with inventory.
