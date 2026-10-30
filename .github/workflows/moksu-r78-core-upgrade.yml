@@ -81,8 +81,8 @@ jobs:
           KMI: ${{ matrix.kmi }}
         run: |
           set -euo pipefail
-          tar -xzf input/moksu-r78-source.tar.gz -C source
           mkdir -p out/logs
+          tar --no-same-owner -xzf input/moksu-r78-source.tar.gz -C source
           test "$(git -C source rev-list --count HEAD)" = 2709
           grep -q 'KSU_PACKAGE_NAME ?= com.moksu.manager' source/kernel/Kbuild
           grep -q 'KSU_EXPECTED_HASH ?= df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
@@ -121,7 +121,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with: {name: moksu-r78-source, path: input}
-      - run: mkdir -p out && tar -xzf input/moksu-r78-source.tar.gz -C source
+      - run: mkdir -p out && tar --no-same-owner -xzf input/moksu-r78-source.tar.gz -C source
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '21'}
       - uses: android-actions/setup-android@v3
@@ -155,7 +155,7 @@ jobs:
         with: {name: moksu-r78-source, path: input}
       - uses: actions/download-artifact@v4
         with: {pattern: 'moksu-r78-kmi-*', path: lkms, merge-multiple: true}
-      - run: mkdir -p out && tar -xzf input/moksu-r78-source.tar.gz -C source
+      - run: mkdir -p out && tar --no-same-owner -xzf input/moksu-r78-source.tar.gz -C source
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '21'}
       - uses: android-actions/setup-android@v3
