@@ -1,0 +1,38 @@
+name: moksu R7.8 KSU 32709 source preparation
+on:
+  push:
+    branches: [moksu-ksu32709-r78-20261030]
+    paths: ['.github/workflows/moksu-r78-core-prepare.yml']
+permissions:
+  contents: read
+jobs:
+  source-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: ab05a0626e88d4ada1295ec561d5660f26547fdc
+          fetch-depth: 0
+          path: upstream
+          persist-credentials: false
+      - name: Verify pinned history and archive exact source inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test "$(git -C upstream rev-parse HEAD)" = ab05a0626e88d4ada1295ec561d5660f26547fdc
+          git -C upstream merge-base --is-ancestor 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d HEAD
+          test "$(git -C upstream rev-list --count HEAD)" = 2709
+          git -C upstream archive --format=tar 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d | gzip -n > out/upstream-base.tar.gz
+          git -C upstream archive --format=tar ab05a0626e88d4ada1295ec561d5660f26547fdc | gzip -n > out/upstream-ci32709.tar.gz
+          git -C upstream diff --binary 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d HEAD -- kernel uapi userspace Cargo.toml Cargo.lock .github/scripts > out/core-32709.patch
+          git -C upstream diff --stat 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d HEAD -- kernel uapi userspace > out/core-change-summary.txt
+          sha256sum out/*.tar.gz out/*.patch > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r78-pinned-upstream-inputs
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
