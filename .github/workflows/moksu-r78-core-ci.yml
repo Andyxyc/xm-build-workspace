@@ -1,0 +1,224 @@
+name: moksu R7.8 KSU32709 core upgrade
+on:
+  push:
+    branches: [moksu-r78-ksu32709-20261030]
+    paths: ['moksu/r78/**', '.github/workflows/moksu-r78-core-ci.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: moksu-r78-core-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Reproduce R7.7 and merge pinned CI32709 core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d, path: source, fetch-depth: 0, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d, path: base, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: upstream, fetch-depth: 0, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {repository: hartgerinktarcila-design/7kimisu, ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c, path: old, persist-credentials: false}
+      - name: Reproduce and verify source; stop on any unresolved change
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 -m py_compile config/moksu/r78/prepare_core.py
+          python3 config/moksu/r78/prepare_core.py source old config base upstream out 2>&1 | tee out/source-build.log
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx --exclude=__pycache__ -czf out/moksu-r78-source.tar.gz -C source .
+          sha256sum out/moksu-r78-source.tar.gz > out/source-sha256.txt
+      - name: Preserve failure evidence and exact source references
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for directory in source base upstream; do
+            test -d "$directory"
+            tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx --exclude=__pycache__ -czf "out/${directory}-diagnostic.tar.gz" -C "$directory" .
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r78-source, path: out/, retention-days: 90, if-no-files-found: error}
+
+  kernel:
+    name: KSU32709 custom identity ${{ matrix.kmi }}
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        kmi: [android12-5.10, android13-5.10, android13-5.15, android14-5.15, android14-6.1, android15-6.6, android16-6.12, android17-6.18]
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260828
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: source, fetch-depth: 0, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r78-source, path: input}
+      - name: Restore merged core and verify manager trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tar -xzf input/moksu-r78-source.tar.gz -C source
+          grep -q 'KSU_PACKAGE_NAME ?= com.moksu.manager' source/kernel/Kbuild
+          grep -q 'KSU_EXPECTED_HASH ?= df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
+          test "$(git -C source rev-list --count HEAD)" -eq 2709
+      - name: Build both architectures with matching KMI
+        shell: bash
+        env: {KMI: '${{ matrix.kmi }}'}
+        run: |
+          set -euo pipefail
+          if [[ "$KMI" == android16-6.12 ]]; then
+            bash source/moksu-build/ksu331/build_lkm16.sh 2>&1 | tee out/kernel.log
+          else
+            bash source/moksu-build/ksu331/build_lkm.sh 2>&1 | tee out/kernel.log
+          fi
+          grep -q 'KernelSU version: 32709' out/kernel.log
+          for arch in aarch64 x86_64; do
+            file="out/$arch/${KMI}_kernelsu.ko"
+            test -s "$file"
+            grep -aq 'ksu_stealth_is_enabled' "$file"
+            grep -aq 'com.moksu.manager' "$file"
+            sha256sum "$file" >> out/sha256.txt
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: 'moksu-r78-kmi-${{ matrix.kmi }}', path: out/, retention-days: 90, if-no-files-found: error}
+
+  native:
+    name: Build new ksud and ksuinit with all 16 matching modules
+    needs: [source, kernel]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: source, fetch-depth: 0, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r78-source, path: input}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'moksu-r78-kmi-*', path: lkms, merge-multiple: true}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Compile pinned Android native core
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tar -xzf input/moksu-r78-source.tar.gz -C source
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash source/moksu-build/ksu331/build_userspace.sh 2>&1 | tee out/native-build.log
+          for target in aarch64-linux-android x86_64-linux-android; do
+            test -s "out/$target/ksud"
+            cp "source/target/$target/release/ksuinit" "out/$target/ksuinit"
+            sha256sum "out/$target/ksud" "out/$target/ksuinit" >> out/sha256.txt
+          done
+          cp input/upgrade-lock.json out/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r78-native, path: out/, retention-days: 90, if-no-files-found: error}
+
+  android:
+    name: Compile unchanged manager and JNI for CI32709
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: source, fetch-depth: 0, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r78-source, path: input}
+      - run: mkdir -p out && tar -xzf input/moksu-r78-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Build same-package manager with existing features
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1-29-gab05a062-R7.8 -PKSU_VERSION_CODE=32709 -PMOKSU_APP_INFO_MODE=unified 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/manager-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/manager-unsigned.apk"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r78-android, path: out/, retention-days: 90, if-no-files-found: error}
+
+  package:
+    name: Assemble and validate new-core APK for original-key signing
+    needs: [native, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r78-android, path: android}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r78-native, path: native}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r78-source, path: source-artifact}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Package newly built native binaries without changing UI assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sdkmanager 'build-tools;37.0.0'
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          from zipfile import ZipFile,ZipInfo,ZIP_DEFLATED
+          native={
+            'lib/arm64-v8a/libksud.so':Path('native/aarch64-linux-android/ksud'),
+            'lib/x86_64/libksud.so':Path('native/x86_64-linux-android/ksud')
+          }
+          old={'5facd04280bf53d3cf96bdf6204eff1cc0c64e6432ed168c018813daf5f5dd33','88b4086d1c25c64b6aab9000f00eb84924d888fd2848b153349f2c2c09fb186c'}
+          hashes={}
+          for name,path in native.items():
+            assert path.is_file() and path.stat().st_size>1000000
+            hashes[name]=hashlib.sha256(path.read_bytes()).hexdigest()
+            assert hashes[name] not in old, 'Old R7.2 native binary must not be reused'
+          with ZipFile('android/manager-unsigned.apk') as src,ZipFile('out/merged.apk','w') as dst:
+            for info in src.infolist():
+              if info.filename in native: continue
+              if info.filename.startswith('META-INF/') and info.filename.lower().endswith(('.rsa','.dsa','.ec','.sf')): continue
+              dst.writestr(info,src.read(info.filename))
+            for name,path in native.items():
+              info=ZipInfo(name);info.compress_type=ZIP_DEFLATED;info.external_attr=0o644<<16
+              dst.writestr(info,path.read_bytes())
+          with ZipFile('out/merged.apk') as z:
+            assert z.testzip() is None
+            assert len(z.namelist())==len(set(z.namelist()))
+            assert z.getinfo('resources.arsc').compress_type==0
+          Path('out/native-provenance.json').write_text(json.dumps(hashes,indent=2)+'\n')
+          PY
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/zipalign" -p -f 4 out/merged.apk out/moksu-R7.8-KSU32709-UNSIGNED.apk
+          "$BT/zipalign" -c -v 4 out/moksu-R7.8-KSU32709-UNSIGNED.apk > out/zipalign.txt
+          "$BT/aapt" dump badging out/moksu-R7.8-KSU32709-UNSIGNED.apk > out/badging.txt
+          grep -q "package: name='com.moksu.manager' versionCode='32709'" out/badging.txt
+          grep -q "application-label:'moksu'" out/badging.txt
+          cp "$BT/lib/apksigner.jar" "$BT/zipalign" out/
+          cp source-artifact/upgrade-lock.json out/
+          sha256sum out/moksu-R7.8-KSU32709-UNSIGNED.apk > out/sha256.txt
+          rm out/merged.apk
+      - uses: actions/upload-artifact@v4
+        with: {name: moksu-r78-owner-signing, path: out/, retention-days: 90, if-no-files-found: error}
