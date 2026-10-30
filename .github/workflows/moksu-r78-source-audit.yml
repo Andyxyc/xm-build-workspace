@@ -1,0 +1,40 @@
+name: moksu R7.8 core source audit
+on:
+  push:
+    branches: [moksu-core-ci-r78-20261030]
+    paths: ['.github/workflows/moksu-r78-source-audit.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: ab05a0626e88d4ada1295ec561d5660f26547fdc
+          fetch-depth: 0
+          path: official
+          persist-credentials: false
+      - name: Export pinned old and new upstream plus public build recipes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          git -C official archive --format=tar.gz 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d > out/upstream-r77-base.tar.gz
+          git -C official archive --format=tar.gz ab05a0626e88d4ada1295ec561d5660f26547fdc > out/upstream-ci-ab05a062.tar.gz
+          git -C config archive --format=tar.gz HEAD > out/build-recipes.tar.gz
+          git -C official rev-list --count ab05a0626e88d4ada1295ec561d5660f26547fdc > out/upstream-commit-count.txt
+          git -C official describe --tags --always ab05a0626e88d4ada1295ec561d5660f26547fdc > out/upstream-description.txt
+          git -C official diff --stat 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d ab05a0626e88d4ada1295ec561d5660f26547fdc > out/upstream-diff-stat.txt
+          git -C official diff --binary 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d ab05a0626e88d4ada1295ec561d5660f26547fdc -- kernel userspace uapi Cargo.toml Cargo.lock .github/scripts > out/upstream-core.patch
+          (cd out && sha256sum *.tar.gz *.patch > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moksu-r78-pinned-source-audit
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
