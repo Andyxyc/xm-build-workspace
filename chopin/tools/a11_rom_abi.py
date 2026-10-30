@@ -1,6 +1,8 @@
 """Read bounded official Android11 boot bytes; report ABI evidence, never flash."""
 import ast
+import concurrent.futures
 import gzip
+import io
 import hashlib
 import json
 import os
@@ -9,6 +11,7 @@ import signal
 import struct
 import sys
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -64,15 +67,52 @@ try:
     namespace = {}
     exec(compile(ast.Module(body=definitions, type_ignores=[]), '<pinned ABI definitions>', 'exec'), namespace)
     exported = namespace['exported']
+    class ParallelRemoteZip(namespace['RemoteZip']):
+        """Same byte/header limits; four bounded ranges per prefetch, no full fetch."""
+        def read(self, n=-1):
+            if n < 0:
+                n = self.total-self.pos
+            n = min(n, self.total-self.pos)
+            assert 0 <= n <= 96*1024*1024
+            result = []
+            while n:
+                offset = self.pos-self.cache_start
+                if not 0 <= offset < len(self.cache):
+                    amount = min(max(n, 64*1024), 2*1024*1024, self.total-self.pos)
+                    assert self.downloaded+amount <= 96*1024*1024
+                    chunks = [(start, min(512*1024, self.pos+amount-start))
+                              for start in range(self.pos, self.pos+amount, 512*1024)]
+                    def fetch(item):
+                        start, size = item
+                        with self.request(start, start+size-1) as response:
+                            assert response.headers.get('Content-Range') == f'bytes {start}-{start+size-1}/{self.total}'
+                            body = response.read(size+1)
+                            assert len(body) == size, 'Truncated or oversized Range body'
+                            return body
+                    # Reserve requested bytes before submitting; failures cannot permit an unlimited retry.
+                    self.downloaded += amount
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                        data = b''.join(pool.map(fetch, chunks))
+                    self.cache_start, self.cache = self.pos, data
+                    offset = 0
+                    print(json.dumps({'range_start': self.pos, 'range_bytes': amount,
+                                      'downloaded_bytes': self.downloaded}), flush=True)
+                amount = min(n, len(self.cache)-offset)
+                result.append(self.cache[offset:offset+amount])
+                self.pos += amount
+                n -= amount
+            return b''.join(result)
     signal.signal(signal.SIGALRM, deadline)
-    signal.alarm(480)
+    signal.alarm(900)
     save('reference_parser_selfcheck')
     selfcheck = exported(image, expected)
     assert not selfcheck['different_export_crcs'] and not selfcheck['candidate_exports_missing_from_firmware']
     report['reference_parser_selfcheck'] = selfcheck
     del image
     save('open_official_remote_zip')
-    remote = namespace['RemoteZip'](URL)
+    remote = ParallelRemoteZip(URL)
+    report['parallel_range_workers'] = 4
+    report['max_single_range_bytes'] = 512*1024
     report['ROM_total_bytes'] = remote.total
     with zipfile.ZipFile(remote) as archive:
         names = archive.namelist()
@@ -94,7 +134,7 @@ try:
     assert page in (2048, 4096) and 0 < size < 96*1024*1024 and page+size <= len(boot)
     report['boot_sha256'] = hashlib.sha256(boot).hexdigest()
     report['boot_os_version_field'] = struct.unpack_from('<I', boot, 44)[0]
-    image = gzip.decompress(boot[page:page+size])
+    image = gzip.GzipFile(fileobj=io.BytesIO(boot[page:page+size])).read(96*1024*1024+1)
     assert 0 < len(image) <= 96*1024*1024 and image[56:60] == b'ARMd'
     report['image_sha256'] = hashlib.sha256(image).hexdigest()
     banner = re.search(rb'Linux version [^\x00\n]{1,400}', image)
