@@ -25,13 +25,14 @@ jobs:
         with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: upstream, fetch-depth: 0, persist-credentials: false}
       - uses: actions/checkout@v4
         with: {repository: hartgerinktarcila-design/7kimisu, ref: 0246ca0f16ea2e3a6af030643bb6f74262e0e26c, path: old, persist-credentials: false}
-      - name: Reproduce and verify source; stop on any unresolved change
+      - name: Reproduce and verify source; stop on unresolved changes
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
-          python3 -m py_compile config/moksu/r78/prepare_core.py
+          python3 -m py_compile config/moksu/r78/prepare_core.py config/moksu/r78/finalize_source.py
           python3 config/moksu/r78/prepare_core.py source old config base upstream out 2>&1 | tee out/source-build.log
+          python3 config/moksu/r78/finalize_source.py source out 2>&1 | tee out/abi-check.log
           tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx --exclude=__pycache__ -czf out/moksu-r78-source.tar.gz -C source .
           sha256sum out/moksu-r78-source.tar.gz > out/source-sha256.txt
       - name: Preserve failure evidence and exact source references
@@ -65,12 +66,14 @@ jobs:
         with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: source, fetch-depth: 0, persist-credentials: false}
       - uses: actions/download-artifact@v4
         with: {name: moksu-r78-source, path: input}
-      - name: Restore merged core and verify manager trust
+      - name: Restore exact merged tree and original manager trust
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
-          tar -xzf input/moksu-r78-source.tar.gz -C source
+          test -d source/.git && test -s input/moksu-r78-source.tar.gz
+          find source -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+          tar --no-same-owner -xzf input/moksu-r78-source.tar.gz -C source
           grep -q 'KSU_PACKAGE_NAME ?= com.moksu.manager' source/kernel/Kbuild
           grep -q 'KSU_EXPECTED_HASH ?= df131f3197ed55a19d7e0a86a2b04635a5c0e5ea4bf9b596fef5a8e1d5bbcbd8' source/kernel/Kbuild
           test "$(git -C source rev-list --count HEAD)" -eq 2709
@@ -117,7 +120,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          tar -xzf input/moksu-r78-source.tar.gz -C source
+          test -d source/.git && test -s input/moksu-r78-source.tar.gz
+          find source -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+          tar --no-same-owner -xzf input/moksu-r78-source.tar.gz -C source
           sdkmanager 'ndk;29.0.14206865'
           sudo apt-get update
           sudo apt-get install -y libclang-dev
@@ -135,7 +140,7 @@ jobs:
         with: {name: moksu-r78-native, path: out/, retention-days: 90, if-no-files-found: error}
 
   android:
-    name: Compile unchanged manager and JNI for CI32709
+    name: Compile preserved manager and matched JNI for CI32709
     needs: source
     runs-on: ubuntu-24.04
     timeout-minutes: 55
@@ -144,7 +149,23 @@ jobs:
         with: {repository: tiann/KernelSU, ref: ab05a0626e88d4ada1295ec561d5660f26547fdc, path: source, fetch-depth: 0, persist-credentials: false}
       - uses: actions/download-artifact@v4
         with: {name: moksu-r78-source, path: input}
-      - run: mkdir -p out && tar -xzf input/moksu-r78-source.tar.gz -C source
+      - name: Restore exact reviewed manager without new upstream UI files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          test -d source/.git && test -s input/moksu-r78-source.tar.gz
+          find source -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+          tar --no-same-owner -xzf input/moksu-r78-source.tar.gz -C source
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          root=Path('source')
+          expected=json.loads(Path('input/final-manager-manifest.json').read_text())
+          actual={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in (root/'manager').rglob('*') if p.is_file()}
+          assert actual==expected, 'Manager tree does not match reviewed source'
+          assert (root/'manager/app/src/main/cpp/uapi/supercall.h').read_bytes()==(root/'uapi/supercall.h').read_bytes()
+          PY
       - uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '21'}
       - uses: android-actions/setup-android@v3
