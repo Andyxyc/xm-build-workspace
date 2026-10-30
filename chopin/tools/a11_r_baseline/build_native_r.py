@@ -77,7 +77,9 @@ def main():
         report["actual_compiler"] = compiler
         report["clang_source_commit"] = CLANG
         tools = [workspace/"clang/bin"/n for n in ["clang", "ld.lld", "llvm-ar", "llvm-nm", "llvm-objcopy"]]
-        tools += [workspace/"gcc-64/bin/aarch64-linux-android-gcc", workspace/"gcc-32/bin/arm-linux-androideabi-gcc"]
+        # These AOSP snapshots provide binutils; the compiler is the pinned clang above.
+        tools += [workspace/"gcc-64/bin"/('aarch64-linux-android-'+name) for name in ['as', 'ld']]
+        tools += [workspace/"gcc-32/bin"/('arm-linux-androideabi-'+name) for name in ['as', 'ld']]
         report["tool_binary_sha256"] = {str(p.relative_to(workspace)): sha(p) for p in tools}
         for p in workspace.glob("gcc-*.tar.gz"):
             report.setdefault("gcc_archive_sha256", {})[p.name] = sha(p)
