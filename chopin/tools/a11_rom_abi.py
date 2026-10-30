@@ -14,6 +14,8 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+from arm64_export_crc import exported as absolute_exports
+from vmlinux_to_elf.core.kallsyms import KallsymsFinder
 
 OUT = Path('a11-rom-analysis')
 OUT.mkdir(exist_ok=True)
@@ -47,6 +49,23 @@ def deadline(signum, frame):
     raise TimeoutError('Bounded ABI probe expired at '+report.get('stage', 'unknown'))
 
 
+def inspect_exports(image, expected, label):
+    found = KallsymsFinder(image, 64)
+    symbols = {symbol.name: symbol for symbol in found.symbols}
+    report.setdefault('normalizer_diagnostics', {})[label] = {
+        'is_relocated': found.is_relocated, 'symbols_recovered': len(symbols),
+        'text_symbol_present': '_text' in symbols,
+        'selected_symbol_names': [name for name in ['_text', '_stext', 'stext',
+                                  'start_kernel', 'remap_pfn_range'] if name in symbols],
+        'kernel_text_candidate': hex(found.kernel_text_candidate)
+                                  if found.kernel_text_candidate is not None else None,
+        'first_symbol_names': [symbol.name for symbol in found.symbols[:12]]}
+    save(report['stage'])
+    # The Android11 image has no _text in the parsed table. Derive one unique
+    # base from relocated export-name pointers, then independently locate CRCs.
+    return absolute_exports(found.kernel_img, expected)
+
+
 try:
     save('verify_exact_reference_and_parser')
     reference = Path('a11-reference')
@@ -66,7 +85,6 @@ try:
                                                          ast.FunctionDef, ast.ClassDef))]
     namespace = {}
     exec(compile(ast.Module(body=definitions, type_ignores=[]), '<pinned ABI definitions>', 'exec'), namespace)
-    exported = namespace['exported']
     class ParallelRemoteZip(namespace['RemoteZip']):
         """Same byte/header limits; four bounded ranges per prefetch, no full fetch."""
         def read(self, n=-1):
@@ -105,7 +123,7 @@ try:
     signal.signal(signal.SIGALRM, deadline)
     signal.alarm(900)
     save('reference_parser_selfcheck')
-    selfcheck = exported(image, expected)
+    selfcheck = inspect_exports(image, expected, 'reference')
     assert not selfcheck['different_export_crcs'] and not selfcheck['candidate_exports_missing_from_firmware']
     report['reference_parser_selfcheck'] = selfcheck
     del image
@@ -141,7 +159,7 @@ try:
     assert banner
     report['kernel_banner'] = banner[0].decode(errors='replace')
     save('recover_firmware_export_tables')
-    report['export_comparison'] = exported(image, expected)
+    report['export_comparison'] = inspect_exports(image, expected, 'firmware')
     report['status'] = 'PASS_BOUNDED_EXTRACTION_AND_CRC_COMPARISON_ONLY'
     report['compatibility_claim'] = False
     report['limitations'] = [

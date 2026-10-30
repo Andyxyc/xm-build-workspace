@@ -2,7 +2,7 @@ name: Chopin Android11 bounded official boot ABI evidence
 on:
   push:
     branches: [chopin-feature-kernel-20261025]
-    paths: ['chopin/tools/a11_rom_abi.py', '.github/workflows/chopin-a11-rom-abi.yml']
+    paths: ['chopin/tools/a11_rom_abi.py', 'chopin/tools/arm64_export_crc.py', '.github/workflows/chopin-a11-rom-abi.yml']
   workflow_dispatch:
 permissions:
   contents: read
