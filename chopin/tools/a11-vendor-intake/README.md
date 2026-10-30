@@ -22,30 +22,36 @@ snapshot and fail. An incomplete snapshot must not be treated as a complete
 module list. Normal directory enumeration is not independent ext4 checksum
 verification.
 
-The already completed official run covered wlan_drv_gen4m.ko, conninfra.ko
-and met.ko. It did not establish the complete Android11 module family. Do not
-use the older ten-name A12 list as an assertion that those files exist in R.
-The next proposed read is --module wmt_chrdev_wifi.ko --inventory. That name
-is already in the fixed allowlist and may supply unresolved wlan peer
-exports; its presence and export table have not been verified. The command
-will first save the directory inventory and still fail if that candidate is
-absent. It does not reopen the three completed module files, although shared
-payload operations can overlap at the transport layer.
-First obtain the real inventory and confirm its payload manifest SHA matches
-the prior run. Then review the exact regular .ko basenames within the file
-size limit, minus the three completed names. Add only those observed names
-to an explicitly reviewed allowlist and request them by --module. Keep
-directories, symlinks, oversized files, compressed/unknown formats and missing
-names separate; none silently become successful reads. A new batch still
-needs full operation-SHA and ELF checks. Do not enlarge the budget or switch
-to a full vendor download when a batch fails.
+Completed official reads covered wlan_drv_gen4m.ko, conninfra.ko, met.ko and
+wmt_chrdev_wifi.ko. The complete parsed R directory contains nine regular
+.ko files, so those four files do not establish the entire R module family.
+The remaining observed files are bt_drv.ko (343880 bytes), fpsgo.ko (40496),
+gps_drv.ko (408456), kheaders.ko (3275112) and sla.ko (36552).
+
+This v3 proposal only adds the actual bt_drv.ko and kheaders.ko basenames to
+the read allowlist. It does not map bt_drv.ko to bt_drv_6893.ko or invent an
+alias. The other three names were already allowed. The next explicit batch
+is --module bt_drv.ko --module fpsgo.ko --module gps_drv.ko --module kheaders.ko
+--module sla.ko --inventory. All five together total 4104496 bytes, within
+the unchanged selected-file budget. Keep kheaders content analysis in the
+same reviewed read batch rather than fetching that file twice.
+
+The input inventory is tied to payload manifest SHA-256
+8aa942f0442c9509943ddf3e1fd0e27a26a897ff3f41f122a5a1b6a39b24c4c5.
+That is evidence for this fixed official A11 probe only. It does not add an
+AK3 firmware/hash binding, rename a payload or change universal installer
+selection. Transport, manifest parsing, operation SHA verification, ELF
+parsing, limits and failure handling stay unchanged. A missing file still
+fails; four prior module reads and this source proposal are not an R kernel
+build, device test or compatibility acceptance.
 
 The new test_inventory.py covers metadata-only traversal, limits, partial
 failure preservation and the unchanged default selected-file path using fake
 inodes. The extended cloud ext4 fixture also checks a real CLI failure with
 synthetic HTTP: connfem.ko is deliberately absent, so the command must return
 exit 2/BLOCKED while keeping its complete directory inventory. No live ROM
-URL is opened by that fixture. The v2 real-ext4 fixture has not yet run.
+URL is opened by that fixture. The v2 cloud run passed those generated-ext4
+cases and the actual directory inventory; this v3 batch has not run.
 
 This tool reads selected module files from the fixed official chopin
 V12.5.7.0.RKPMIXM OTA. It never downloads a full ROM/vendor image, mounts a
@@ -128,18 +134,20 @@ Linux cloud job, install only the locked wheels:
 python3 -m pip install --no-deps --no-compile --require-hashes -r chopin/tools/a11-vendor-intake/requirements.lock
 python3 -B chopin/tools/a11-vendor-intake/test_vendor_reader.py --helper chopin/tools/rom_abi_probe.py --report UNIT_REPORT_JSON
 python3 -B chopin/tools/a11-vendor-intake/ext4_fixture.py --helper chopin/tools/rom_abi_probe.py --report EXT4_REPORT_JSON
-python3 -B chopin/tools/a11-vendor-intake/intake.py --helper chopin/tools/rom_abi_probe.py --out NEW_DERIVED_OUTPUT_DIRECTORY --all-modules
+python3 -B chopin/tools/a11-vendor-intake/intake.py --helper chopin/tools/rom_abi_probe.py --out NEW_DERIVED_OUTPUT_DIRECTORY --module bt_drv.ko --module fpsgo.ko --module gps_drv.ko --module kheaders.ko --module sla.ko --inventory
 ```
 
-Default intake selects only conninfra.ko and met.ko. --all-modules selects the
-fixed ten known names; --module accepts only names from that same allowlist.
+Default intake still selects only conninfra.ko and met.ko. --module accepts
+only names from the reviewed tool allowlist. --all-modules includes historical
+names that are absent from this R inventory, so it is not the remaining-file
+command. Use the explicit five-name batch above.
 Files are read only from /lib/modules in the vendor filesystem. A missing
 name does not trigger a whole-filesystem search or silently change scope.
 
-The proposed workflow runs synthetic cases on push. The official OTA read
-requires an explicit workflow_dispatch with run_official_probe=true after
-fixtures pass. Upload paths contain JSON only. No workflow has been started
-by this preparation task.
+The reviewed workflows have run fixed official batches after synthetic cases
+on scoped pushes. This proposal does not change or start a workflow. The
+next five-name command must be merged with the separate kheaders analysis
+before a single cloud read. Upload paths remain derived JSON only.
 
 The real-ext4 fixture uses the cloud runner's existing mke2fs on a new 32 MiB
 ordinary temporary file populated with generated ELF fixtures. It wraps that
@@ -152,6 +160,8 @@ hash, payload ZIP CRC, full vendor hash and OEM payload signature are not
 verified by a partial read. New import records are evidence for a fourth ABI
 family, not proof that any kernel, Android11 ROM or physical driver works.
 
-Root review: the scoped push runs the official read after fixtures succeed. The first fixed intake is wlan_drv_gen4m.ko, conninfra.ko, met.ko, in that order. No claim covers unselected files.
+The prior three-module intake and subsequent wmt_chrdev_wifi.ko plus inventory
+results remain separate evidence. This v3 preparation does not reread those
+files or claim that the remaining five imports or embedded headers passed.
 
-Root reviewed follow-up: scoped push runs official intake after fixtures, selecting only wmt_chrdev_wifi.ko plus bounded directory metadata. Prior successful wlan/conninfra/met input is retained; this run does not reread those modules. Missing file remains a failure with inventory.
+Root integration: after the reader, inventory, ext4 and generated-header fixtures pass, scoped push reads only bt_drv.ko, fpsgo.ko, gps_drv.ko, sla.ko and kheaders.ko. The prior four actual module records stay separate and are reused. kheaders is limited to 4MiB and only selected generated-header hashes/macros are emitted; cache freshness is not certified. A failed analyzer retains module import evidence and fails the job. No phone commands or AK3 changes.

@@ -216,6 +216,24 @@ class ElfFixture(unittest.TestCase):
         for data in (module_bytes(crc=1<<40),module_bytes(vermagic=b"4.14 fixture SMP")):
             with self.assertRaises(ValueError):parse_module("met.ko",data)
 
+    def test_A11_bt_basename_is_accepted_without_aliasing(self):
+        data=module_bytes(crc=0x1234abcd)
+        parsed=parse_module("bt_drv.ko",data)
+        self.assertEqual(parsed["file"],"bt_drv.ko")
+        self.assertEqual(parsed["imports"],{"module_layout":"1234abcd"})
+        self.assertEqual(parsed["sha256"],hashlib.sha256(data).hexdigest())
+
+    def test_A11_kheaders_basename_uses_the_same_ELF_parser(self):
+        data=module_bytes(crc=0x2345bcde)
+        parsed=parse_module("kheaders.ko",data)
+        self.assertEqual(parsed["file"],"kheaders.ko")
+        self.assertEqual(parsed["imports"],{"module_layout":"2345bcde"})
+        self.assertEqual(parsed["sha256"],hashlib.sha256(data).hexdigest())
+
+    def test_new_names_do_not_allow_paths_or_invented_aliases(self):
+        for name in ("../bt_drv.ko","bt_drv.ko/../kheaders.ko","kheaders.ko.xz","bt_drv_a11.ko"):
+            with self.assertRaises(ValueError):parse_module(name,module_bytes())
+
 
 if __name__ == "__main__":
     import argparse

@@ -27,6 +27,15 @@ jobs:
       - name: Check bounded metadata inventory and failure preservation
         working-directory: chopin/tools/a11-vendor-intake
         run: python3 -B -m unittest -v test_inventory
+      - name: Check bounded generated-header analysis using synthetic ELF XZ and tar
+        run: python3 -B chopin/tools/a11-vendor-intake/test_kheaders_bounded.py
+      - name: Preserve the generated-header fixture report
+        if: always()
+        run: |
+          mkdir -p a11-vendor-fixture-evidence
+          if test -f chopin/tools/a11-vendor-intake/fixture-results.json; then
+            cp chopin/tools/a11-vendor-intake/fixture-results.json a11-vendor-fixture-evidence/kheaders.json
+          fi
       - name: Read fixed modules from a generated ext4 file inside a synthetic payload
         run: python3 -B chopin/tools/a11-vendor-intake/ext4_fixture.py --helper chopin/tools/rom_abi_probe.py --report a11-vendor-fixture-evidence/ext4.json
       - uses: actions/upload-artifact@v4
@@ -46,7 +55,7 @@ jobs:
       - name: Install the fixed pure Python wheel set
         run: python3 -m pip install --no-deps --no-compile --require-hashes -r chopin/tools/a11-vendor-intake/requirements.lock
       - name: Read only the fixed module paths and publish derived import records
-        run: python3 -B chopin/tools/a11-vendor-intake/intake.py --helper chopin/tools/rom_abi_probe.py --out a11-vendor-derived-evidence --module wmt_chrdev_wifi.ko --inventory
+        run: python3 -B chopin/tools/a11-vendor-intake/intake.py --helper chopin/tools/rom_abi_probe.py --out a11-vendor-derived-evidence --module bt_drv.ko --module fpsgo.ko --module gps_drv.ko --module sla.ko --module kheaders.ko --inventory
       - uses: actions/upload-artifact@v4
         if: always()
         with:

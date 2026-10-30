@@ -16,6 +16,8 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+from bounded_kheaders import inspect_kheaders_module, DEFAULT_MACROS
+HEADER_MACROS = tuple(sorted(set(DEFAULT_MACROS + ('CONFIG_ALPHA', 'CONFIG_ANDROID_BINDER_IPC', 'CONFIG_ARM64_MODULE_PLTS', 'CONFIG_ARM64_PAGE_SHIFT', 'CONFIG_ARM64_VA_BITS', 'CONFIG_AUDIT', 'CONFIG_CC_IS_CLANG', 'CONFIG_CFI_CLANG', 'CONFIG_CFI_PERMISSIVE', 'CONFIG_CLANG_VERSION', 'CONFIG_CONSTRUCTORS', 'CONFIG_DEBUG_INFO', 'CONFIG_DEBUG_INFO_BTF', 'CONFIG_EVENT_TRACING', 'CONFIG_EXT4_FS', 'CONFIG_EXT4_FS_ENCRYPTION', 'CONFIG_F2FS_FS', 'CONFIG_F2FS_FS_ENCRYPTION', 'CONFIG_FTRACE_MCOUNT_RECORD', 'CONFIG_GCC_VERSION', 'CONFIG_GENERIC_BUG', 'CONFIG_HAVE_SYSCALL_TRACEPOINTS', 'CONFIG_IA64', 'CONFIG_JUMP_LABEL', 'CONFIG_KALLSYMS', 'CONFIG_KALLSYMS_ALL', 'CONFIG_KPROBES', 'CONFIG_KPROBES_ON_FTRACE', 'CONFIG_KPROBES_SANITY_TEST', 'CONFIG_KRETPROBES', 'CONFIG_LIVEPATCH', 'CONFIG_LOCKDEP', 'CONFIG_LTO', 'CONFIG_LTO_CLANG', 'CONFIG_MODULES', 'CONFIG_MODULES_TREE_LOOKUP', 'CONFIG_MODULE_REL_CRCS', 'CONFIG_MODULE_SIG', 'CONFIG_MODULE_UNLOAD', 'CONFIG_MTK_GPU_VERSION', 'CONFIG_MTK_PLATFORM', 'CONFIG_OPTPROBES', 'CONFIG_PPC64', 'CONFIG_RANDOMIZE_BASE', 'CONFIG_RANDOMIZE_MODULE_REGION_FULL', 'CONFIG_RETPOLINE', 'CONFIG_SECURITY', 'CONFIG_SECURITY_SELINUX', 'CONFIG_SMP', 'CONFIG_STRICT_MODULE_RWX', 'CONFIG_SYSCTL', 'CONFIG_SYSFS', 'CONFIG_THINLTO', 'CONFIG_TRACEPOINT', 'CONFIG_TRACEPOINTS', 'CONFIG_TRACING', 'CONFIG_UNUSED_SYMBOLS'))))
 
 HELPER_SHA = "ab77c172463ba046173ff531c3cc90ea8df8cbb5f3280959d1ee02c0d84f0807"
 MAX_NETWORK = 128 * 1024 * 1024
@@ -26,7 +28,8 @@ MAX_LOGICAL_READ = 16 * 1024 * 1024
 MAX_LOGICAL_TOTAL = 64 * 1024 * 1024
 MAX_MODULE = 16 * 1024 * 1024
 MODULES = ("conninfra.ko", "met.ko", "connfem.ko", "bt_drv_6893.ko", "fmradio_drv_connac2x.ko",
-           "fpsgo.ko", "gps_drv.ko", "sla.ko", "wlan_drv_gen4m.ko", "wmt_chrdev_wifi.ko")
+           "fpsgo.ko", "gps_drv.ko", "sla.ko", "wlan_drv_gen4m.ko", "wmt_chrdev_wifi.ko",
+           "bt_drv.ko", "kheaders.ko")
 
 
 def require(value, message):
@@ -443,11 +446,28 @@ def module_manifests(partition, selected, on_module=None, on_inventory=None):
         require(node.filetype == stat.S_IFREG and not node.inode.i_flags & 0x804,
                 "Module must be a plain regular, unencrypted, uncompressed file")
         require(0 < node.size <= MAX_MODULE, "Module file size exceeds limit")
+        if name == 'kheaders.ko':
+            require(node.size <= 4*1024*1024, 'kheaders input exceeds the bounded analyzer limit')
         total += node.size
         require(total <= 32 * 1024 * 1024, "Total selected module-byte budget reached")
         data = node.open().read(node.size + 1)
         require(len(data) == node.size, "Truncated module file")
-        rows.append(parse_module(name, data))
+        row = parse_module(name, data)
+        if name == 'kheaders.ko':
+            try:
+                row['generated_header_evidence'] = inspect_kheaders_module(name, data, macro_names=HEADER_MACROS)
+                head = row['generated_header_evidence']['selected_headers'].get('include/generated/utsrelease.h', {})
+                value = head.get('requested_macros', {}).get('UTS_RELEASE', {}).get('value')
+                row['generated_header_release_matches_module_vermagic'] = (
+                    value.strip('"') == row['vermagic'].split()[0]) if value is not None else None
+            except Exception as error:
+                row['generated_header_evidence'] = {'status': 'FAIL_BOUNDED_HEADER_EXTRACTION',
+                    'error': type(error).__name__+': '+str(error)}
+                rows.append(row)
+                if on_module is not None:
+                    on_module(row)
+                raise
+        rows.append(row)
         if on_module is not None:
             on_module(rows[-1])
     return rows, {"filesystem": "ext4", "block_size": fs.block_size, "blocks": fs.block_count,
