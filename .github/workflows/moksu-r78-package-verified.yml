@@ -1,0 +1,88 @@
+name: moksu R7.8 verified core package
+on:
+  push:
+    branches: [moksu-ksu32709-r78-20261030]
+    paths: ['.github/workflows/moksu-r78-package-verified.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    name: Assemble CI32709 APK from successful component builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r78-android-exact
+          path: android
+          run-id: 41038107813
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r78-native
+          path: native
+          run-id: 41037630715
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r78-source
+          path: input
+          run-id: 41037630715
+          github-token: ${{ github.token }}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'build-tools;37.0.0'
+      - name: Verify identities and replace only native payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/lib64
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZipInfo,ZIP_DEFLATED
+          import hashlib,json,struct
+          assert hashlib.sha256(Path('native/aarch64-linux-android/ksud').read_bytes()).hexdigest()=='deee8b14d42c0ae1a3a71cf63d42cbb6c5e6f02c1336103d79fb4c5726fa0a3e'
+          assert hashlib.sha256(Path('native/x86_64-linux-android/ksud').read_bytes()).hexdigest()=='997a3595929739462081da7ef4d48766635daa1fdbc9e06e40c3a8875aaa59d1'
+          report=json.loads(Path('android/manager-source-verification.json').read_text())
+          assert report['identical_to_R7_7'] and report['sha256_tree']=='c48f67e1dc97de73217bee907b32acda16669f4f3b991b748a44b376213059cb'
+          assert json.loads(Path('input/R78-core-upgrade.json').read_text())['core_version']==32709
+          updates={'lib/arm64-v8a/libksud.so':Path('native/aarch64-linux-android/ksud'),'lib/x86_64/libksud.so':Path('native/x86_64-linux-android/ksud')}
+          for name,p in updates.items():
+              data=p.read_bytes();assert data.startswith(b'\x7fELF') and b'com.moksu.manager' in data
+              assert struct.unpack_from('<H',data,18)[0]==(183 if 'arm64' in name else 62)
+          with ZipFile('android/manager-raw-unsigned.apk') as src,ZipFile('out/merged-unaligned.apk','w') as dst:
+              for info in src.infolist():
+                  if info.filename in updates:continue
+                  if info.filename.startswith('META-INF/') and info.filename.lower().endswith(('.rsa','.dsa','.ec','.sf')):continue
+                  dst.writestr(info,src.read(info.filename))
+              for name,p in updates.items():
+                  zi=ZipInfo(name);zi.compress_type=ZIP_DEFLATED;zi.external_attr=0o644<<16;dst.writestr(zi,p.read_bytes())
+          with ZipFile('out/merged-unaligned.apk') as check,ZipFile('android/manager-raw-unsigned.apk') as original:
+              assert check.testzip() is None
+              assert len(check.namelist())==len(set(check.namelist()))
+              for n in original.namelist():
+                  if n in updates or (n.startswith('META-INF/') and n.lower().endswith(('.rsa','.dsa','.ec','.sf'))):continue
+                  assert check.read(n)==original.read(n),n
+              assert check.getinfo('resources.arsc').compress_type==0
+          Path('out/native-sha256.json').write_text(json.dumps({k:hashlib.sha256(v.read_bytes()).hexdigest() for k,v in updates.items()},indent=2)+'\n')
+          PY
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/zipalign" -p -f 4 out/merged-unaligned.apk out/moksu-KSU32709-R7.8-UNSIGNED.apk
+          "$BT/zipalign" -c -v 4 out/moksu-KSU32709-R7.8-UNSIGNED.apk > out/alignment-report.txt
+          "$BT/aapt" dump badging out/moksu-KSU32709-R7.8-UNSIGNED.apk > out/apk-badging.txt
+          grep -q "name='com.moksu.manager' versionCode='32709' versionName='3.3.1-CI32709-R7.8'" out/apk-badging.txt
+          grep -q "application-label:'moksu'" out/apk-badging.txt
+          cp "$BT/lib/apksigner.jar" out/apksigner.jar
+          cp "$BT/zipalign" "$BT/aapt" out/
+          test -s "$BT/lib64/libc++.so"
+          cp "$BT/lib64/libc++.so" out/lib64/
+          cp input/R78-core-upgrade.json input/R78-baseline-check.json android/manager-source-verification.json out/
+          sha256sum out/moksu-KSU32709-R7.8-UNSIGNED.apk out/lib64/libc++.so > out/unsigned-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moksu-r78-verified-unsigned
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
