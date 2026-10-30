@@ -1,0 +1,71 @@
+name: moksu R7.8 exact manager tree build
+on:
+  push:
+    branches: [moksu-core-ci-r78-20261030]
+    paths: ['.github/workflows/moksu-r78-android-clean.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  android:
+    name: Compile verified unchanged manager with CI32709 core bridge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: ab05a0626e88d4ada1295ec561d5660f26547fdc
+          fetch-depth: 0
+          path: history
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r78-source
+          path: input
+          run-id: 41035566612
+          github-token: ${{ github.token }}
+      - name: Materialize exact source, never overlay a newer UI tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source out
+          cp -a history/.git source/.git
+          tar -xzf input/moksu-r78-source.tar.gz -C source
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('source')
+          h=hashlib.sha256()
+          count=0
+          for p in sorted((root/'manager').rglob('*')):
+              if p.is_file() and not p.is_symlink():
+                  h.update(str(p.relative_to(root)).encode()+b'\0'+hashlib.sha256(p.read_bytes()).digest())
+                  count+=1
+          assert h.hexdigest()=='8fff1707b219415f101a210bb9ab8382356926a9858050a4cb0910f4e95e3c76', h.hexdigest()
+          assert 'KERNEL_SU_UAPI_VERSION = 6;' in (root/'uapi/supercall.h').read_text()
+          Path('out/manager-source-audit.json').write_text(json.dumps({'files':count,'sha256':h.hexdigest(),'matches_r77':True,'uapi':6},indent=2)+'\n')
+          PY
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Build original interface and package
+        working-directory: source/manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.2-R7.8-CI32709 -PKSU_VERSION_CODE=32709 -PMOKSU_APP_INFO_MODE=unified 2>&1 | tee "$GITHUB_WORKSPACE/out/android-build.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk"
+          test -s "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk"
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/aapt" dump badging "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk" > "$GITHUB_WORKSPACE/out/apk-badging.txt"
+          grep -q "package: name='com.moksu.manager' versionCode='32709' versionName='3.3.2-R7.8-CI32709'" "$GITHUB_WORKSPACE/out/apk-badging.txt"
+          cp "$BT/lib/apksigner.jar" "$GITHUB_WORKSPACE/out/apksigner.jar"
+          cp "$BT/zipalign" "$GITHUB_WORKSPACE/out/zipalign"
+          cp "$BT/aapt" "$GITHUB_WORKSPACE/out/aapt"
+          sha256sum "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk" > "$GITHUB_WORKSPACE/out/unsigned-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r78-android-verified, path: out/, retention-days: 30, if-no-files-found: error}
