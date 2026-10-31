@@ -71,6 +71,9 @@ valid,meta=module()
 reference=run('valid_generated_headers_only',valid,contains='4.14.186-SYNTHETIC-ONLY')
 assert reference and reference['selected_headers']['include/generated/autoconf.h']['requested_macros']['CONFIG_MISSING']['state']=='not_defined_in_this_header'
 run('different_ELF_offsets',module(extra_pad=312)[0])
+run('vendor_comma_binding_header',module(BASE+[{'name':'include/dt-bindings/reset/qcom,mmcc-msm8974.h','data':b'ignored-vendor-header'}])[0])
+for name in ['include/../qcom,escape.h','/qcom,absolute.h','include/qcom,unsafe;name.h']:
+    run('comma_does_not_relax_path_'+repr(name),module(BASE+[{'name':name,'data':b'X'}])[0],False)
 run('misleading_XZ_magic_outside_anchors',module(prefix=b'\xfd7zXZ\x00BADPREFIX',suffix=b'\xfd7zXZ\x00BADSUFFIX')[0])
 run('wrong_machine',mutate(valid,18,62,'<H'),False)
 run('wrong_class',mutate(valid,4,1),False)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Cloud-only: unmodified MiCode R baseline, then the 434 known R imports.
+"""Cloud-only: MiCode R plus a recorded C prototype fix, then 434 known R imports.
 
 This file is a reviewed proposal. It has not compiled a kernel locally. It
-does not patch source/config, compose boot/AK3, or access a device.
+does not compose boot/AK3 or access a device. No config options are changed.
 """
 import hashlib
 import json
@@ -59,6 +59,17 @@ def main():
         head = subprocess.check_output(["git", "-C", str(kernel), "rev-parse", "HEAD"], text=True).strip()
         assert head == R
         assert not subprocess.check_output(["git", "-C", str(kernel), "status", "--porcelain"])
+        # The prior real clang13 build stopped here with -Wstrict-prototypes.
+        # Only spell the existing no-argument declaration explicitly; retain its body.
+        dsi = kernel/"drivers/gpu/drm/mediatek/mtk_dsi.c"
+        assert sha(dsi) == "385067c365eee761f6d83832e538822e1b8ebe295e1f31b26c13fa010db40961"
+        text = dsi.read_text(encoding="utf-8")
+        old = "bool get_dsi_doze_state()\n"
+        assert text.count(old) == 1
+        dsi.write_text(text.replace(old, "bool get_dsi_doze_state(void)\n", 1), encoding="utf-8")
+        assert sha(dsi) == "38385114e51f29efffa4c2b630e2ee38c531392832e479629612295a7452239c"
+        report["profile"] = "R_ANDROID11_NATIVE_PLUS_EXPLICIT_VOID_COMPILER_FIX"
+        report["source_or_config_patches_applied"] = [{"file": "drivers/gpu/drm/mediatek/mtk_dsi.c", "change": "get_dsi_doze_state() -> get_dsi_doze_state(void)", "config_changed": False}]
         assert subprocess.check_output(["git", "-C", str(workspace/"clang"), "rev-parse", "HEAD"], text=True).strip() == CLANG
         assert sha(kernel/"arch/arm64/configs/chopin_user_defconfig") == DEFCFG_SHA
         assert sha(imports) == IMPORTS_SHA

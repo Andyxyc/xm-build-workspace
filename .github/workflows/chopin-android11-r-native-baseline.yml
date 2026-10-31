@@ -51,7 +51,7 @@ jobs:
           cd builder
           source scripts/toolchain.sh
           setup_gcc
-      - name: Build unmodified R and compare the 434 known R kernel imports
+      - name: Build R with recorded prototype fix and compare the 434 known R imports
         run: python3 chopin/tools/a11_r_baseline/build_native_r.py
       - name: Preserve exact source changes, including failure cases
         if: always()

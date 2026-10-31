@@ -102,7 +102,9 @@ def safe_name(name,L,allow_root=False):
     name=name.rstrip('/')
     if name in ('','.'):need(allow_root,'Tar root name not allowed');return '.'
     parts=name.split('/')
-    need(all(p not in ('','..','.') for p in parts) and all(re.fullmatch(r'[A-Za-z0-9_.+@-]+',p) for p in parts),'Tar traversal or unsupported path characters: '+repr(name[:512]))
+    # Device-tree binding headers use vendor commas (e.g. qcom,mmcc-msm8974.h).
+    # Keep the component/traversal rules; these names are inspected, never extracted.
+    need(all(p not in ('','..','.') for p in parts) and all(re.fullmatch(r'[A-Za-z0-9_.+@,-]+',p) for p in parts),'Tar traversal or unsupported path characters: '+repr(name[:512]))
     return name
 
 def safe_link(member,target,hard,L):
