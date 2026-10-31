@@ -70,6 +70,17 @@ def main():
         assert sha(dsi) == "38385114e51f29efffa4c2b630e2ee38c531392832e479629612295a7452239c"
         report["profile"] = "R_ANDROID11_NATIVE_PLUS_EXPLICIT_VOID_COMPILER_FIX"
         report["source_or_config_patches_applied"] = [{"file": "drivers/gpu/drm/mediatek/mtk_dsi.c", "change": "get_dsi_doze_state() -> get_dsi_doze_state(void)", "config_changed": False}]
+        # The real Image/modules build exposed the same memory object twice:
+        # it is already part of composite mtk-vcu-y, not a second provider.
+        vcu = kernel/"drivers/media/platform/mtk-vcu/Makefile"
+        assert sha(vcu) == "aef5e7096f2f98f74dd5d7b3ccea84286517992669db68642625f9301106300d"
+        text = vcu.read_text(encoding="utf-8")
+        old = "obj-$(CONFIG_VIDEO_MEDIATEK_VCU) += mtk-vcu.o mtk_vcodec_mem.o"
+        assert text.count(old) == 1 and "mtk-vcu-y += mtk_vcu.o" in text
+        vcu.write_text(text.replace(old, "obj-$(CONFIG_VIDEO_MEDIATEK_VCU) += mtk-vcu.o", 1), encoding="utf-8")
+        assert sha(vcu) == "5539c9cdaa20f7fad56d96003151146d873d2809758240a94f973aed608afe35"
+        report["source_or_config_patches_applied"].append({"file": "drivers/media/platform/mtk-vcu/Makefile", "change": "link the original memory provider only through its existing composite target", "config_changed": False, "camera_codec_features_disabled": False})
+        report["profile"] = "R_ANDROID11_NATIVE_PLUS_RECORDED_COMPILER_AND_KBUILD_FIXES"
         assert subprocess.check_output(["git", "-C", str(workspace/"clang"), "rev-parse", "HEAD"], text=True).strip() == CLANG
         assert sha(kernel/"arch/arm64/configs/chopin_user_defconfig") == DEFCFG_SHA
         assert sha(imports) == IMPORTS_SHA
