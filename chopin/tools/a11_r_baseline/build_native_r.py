@@ -94,7 +94,7 @@ def main():
         report["tool_binary_sha256"] = {str(p.relative_to(workspace)): sha(p) for p in tools}
         for p in workspace.glob("gcc-*.tar.gz"):
             report.setdefault("gcc_archive_sha256", {})[p.name] = sha(p)
-        base = ["make", "-C", str(kernel), "O=out", "ARCH=arm64", "CC="+str(workspace/"clang/bin/clang"),
+        base = ["make", "-C", str(kernel), "O=out", "ARCH=arm64", "CC=ccache "+str(workspace/"clang/bin/clang"),
                 "LD=ld.lld", "AR=llvm-ar", "NM=llvm-nm", "STRIP=llvm-strip", "OBJCOPY=llvm-objcopy",
                 "OBJDUMP=llvm-objdump", "CLANG_TRIPLE=aarch64-linux-gnu-",
                 "CROSS_COMPILE="+str(workspace/"gcc-64/bin/aarch64-linux-android-"),
@@ -108,7 +108,12 @@ def main():
         assert 'CONFIG_MTK_GPU_VERSION="mali valhall r25p0"' in cfg.splitlines()
         assert not any(x in cfg.splitlines() for x in ["CONFIG_KSU=y", "CONFIG_KSU_SUSFS=y", "CONFIG_KPM=y"])
         report["stage"] = "native_compile"
-        run_logged(base+["-j2"], output/"compile.log", env)
+        # The previous real build hit a missing vendor-generated cust.dtsi in
+        # the default DTB target. ABI investigation needs the actual Image and
+        # modules, not an invented device tree; retain the DTB limitation.
+        report["build_targets"] = ["Image", "modules"]
+        report["device_tree_status"] = "NOT_BUILT_MISSING_VENDOR_GENERATED_k6891v1_64_cust_dtsi"
+        run_logged(base+["-j2", "Image", "modules"], output/"compile.log", env)
         report["stage"] = "R_known_imports_gate"
         checker = here.parent/"verify_vendor_imports.py"
         run_logged([sys.executable, str(checker), str(out/"Module.symvers"), str(imports),

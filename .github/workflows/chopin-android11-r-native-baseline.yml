@@ -19,6 +19,11 @@ jobs:
       ENABLE_GCC_ARM32: 'true'
       AOSP_GCC_TAG: android-12.1.0_r27
       PYTHONDONTWRITEBYTECODE: '1'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-r
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: 'true'
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Host prerequisites
@@ -26,7 +31,12 @@ jobs:
           set -euo pipefail
           mkdir -p r-baseline-evidence "$WORKSPACE"
           sudo timeout 180 apt-get update -qq
-          sudo timeout 180 apt-get install -y --no-install-recommends bc bison flex libssl-dev libelf-dev xz-utils
+          sudo timeout 180 apt-get install -y --no-install-recommends ccache bc bison flex libssl-dev libelf-dev xz-utils
+      - uses: actions/cache/restore@v4
+        with:
+          path: .ccache-r
+          key: chopin-R-clang13-explicit-void-${{ github.run_id }}
+          restore-keys: chopin-R-clang13-explicit-void-
       - name: Fetch the exact public R kernel and existing builder utilities
         run: |
           set -euo pipefail
@@ -51,7 +61,7 @@ jobs:
           cd builder
           source scripts/toolchain.sh
           setup_gcc
-      - name: Build R with recorded prototype fix and compare the 434 known R imports
+      - name: Build actual R Image and modules with recorded prototype fix and compare the 434 known R imports
         run: python3 chopin/tools/a11_r_baseline/build_native_r.py
       - name: Preserve exact source changes, including failure cases
         if: always()
@@ -62,6 +72,12 @@ jobs:
             git -C "$WORKSPACE/android-kernel" status --short > r-baseline-evidence/native-source-status.txt
           fi
           cp chopin/abi-profiles/android11-three-module-imports.json r-baseline-evidence/
+          ccache -s > r-baseline-evidence/ccache.txt || true
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .ccache-r
+          key: chopin-R-clang13-explicit-void-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
