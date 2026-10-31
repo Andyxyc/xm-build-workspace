@@ -1,0 +1,81 @@
+name: Chopin Android11 stock config object ABI probe
+on:
+  push:
+    branches: [chopin-feature-kernel-20261025]
+    paths:
+      - '.github/workflows/chopin-android11-r-config-objects.yml'
+      - 'chopin/tools/a11_r_config_probe/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  config-objects:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      WORKSPACE: ${{ github.workspace }}/kernel_workspace_r
+      ENABLE_GCC_ARM64: 'true'
+      ENABLE_GCC_ARM32: 'true'
+      AOSP_GCC_TAG: android-12.1.0_r27
+      PYTHONDONTWRITEBYTECODE: '1'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-r
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: 'true'
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host prerequisites
+        run: |
+          set -euo pipefail
+          mkdir -p r-baseline-evidence "$WORKSPACE"
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y --no-install-recommends ccache bc bison flex libssl-dev libelf-dev xz-utils
+      - uses: actions/cache/restore@v4
+        with:
+          path: .ccache-r
+          key: chopin-R-clang13-explicit-void-${{ github.run_id }}
+          restore-keys: chopin-R-clang13-explicit-void-
+      - name: Fetch the exact public R kernel and existing builder utilities
+        run: |
+          set -euo pipefail
+          git init "$WORKSPACE/android-kernel"
+          git -C "$WORKSPACE/android-kernel" remote add origin https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git
+          git -C "$WORKSPACE/android-kernel" fetch --depth=1 origin 2af31af37e12a338fddca780044f8b182c23ed9a
+          git -C "$WORKSPACE/android-kernel" checkout --detach FETCH_HEAD
+          test "$(git -C "$WORKSPACE/android-kernel" rev-parse HEAD)" = 2af31af37e12a338fddca780044f8b182c23ed9a
+          git init builder
+          git -C builder remote add origin https://github.com/Owen0225/sukisu-Ultra-4.14.-.git
+          git -C builder fetch --depth=1 origin 3a0956434309958a96ca3f701cad7d7c5af0a83b
+          git -C builder checkout --detach FETCH_HEAD
+          test "$(git -C builder rev-parse HEAD)" = 3a0956434309958a96ca3f701cad7d7c5af0a83b
+      - name: Use the existing pinned clang13 investigation toolchain
+        run: |
+          set -euo pipefail
+          git init "$WORKSPACE/clang"
+          git -C "$WORKSPACE/clang" remote add origin https://gitlab.com/LeCmnGend/proton-clang.git
+          git -C "$WORKSPACE/clang" fetch --depth=1 origin b62936c20dfd8fabd680b8879e2aa0a3cc1b024a
+          git -C "$WORKSPACE/clang" checkout --detach FETCH_HEAD
+          test "$(git -C "$WORKSPACE/clang" rev-parse HEAD)" = b62936c20dfd8fabd680b8879e2aa0a3cc1b024a
+          cd builder
+          source scripts/toolchain.sh
+          setup_gcc
+      - name: Compare native and stock-derived config using module object CRC only
+        run: python3 chopin/tools/a11_r_config_probe/config_probe.py
+      - name: Preserve cache statistics even on failure
+        if: always()
+        run: |
+          mkdir -p r-config-object-evidence
+          ccache -s > r-config-object-evidence/ccache.txt || true
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .ccache-r
+          key: chopin-R-clang13-explicit-void-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chopin-R-two-config-object-diagnostic-not-flashable
+          path: r-config-object-evidence/**
+          if-no-files-found: error
+          retention-days: 14
