@@ -13,6 +13,7 @@ import sys
 import time
 import urllib.request
 import zipfile
+import zlib
 from pathlib import Path
 from arm64_export_crc import exported as absolute_exports
 from vmlinux_to_elf.core.kallsyms import KallsymsFinder
@@ -65,6 +66,32 @@ def inspect_exports(image, expected, label):
     # base from relocated export-name pointers, then independently locate CRCs.
     return absolute_exports(found.kernel_img, expected)
 
+
+
+def embedded_config_values(image):
+    """Bounded gzip IKCONFIG from the exact firmware Image, not kheaders cache."""
+    marker = b'IKCFG_ST'
+    positions = [m.start() for m in re.finditer(re.escape(marker), image)]
+    assert len(positions) == 1, 'Expected one IKCONFIG frame'
+    dec = zlib.decompressobj(31)
+    raw = dec.decompress(image[positions[0]+len(marker):], 1024*1024+1)
+    assert len(raw) <= 1024*1024 and dec.eof and not dec.unconsumed_tail
+    assert dec.unused_data.startswith(b'IKCFG_ED'), 'IKCONFIG end marker missing'
+    values = {}
+    for line in raw.decode('ascii').splitlines():
+        if line.startswith('# CONFIG_') and line.endswith(' is not set'):
+            name, value = line[2:-11], 'n'
+        elif re.fullmatch(r'CONFIG_[A-Za-z0-9_]+=[^\r\n]{1,1024}', line):
+            name, value = line.split('=', 1)
+        else:
+            continue
+        assert name not in values, 'Duplicate config key'
+        values[name] = value
+    assert 1000 <= len(values) <= 20000
+    return {'config_sha256': hashlib.sha256(raw).hexdigest(),
+            'config_bytes': len(raw), 'key_values': values,
+            'source': 'IKCONFIG inside SHA-pinned official stock Image',
+            'compiled_object_consistency_claim': False}
 
 try:
     save('verify_exact_reference_and_parser')
@@ -155,6 +182,12 @@ try:
     image = gzip.GzipFile(fileobj=io.BytesIO(boot[page:page+size])).read(96*1024*1024+1)
     assert 0 < len(image) <= 96*1024*1024 and image[56:60] == b'ARMd'
     report['image_sha256'] = hashlib.sha256(image).hexdigest()
+    assert report['boot_sha256'] == 'a0fbb496a41d93d171f6fbd72c09023174c98dd396e215dc6af5f3a05089711c'
+    assert report['image_sha256'] == '35cc28163c6e0c766418d06f60c22840de2f1b9d8a1b79afc398cb37182d015f'
+    config = embedded_config_values(image)
+    (OUT/'stock-embedded-config-values.json').write_text(json.dumps(config, indent=2)+'\n', encoding='utf-8')
+    report['embedded_config'] = {k: v for k, v in config.items() if k != 'key_values'}
+    report['embedded_config']['keys'] = len(config['key_values'])
     banner = re.search(rb'Linux version [^\x00\n]{1,400}', image)
     assert banner
     report['kernel_banner'] = banner[0].decode(errors='replace')
