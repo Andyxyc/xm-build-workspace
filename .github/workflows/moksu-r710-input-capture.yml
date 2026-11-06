@@ -1,0 +1,207 @@
+name: moksu R7.10 ordinary credential input and capture compatibility
+on:
+  push:
+    branches: [moksu-r710-input-capture-20261106]
+    paths: ['moksu/r710/**', '.github/workflows/moksu-r710-input-capture.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: moksu-r710-input-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r79-source
+          path: input
+          run-id: 42211272068
+          github-token: ${{ github.token }}
+      - name: Apply bounded input-only changes to R7.9
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source out
+          tar --no-same-owner -xzf input/moksu-r79-source.tar.gz -C source
+          python3 -m py_compile config/moksu/r710/prepare_inputs.py
+          python3 config/moksu/r710/prepare_inputs.py source config/moksu/r710 | tee out/source-checks.log
+          node --check source/userspace/ksud/assets/webadmin/app.js
+          cp source/R710-input-checks.json out/
+          tar --exclude=.git --exclude=target --exclude=build --exclude=.gradle --exclude=.cxx --exclude=__pycache__ -czf out/moksu-r710-source.tar.gz -C source .
+          tar --exclude=.git --exclude=__pycache__ -czf out/moksu-r710-build-config.tar.gz -C config moksu .github
+          git -C config rev-parse HEAD > out/build-config-commit.txt
+      - uses: actions/upload-artifact@v4
+        with: {name: moksu-r710-source, path: out/, retention-days: 30, if-no-files-found: error}
+  android:
+    runs-on: ubuntu-24.04
+    needs: source
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 019a3c0103a8f8d56675546016c4073d0fd18352
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r710-source, path: input}
+      - name: Restore exact manager tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('source').resolve(strict=True)
+          assert (root/'.git').is_dir() and root.name=='source'
+          target=root/'manager'
+          assert target.is_dir() and not target.is_symlink()
+          shutil.rmtree(target)
+          PY
+          mkdir -p out
+          tar --no-same-owner -xzf input/moksu-r710-source.tar.gz -C source
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - name: Compile manager and run input policy tests
+        shell: bash
+        working-directory: source/manager
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease :app:testReleaseUnitTest --tests 'me.weishu.kernelsu.mok.MokInputPresentationTest' -PKSU_NAME=moksu -PKSU_PACKAGE_NAME=com.moksu.manager -PKSU_VERSION_NAME=3.3.1-CI32717-R7.10 -PKSU_VERSION_CODE=32718 -PMOKSU_APP_INFO_MODE=unified 2>&1 | tee "$GITHUB_WORKSPACE/out/gradle-R710.log"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/manager-raw-unsigned.apk"
+          cp -r app/build/test-results/testReleaseUnitTest "$GITHUB_WORKSPACE/out/unit-test-results"
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          reports=list(Path('app/build/test-results/testReleaseUnitTest').glob('TEST-*MokInputPresentationTest*.xml'))
+          assert len(reports)==1, reports
+          suite=ET.parse(reports[0]).getroot()
+          assert int(suite.attrib['tests'])==12,suite.attrib
+          assert int(suite.attrib['failures'])==0 and int(suite.attrib['errors'])==0,suite.attrib
+          assert int(suite.attrib.get('skipped','0'))==0,suite.attrib
+          print('R710_INPUT_TESTS_PASS',suite.attrib['tests'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r710-android, path: out/, retention-days: 30, if-no-files-found: error}
+  native:
+    runs-on: ubuntu-24.04
+    needs: source
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tiann/KernelSU
+          ref: 019a3c0103a8f8d56675546016c4073d0fd18352
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r710-source, path: input}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: moksu-r79-kmi-*
+          path: lkms
+          merge-multiple: true
+          run-id: 42211272068
+          github-token: ${{ github.token }}
+      - name: Restore source with unchanged CI32717 kernel modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tar --no-same-owner -xzf input/moksu-r710-source.tar.gz -C source
+          for arch in aarch64 x86_64; do
+            test "$(find "lkms/$arch" -maxdepth 1 -name '*_kernelsu.ko' | wc -l)" -eq 8
+          done
+          test "$(git -C source rev-list --count HEAD)" = 2717
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - name: Prepare native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;29.0.14206865'
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+          rustup update stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Rebuild daemon with updated embedded web input
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash source/moksu-build/ksu331/build_userspace.sh 2>&1 | tee out/native-R710.log
+          for triple in aarch64-linux-android x86_64-linux-android; do
+            cp "source/target/$triple/release/ksuinit" "out/$triple/ksuinit"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: moksu-r710-native, path: out/, retention-days: 30, if-no-files-found: error}
+  package:
+    runs-on: ubuntu-24.04
+    needs: [source, android, native]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r710-android, path: android}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r710-native, path: native}
+      - uses: actions/download-artifact@v4
+        with: {name: moksu-r710-source, path: input}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'build-tools;37.0.0'
+      - name: Assemble and inspect APK for original-key signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/lib64
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+          import hashlib,json,struct
+          updates={'lib/arm64-v8a/libksud.so':Path('native/aarch64-linux-android/ksud'), 'lib/x86_64/libksud.so':Path('native/x86_64-linux-android/ksud')}
+          for name,p in updates.items():
+              b=p.read_bytes()
+              assert b.startswith(b'\x7fELF') and len(b)>1000000
+              assert b'32717' in b and b'com.moksu.manager' in b
+              assert b'field.style.webkitTextSecurity="disc"' in b
+              assert struct.unpack_from('<H',b,18)[0]==(183 if 'arm64' in name else 62)
+          with ZipFile('android/manager-raw-unsigned.apk') as src,ZipFile('out/merged-unaligned.apk','w') as dst:
+              for info in src.infolist():
+                  if info.filename in updates:continue
+                  if info.filename.startswith('META-INF/') and info.filename.lower().endswith(('.rsa','.dsa','.ec','.sf')):continue
+                  dst.writestr(info,src.read(info.filename))
+              for name,p in updates.items():
+                  zi=ZipInfo(name);zi.compress_type=ZIP_DEFLATED;zi.external_attr=0o644<<16
+                  dst.writestr(zi,p.read_bytes())
+          with ZipFile('out/merged-unaligned.apk') as z:
+              assert z.testzip() is None and len(z.namelist())==len(set(z.namelist()))
+              assert z.getinfo('resources.arsc').compress_type==0
+          Path('out/native-sha256.json').write_text(json.dumps({n:hashlib.sha256(p.read_bytes()).hexdigest() for n,p in updates.items()},indent=2)+'\n')
+          PY
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/zipalign" -p -f 4 out/merged-unaligned.apk out/moksu-KSU32717-R7.10-UNSIGNED.apk
+          "$BT/zipalign" -c -v 4 out/moksu-KSU32717-R7.10-UNSIGNED.apk > out/alignment-report.txt
+          "$BT/aapt" dump badging out/moksu-KSU32717-R7.10-UNSIGNED.apk > out/apk-badging.txt
+          grep -q "name='com.moksu.manager' versionCode='32718' versionName='3.3.1-CI32717-R7.10'" out/apk-badging.txt
+          cp "$BT/lib/apksigner.jar" "$BT/aapt" "$BT/zipalign" out/
+          cp "$BT/lib64/libc++.so" out/lib64/
+          cp input/R710-input-checks.json input/moksu-r710-source.tar.gz input/moksu-r710-build-config.tar.gz input/build-config-commit.txt out/
+          cp -r android/unit-test-results out/
+          cp android/gradle-R710.log native/native-R710.log out/
+          sha256sum out/moksu-KSU32717-R7.10-UNSIGNED.apk > out/unsigned-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with: {name: moksu-r710-complete-unsigned, path: out/, retention-days: 30, if-no-files-found: error}
