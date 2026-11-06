@@ -1,0 +1,106 @@
+name: moksu R7.10 tested credential input package
+on:
+  push:
+    branches: [moksu-r710-input-capture-20261106]
+    paths: ['.github/workflows/moksu-r710-package-tested.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: config, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r710-android-tested
+          path: android
+          run-id: 42215816159
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r710-native
+          path: native
+          run-id: 42214935647
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: moksu-r710-source
+          path: input
+          run-id: 42214935647
+          github-token: ${{ github.token }}
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools, cmdline-tools-version: 16111833, log-accepted-android-sdk-licenses: false}
+      - run: sdkmanager 'build-tools;37.0.0'
+      - name: Validate tests and decompressed embedded assets then assemble APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/lib64
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZipInfo,ZIP_DEFLATED
+          import hashlib,json,struct,tarfile,zlib
+          import xml.etree.ElementTree as ET
+          tests=list(Path('android/unit-test-results').glob('TEST-*MokInputPresentationTest*.xml'))
+          assert len(tests)==1,tests
+          suite=ET.parse(tests[0]).getroot()
+          assert int(suite.attrib['tests'])==12 and int(suite.attrib['failures'])==0 and int(suite.attrib['errors'])==0
+          assert int(suite.attrib.get('skipped','0'))==0
+          with tarfile.open('input/moksu-r710-source.tar.gz','r:gz') as archive:
+              member=next(m for m in archive.getmembers() if m.name.removeprefix('./')=='userspace/ksud/assets/webadmin/app.js')
+              expected_js=archive.extractfile(member).read()
+          assert hashlib.sha256(expected_js).hexdigest()=='5e381c6fa4c65ec959051d79de0a08a20b8411dfb1434983da4563661abeed7e'
+          updates={'lib/arm64-v8a/libksud.so':Path('native/aarch64-linux-android/ksud'),'lib/x86_64/libksud.so':Path('native/x86_64-linux-android/ksud')}
+          pinned={
+              'lib/arm64-v8a/libksud.so':('3048fbf17f8c5a96b89b6228acf6fcc40351e926d8a2f570847dd5356c4e088f',2871672,183),
+              'lib/x86_64/libksud.so':('0d72dd108caa9453918382da81895f3259d9ecde787abc676d7ae8a6310a3cf6',2526463,62)}
+          verified={}
+          for name,p in updates.items():
+              b=p.read_bytes();sha,offset,machine=pinned[name]
+              assert hashlib.sha256(b).hexdigest()==sha
+              assert b.startswith(b'\x7fELF') and struct.unpack_from('<H',b,18)[0]==machine
+              assert b'32717' in b and b'com.moksu.manager' in b
+              # rust-embed stores release assets using include-flate raw DEFLATE.
+              compressed=b[offset:offset+25495]
+              assert hashlib.sha256(compressed).hexdigest()=='82546413336904adee75ed270b6298846c6f9ec6c126ed11ed79376b34055bd1'
+              decoder=zlib.decompressobj(-15)
+              restored=decoder.decompress(compressed,len(expected_js)+1)
+              assert decoder.eof and not decoder.unused_data and restored==expected_js
+              assert b'field.style.webkitTextSecurity="disc"' in restored
+              assert b'field.type="password"' not in restored
+              verified[name]={'ksud_sha256':sha,'web_js_sha256':hashlib.sha256(restored).hexdigest(),'source_byte_identical':True}
+          with ZipFile('android/manager-raw-unsigned.apk') as src,ZipFile('out/merged-unaligned.apk','w') as dst:
+              for info in src.infolist():
+                  if info.filename in updates:continue
+                  if info.filename.startswith('META-INF/') and info.filename.lower().endswith(('.rsa','.dsa','.ec','.sf')):continue
+                  dst.writestr(info,src.read(info.filename))
+              for name,p in updates.items():
+                  zi=ZipInfo(name);zi.compress_type=ZIP_DEFLATED;zi.external_attr=0o644<<16
+                  dst.writestr(zi,p.read_bytes())
+          with ZipFile('out/merged-unaligned.apk') as check,ZipFile('android/manager-raw-unsigned.apk') as original:
+              assert check.testzip() is None and len(check.namelist())==len(set(check.namelist()))
+              assert check.getinfo('resources.arsc').compress_type==0
+              for name in original.namelist():
+                  if name in updates or (name.startswith('META-INF/') and name.lower().endswith(('.rsa','.dsa','.ec','.sf'))):continue
+                  assert check.read(name)==original.read(name),name
+          Path('out/embedded-web-validation.json').write_text(json.dumps(verified,indent=2)+'\n')
+          Path('out/native-sha256.json').write_text(json.dumps({n:hashlib.sha256(p.read_bytes()).hexdigest() for n,p in updates.items()},indent=2)+'\n')
+          PY
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/zipalign" -p -f 4 out/merged-unaligned.apk out/moksu-KSU32717-R7.10-UNSIGNED.apk
+          "$BT/zipalign" -c -v 4 out/moksu-KSU32717-R7.10-UNSIGNED.apk > out/alignment-report.txt
+          "$BT/aapt" dump badging out/moksu-KSU32717-R7.10-UNSIGNED.apk > out/apk-badging.txt
+          grep -q "name='com.moksu.manager' versionCode='32718' versionName='3.3.1-CI32717-R7.10'" out/apk-badging.txt
+          cp "$BT/lib/apksigner.jar" "$BT/aapt" "$BT/zipalign" out/
+          cp "$BT/lib64/libc++.so" out/lib64/
+          cp input/R710-input-checks.json input/moksu-r710-source.tar.gz input/build-config-commit.txt out/
+          cp -r android/unit-test-results out/
+          cp android/gradle-R710.log native/native-R710.log out/
+          sha256sum out/moksu-KSU32717-R7.10-UNSIGNED.apk > out/unsigned-sha256.txt
+          tar --exclude=.git --exclude=__pycache__ -czf out/moksu-r710-build-config.tar.gz -C config moksu .github
+          git -C config rev-parse HEAD > out/final-build-config-commit.txt
+      - uses: actions/upload-artifact@v4
+        with: {name: moksu-r710-tested-complete-unsigned, path: out/, retention-days: 30, if-no-files-found: error}
